@@ -1,0 +1,13 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "tb-publisher",
+  "targets": {
+    "docker-build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "docker build -f apps/tb-publisher/Dockerfile -t karisuke/tb-publisher:local .",
+        "cwd": "{workspaceRoot}"
+      }
+    }
+  }
+}

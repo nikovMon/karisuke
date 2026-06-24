@@ -1,0 +1,85 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "defaultBase": "main",
+  "plugins": [
+    {
+      "plugin": "@nx/dotnet",
+      "options": {
+        "restore": {
+          "targetName": "restore"
+        },
+        "build": {
+          "targetName": "build"
+        },
+        "test": {
+          "targetName": "test"
+        },
+        "run": {
+          "targetName": "run"
+        },
+        "publish": {
+          "targetName": "publish"
+        }
+      }
+    }
+  ],
+  "namedInputs": {
+    "default": [
+      "{projectRoot}/**/*",
+      "sharedGlobals"
+    ],
+    "production": [
+      "default"
+    ],
+    "sharedGlobals": [
+      "{workspaceRoot}/Directory.Build.props",
+      "{workspaceRoot}/Directory.Packages.props",
+      "{workspaceRoot}/global.json"
+    ]
+  },
+  "targetDefaults": {
+    "restore": {
+      "cache": true,
+      "inputs": [
+        "default",
+        "^default"
+      ]
+    },
+    "build": {
+      "cache": true,
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "production",
+        "^production"
+      ]
+    },
+    "test": {
+      "cache": true,
+      "dependsOn": [
+        "build"
+      ],
+      "inputs": [
+        "default",
+        "^production"
+      ]
+    },
+    "publish": {
+      "cache": true,
+      "dependsOn": [
+        "build"
+      ],
+      "inputs": [
+        "production",
+        "^production"
+      ]
+    },
+    "docker-build": {
+      "cache": false,
+      "dependsOn": [
+        "build"
+      ]
+    }
+  }
+}

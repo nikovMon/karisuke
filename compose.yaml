@@ -1,0 +1,26 @@
+services:
+  gateway:
+    image: karisuke/gateway:local
+    build:
+      context: .
+      dockerfile: apps/gateway/Dockerfile
+
+  tb-publisher:
+    image: karisuke/tb-publisher:local
+    build:
+      context: .
+      dockerfile: apps/tb-publisher/Dockerfile
+
+  tb-consumer:
+    image: karisuke/tb-consumer:local
+    build:
+      context: .
+      dockerfile: apps/tb-consumer/Dockerfile
+
+  rules-api:
+    image: karisuke/rules-api:local
+    build:
+      context: .
+      dockerfile: apps/rules-api/Dockerfile
+    ports:
+      - "8080:8080"

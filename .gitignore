@@ -1,0 +1,54 @@
+# Build output
+bin/
+obj/
+artifacts/
+publish/
+out/
+dist/
+
+# Test output
+TestResults/
+coverage/
+coverage.*
+*.coverage
+*.coveragexml
+*.trx
+
+# Node and Nx
+node_modules/
+.nx/
+npm-debug.log*
+
+# Local environment
+.env
+.env.*
+!.env.example
+*.local
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# VS Code
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# JetBrains Rider and ReSharper
+.idea/
+*.sln.DotSettings.user
+_ReSharper*/
+*.DotSettings.user
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Docker and local publish output
+docker-compose.override.yml
+*.tar
+*.img
