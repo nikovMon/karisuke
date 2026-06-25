@@ -1,12 +1,12 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 
-namespace ImagingPipeline.RabbitClient;
+namespace ImagingPipeline.RabbitMqClient;
 
-internal static class RabbitClientDiagnostics
+internal static class RabbitMqClientDiagnostics
 {
-    public const string ActivitySourceName = "ImagingPipeline.RabbitClient";
-    public const string MeterName = "ImagingPipeline.RabbitClient";
+    public const string ActivitySourceName = "ImagingPipeline.RabbitMqClient";
+    public const string MeterName = "ImagingPipeline.RabbitMqClient";
 
     public static readonly ActivitySource ActivitySource = new(ActivitySourceName);
 
@@ -36,11 +36,8 @@ internal static class RabbitClientDiagnostics
     public static readonly Counter<long> NackedMessages =
         Meter.CreateCounter<long>("imagingpipeline.rabbitmq.messages.nacked");
 
-    public static readonly Counter<long> RetriedMessages =
-        Meter.CreateCounter<long>("imagingpipeline.rabbitmq.messages.retried");
-
-    public static readonly Counter<long> ErrorMessages =
-        Meter.CreateCounter<long>("imagingpipeline.rabbitmq.messages.error_routed");
+    public static readonly Counter<long> DeadLetteredMessages =
+        Meter.CreateCounter<long>("imagingpipeline.rabbitmq.messages.dead_lettered");
 
     public static readonly UpDownCounter<long> PublisherChannels =
         Meter.CreateUpDownCounter<long>("imagingpipeline.rabbitmq.publisher.channels");

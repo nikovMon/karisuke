@@ -45,9 +45,9 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImagingPipeline.Integration
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "libs", "libs", "{6C4D298B-81FB-2B6B-5AB6-46205EDDC72C}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "rabbit-client", "rabbit-client", "{A4BAC550-D58B-8619-B999-9F7910577AA8}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "rabbitmq-client", "rabbitmq-client", "{A4BAC550-D58B-8619-B999-9F7910577AA8}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RabbitClient", "libs\rabbit-client\RabbitClient.csproj", "{71AF2DF5-2384-4597-9415-8CDB82B00D98}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RabbitMqClient", "libs\rabbitmq-client\RabbitMqClient.csproj", "{71AF2DF5-2384-4597-9415-8CDB82B00D98}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

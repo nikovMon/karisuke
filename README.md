@@ -20,7 +20,7 @@ apps/
   tb-consumer/
   rules-api/
 libs/
-  rabbit-client/
+  rabbitmq-client/
 tests/
   gateway-tests/
   tb-publisher-tests/
@@ -29,7 +29,7 @@ tests/
   integration-tests/
 ```
 
-`libs/rabbit-client` contains shared RabbitMQ client logic. Application DTOs remain owned by each application until there is a concrete contract to share.
+`libs/rabbitmq-client` contains shared RabbitMQ client logic. Application DTOs remain owned by each application until there is a concrete contract to share.
 
 ## Install
 
@@ -63,7 +63,7 @@ npx nx build gateway
 npx nx build tb-publisher
 npx nx build tb-consumer
 npx nx build rules-api
-npx nx build rabbit-client
+npx nx build rabbitmq-client
 ```
 
 Run tests through Nx:

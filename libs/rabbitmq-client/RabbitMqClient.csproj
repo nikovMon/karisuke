@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <AssemblyName>ImagingPipeline.RabbitClient</AssemblyName>
-    <PackageId>ImagingPipeline.RabbitClient</PackageId>
-    <RootNamespace>ImagingPipeline.RabbitClient</RootNamespace>
+    <AssemblyName>ImagingPipeline.RabbitMqClient</AssemblyName>
+    <PackageId>ImagingPipeline.RabbitMqClient</PackageId>
+    <RootNamespace>ImagingPipeline.RabbitMqClient</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>

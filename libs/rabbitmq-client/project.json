@@ -1,8 +1,8 @@
 {
-  "name": "rabbit-client",
+  "name": "rabbitmq-client",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "projectType": "library",
-  "sourceRoot": "libs/rabbit-client",
+  "sourceRoot": "libs/rabbitmq-client",
   "tags": ["type:lib", "scope:rabbitmq"]
 }
 

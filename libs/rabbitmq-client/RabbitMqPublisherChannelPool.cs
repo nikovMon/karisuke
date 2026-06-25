@@ -2,18 +2,18 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 
-namespace ImagingPipeline.RabbitClient;
+namespace ImagingPipeline.RabbitMqClient;
 
-internal interface IRabbitPublisherChannelPool : IAsyncDisposable
+internal interface IRabbitMqPublisherChannelPool : IAsyncDisposable
 {
-    ValueTask<RabbitPublisherChannelLease> LeaseAsync(CancellationToken cancellationToken = default);
+    ValueTask<RabbitMqPublisherChannelLease> LeaseAsync(CancellationToken cancellationToken = default);
 }
 
-internal readonly struct RabbitPublisherChannelLease : IAsyncDisposable
+internal readonly struct RabbitMqPublisherChannelLease : IAsyncDisposable
 {
-    private readonly RabbitPublisherChannelPool _pool;
+    private readonly RabbitMqPublisherChannelPool _pool;
 
-    public RabbitPublisherChannelLease(RabbitPublisherChannelPool pool, IChannel channel)
+    public RabbitMqPublisherChannelLease(RabbitMqPublisherChannelPool pool, IChannel channel)
     {
         _pool = pool;
         Channel = channel;
@@ -24,24 +24,24 @@ internal readonly struct RabbitPublisherChannelLease : IAsyncDisposable
     public ValueTask DisposeAsync() => _pool.ReturnAsync(Channel);
 }
 
-internal sealed class RabbitPublisherChannelPool : IRabbitPublisherChannelPool
+internal sealed class RabbitMqPublisherChannelPool : IRabbitMqPublisherChannelPool
 {
-    private readonly IRabbitConnectionManager _connections;
-    private readonly RabbitClientOptions _options;
+    private readonly IRabbitMqConnectionManager _connections;
+    private readonly RabbitMqClientOptions _options;
     private readonly ConcurrentQueue<IChannel> _channels = new();
     private readonly SemaphoreSlim _leases;
     private bool _disposed;
 
-    public RabbitPublisherChannelPool(
-        IRabbitConnectionManager connections,
-        IOptions<RabbitClientOptions> options)
+    public RabbitMqPublisherChannelPool(
+        IRabbitMqConnectionManager connections,
+        IOptions<RabbitMqClientOptions> options)
     {
         _connections = connections;
         _options = options.Value;
         _leases = new SemaphoreSlim(_options.PublisherChannelPoolSize, _options.PublisherChannelPoolSize);
     }
 
-    public async ValueTask<RabbitPublisherChannelLease> LeaseAsync(CancellationToken cancellationToken = default)
+    public async ValueTask<RabbitMqPublisherChannelLease> LeaseAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         await _leases.WaitAsync(cancellationToken);
@@ -52,13 +52,13 @@ internal sealed class RabbitPublisherChannelPool : IRabbitPublisherChannelPool
             {
                 if (channel.IsOpen)
                 {
-                    return new RabbitPublisherChannelLease(this, channel);
+                    return new RabbitMqPublisherChannelLease(this, channel);
                 }
 
                 await DisposeChannelAsync(channel);
             }
 
-            return new RabbitPublisherChannelLease(this, await CreateChannelAsync(cancellationToken));
+            return new RabbitMqPublisherChannelLease(this, await CreateChannelAsync(cancellationToken));
         }
         catch
         {
@@ -74,7 +74,7 @@ internal sealed class RabbitPublisherChannelPool : IRabbitPublisherChannelPool
             publisherConfirmationsEnabled: true,
             publisherConfirmationTrackingEnabled: true);
         var channel = await connection.CreateChannelAsync(channelOptions, cancellationToken);
-        RabbitClientDiagnostics.PublisherChannels.Add(1);
+        RabbitMqClientDiagnostics.PublisherChannels.Add(1);
         return channel;
     }
 
@@ -111,7 +111,7 @@ internal sealed class RabbitPublisherChannelPool : IRabbitPublisherChannelPool
         }
         finally
         {
-            RabbitClientDiagnostics.PublisherChannels.Add(-1);
+            RabbitMqClientDiagnostics.PublisherChannels.Add(-1);
             channel.Dispose();
         }
     }
