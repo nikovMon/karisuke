@@ -2,4 +2,13 @@
   <PropertyGroup>
     <RootNamespace>ImagingPipeline.Rules.Api</RootNamespace>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Swashbuckle.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\libs\elasticsearch-client\ElasticsearchClient.csproj" />
+    <ProjectReference Include="..\..\libs\rules-contracts\RulesContracts.csproj" />
+  </ItemGroup>
 </Project>
