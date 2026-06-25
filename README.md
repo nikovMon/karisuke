@@ -20,6 +20,7 @@ apps/
   tb-consumer/
   rules-api/
 libs/
+  rabbitmq-client/
 tests/
   gateway-tests/
   tb-publisher-tests/
@@ -28,7 +29,7 @@ tests/
   integration-tests/
 ```
 
-`libs` is intentionally empty except for `.gitkeep`. Future shared libraries can be added under `libs/` when a real shared boundary exists. Do not move DTOs into shared libraries until there is a concrete contract to share.
+`libs/rabbitmq-client` contains shared RabbitMQ client logic. Application DTOs remain owned by each application until there is a concrete contract to share.
 
 ## Install
 
@@ -62,6 +63,7 @@ npx nx build gateway
 npx nx build tb-publisher
 npx nx build tb-consumer
 npx nx build rules-api
+npx nx build rabbitmq-client
 ```
 
 Run tests through Nx:
@@ -100,6 +102,6 @@ The `rules-api` service is exposed on host port `8080`.
 
 To add a new application, create a project under `apps/<name>`, add it to `ImagingPipeline.sln`, keep DTOs local under that application, and add a `project.json` only when custom targets such as Docker builds are required.
 
-To add a future shared library, create it under `libs/<name>`, add it to the solution, and reference it only from projects that truly need the shared boundary.
+To add another shared library, create it under `libs/<name>`, add it to the solution, and reference it only from projects that truly need the shared boundary.
 
 To add a new test project, create it under `tests/<name>-tests`, add it to the solution, reference only the application or library under test, and keep it non-packable.
