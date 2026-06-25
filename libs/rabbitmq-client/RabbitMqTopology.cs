@@ -53,7 +53,7 @@ internal static class RabbitMqTopology
             exchangeType,
             durable: true,
             autoDelete: false,
-            arguments: headers.Count == 0 ? null : headers,
+            arguments: NormalizeArguments(headers),
             cancellationToken: cancellationToken);
     }
 
@@ -68,8 +68,39 @@ internal static class RabbitMqTopology
             durable: true,
             exclusive: false,
             autoDelete: false,
-            arguments: headers.Count == 0 ? null : headers,
+            arguments: NormalizeArguments(headers),
             cancellationToken: cancellationToken);
+    }
+
+    private static Dictionary<string, object?>? NormalizeArguments(IDictionary<string, object?> arguments)
+    {
+        if (arguments.Count == 0)
+        {
+            return null;
+        }
+
+        return arguments.ToDictionary(
+            item => item.Key,
+            item => NormalizeArgumentValue(item.Value),
+            StringComparer.Ordinal);
+    }
+
+    private static object? NormalizeArgumentValue(object? value)
+    {
+        if (value is string text)
+        {
+            if (int.TryParse(text, out var number))
+            {
+                return number;
+            }
+
+            if (bool.TryParse(text, out var boolean))
+            {
+                return boolean;
+            }
+        }
+
+        return value;
     }
 
     private static Task BindQueueAsync(
