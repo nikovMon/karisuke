@@ -32,9 +32,9 @@ public static class RuleValidation
             errors.Add("algorithmName is required.");
         }
 
-        if (request.HasField("minResulution") && request.MinResolution is null or <= 0)
+        if (request.HasField("minResolution") && request.MinResolution is null or <= 0)
         {
-            errors.Add("minResulution must be greater than 0.");
+            errors.Add("minResolution must be greater than 0.");
         }
 
         return errors;

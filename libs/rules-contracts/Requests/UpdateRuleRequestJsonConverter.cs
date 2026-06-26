@@ -21,45 +21,55 @@ public sealed class UpdateRuleRequestJsonConverter : JsonConverter<UpdateRuleReq
 
         foreach (var property in document.RootElement.EnumerateObject())
         {
-            request.ProvidedFields.Add(property.Name);
-
             switch (property.Name)
             {
                 case "ruleName":
+                    request.ProvidedFields.Add(property.Name);
                     request.RuleName = ReadNullable<string>(property.Value, options);
                     break;
                 case "description":
+                    request.ProvidedFields.Add(property.Name);
                     request.Description = ReadNullable<string>(property.Value, options);
                     break;
                 case "algorithmName":
-                    request.AlgorithmName = ReadNullable<AlgorithmName>(property.Value, options);
+                    request.ProvidedFields.Add(property.Name);
+                    request.AlgorithmName = ReadNullableValue<AlgorithmName>(property.Value, options);
                     break;
                 case "sensors":
+                    request.ProvidedFields.Add(property.Name);
                     request.Sensors = ReadNullable<Dictionary<string, List<string>>>(property.Value, options);
                     break;
                 case "isActive":
-                    request.IsActive = ReadNullable<bool>(property.Value, options);
+                    request.ProvidedFields.Add(property.Name);
+                    request.IsActive = ReadNullableValue<bool>(property.Value, options);
                     break;
                 case "tenants":
+                    request.ProvidedFields.Add(property.Name);
                     request.Tenants = ReadNullable<List<TenantConfigDto>>(property.Value, options);
                     break;
-                case "minResulution":
-                    request.MinResolution = ReadNullable<double>(property.Value, options);
+                case "minResolution":
+                    request.ProvidedFields.Add(property.Name);
+                    request.MinResolution = ReadNullableValue<double>(property.Value, options);
                     break;
-                case "maxResulution":
-                    request.MaxResolution = ReadNullable<double>(property.Value, options);
+                case "maxResolution":
+                    request.ProvidedFields.Add(property.Name);
+                    request.MaxResolution = ReadNullableValue<double>(property.Value, options);
                     break;
                 case "area":
+                    request.ProvidedFields.Add(property.Name);
                     request.Area = ReadNullable<string>(property.Value, options);
                     break;
                 case "wkt":
+                    request.ProvidedFields.Add(property.Name);
                     request.Wkt = ReadNullable<string>(property.Value, options);
                     break;
                 case "geoJson":
+                    request.ProvidedFields.Add(property.Name);
                     request.GeoJson = property.Value.Clone();
                     break;
                 case "maxLookBackDay":
-                    request.MaxLookBackDay = ReadNullable<int>(property.Value, options);
+                    request.ProvidedFields.Add(property.Name);
+                    request.MaxLookBackDay = ReadNullableValue<int>(property.Value, options);
                     break;
             }
         }
@@ -79,8 +89,8 @@ public sealed class UpdateRuleRequestJsonConverter : JsonConverter<UpdateRuleReq
         WriteIfProvided(writer, options, value, "sensors", value.Sensors);
         WriteIfProvided(writer, options, value, "isActive", value.IsActive);
         WriteIfProvided(writer, options, value, "tenants", value.Tenants);
-        WriteIfProvided(writer, options, value, "minResulution", value.MinResolution);
-        WriteIfProvided(writer, options, value, "maxResulution", value.MaxResolution);
+        WriteIfProvided(writer, options, value, "minResolution", value.MinResolution);
+        WriteIfProvided(writer, options, value, "maxResolution", value.MaxResolution);
         WriteIfProvided(writer, options, value, "area", value.Area);
         WriteIfProvided(writer, options, value, "wkt", value.Wkt);
         WriteIfProvided(writer, options, value, "geoJson", value.GeoJson);
@@ -93,6 +103,17 @@ public sealed class UpdateRuleRequestJsonConverter : JsonConverter<UpdateRuleReq
         if (value.ValueKind == JsonValueKind.Null || value.ValueKind == JsonValueKind.Undefined)
         {
             return default;
+        }
+
+        return value.Deserialize<T>(options);
+    }
+
+    private static T? ReadNullableValue<T>(JsonElement value, JsonSerializerOptions options)
+        where T : struct
+    {
+        if (value.ValueKind == JsonValueKind.Null || value.ValueKind == JsonValueKind.Undefined)
+        {
+            return null;
         }
 
         return value.Deserialize<T>(options);

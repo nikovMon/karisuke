@@ -56,6 +56,16 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
+    public async Task GetAllReturnsEmptyArrayWhenNoRulesExist()
+    {
+        using var context = CreateContext();
+
+        var rules = await context.Client.GetFromJsonAsync<List<RuleConfigDto>>("/rules", JsonOptions);
+
+        Assert.Empty(rules ?? []);
+    }
+
+    [Fact]
     public async Task GetAllNameOnlyReturnsOnlyNames()
     {
         using var context = CreateContext(
@@ -67,6 +77,18 @@ public sealed class RulesApiRouteTests
             JsonOptions);
 
         Assert.Equal(["one"], names);
+    }
+
+    [Fact]
+    public async Task GetAllReturnsBadRequestForInvalidBooleanQueryValues()
+    {
+        using var context = CreateContext();
+
+        var invalidIsActive = await context.Client.GetAsync("/rules?isActive=maybe");
+        var invalidNameOnly = await context.Client.GetAsync("/rules?getNameOnly=maybe");
+
+        Assert.Equal(HttpStatusCode.BadRequest, invalidIsActive.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidNameOnly.StatusCode);
     }
 
     [Fact]
@@ -82,6 +104,18 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
+    public async Task GetByIdIsCaseSensitive()
+    {
+        using var context = CreateContext(ValidRule("Rule-1", "one"));
+
+        var exact = await context.Client.GetAsync("/rules/Rule-1");
+        var differentCase = await context.Client.GetAsync("/rules/rule-1");
+
+        Assert.Equal(HttpStatusCode.OK, exact.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, differentCase.StatusCode);
+    }
+
+    [Fact]
     public async Task GetByNameReturnsExactRuleOrNotFound()
     {
         using var context = CreateContext(ValidRule("rule-1", "one"));
@@ -94,6 +128,18 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
+    public async Task GetByNameIsCaseSensitive()
+    {
+        using var context = CreateContext(ValidRule("rule-1", "CameraRule"));
+
+        var exact = await context.Client.GetAsync("/rules/name/CameraRule");
+        var differentCase = await context.Client.GetAsync("/rules/name/camerarule");
+
+        Assert.Equal(HttpStatusCode.OK, exact.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, differentCase.StatusCode);
+    }
+
+    [Fact]
     public async Task CreateReturnsCreatedAndStoresRule()
     {
         using var context = CreateContext();
@@ -103,6 +149,22 @@ public sealed class RulesApiRouteTests
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         Assert.True(response.Headers.Location?.ToString().Contains("/rules/rule-1", StringComparison.Ordinal));
         Assert.NotNull(await context.Repository.GetByIdAsync("rule-1"));
+    }
+
+    [Fact]
+    public async Task CreateAcceptsGeoJsonOnlyRule()
+    {
+        using var context = CreateContext();
+        var rule = ValidRule("rule-1", "geo-json-only");
+        rule.Wkt = null;
+        rule.GeoJson = JsonDocument.Parse("{\"type\":\"Point\",\"coordinates\":[1,1]}").RootElement.Clone();
+
+        var response = await context.Client.PostAsJsonAsync("/rules", rule, JsonOptions);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var stored = await context.Repository.GetByIdAsync("rule-1");
+        Assert.Null(stored?.Wkt);
+        Assert.Equal(JsonValueKind.Object, stored?.GeoJson?.ValueKind);
     }
 
     [Fact]
@@ -126,13 +188,48 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
+    public async Task CreateReturnsBadRequestForMalformedJsonOrInvalidEnum()
+    {
+        using var context = CreateContext();
+
+        var malformed = await context.Client.PostAsync("/rules", Json("{\"_id\":\"rule-1\""));
+        var invalidEnum = await context.Client.PostAsync(
+            "/rules",
+            Json("""
+                {
+                  "_id": "rule-1",
+                  "ruleName": "one",
+                  "algorithmName": "Unknown",
+                  "isActive": true,
+                  "minResolution": 0.5,
+                  "maxResolution": 1,
+                  "area": "area",
+                  "wkt": "POINT (1 1)"
+                }
+                """));
+
+        Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidEnum.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateReturnsBadRequestForMissingBody()
+    {
+        using var context = CreateContext();
+
+        var response = await context.Client.PostAsync("/rules", Json("null"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
     public async Task PatchOneUpdatesOnlySentFieldsAndAllowsExplicitNull()
     {
         var rule = ValidRule("rule-1", "one");
         rule.Description = "old";
         rule.MaxLookBackDay = 5;
         using var context = CreateContext(rule);
-        var body = Json("{\"description\":null,\"isActive\":false,\"minResulution\":0.8}");
+        var body = Json("{\"description\":null,\"isActive\":false,\"minResolution\":0.8}");
 
         var response = await context.Client.PatchAsync("/rules/rule-1", body);
         var updated = await response.Content.ReadFromJsonAsync<RuleConfigDto>(JsonOptions);
@@ -146,6 +243,50 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
+    public async Task PatchOneReplacesSensorsAndNormalizesValues()
+    {
+        var rule = ValidRule("rule-1", "one");
+        rule.Sensors["camera"] = ["cam-1"];
+        using var context = CreateContext(rule);
+
+        var response = await context.Client.PatchAsync(
+            "/rules/rule-1",
+            Json("""
+                {
+                  "sensors": {
+                    "thermal": ["th-1", "th-1", ""],
+                    "": ["ignored"]
+                  }
+                }
+                """));
+        var updated = await response.Content.ReadFromJsonAsync<RuleConfigDto>(JsonOptions);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(updated?.Sensors.ContainsKey("camera"));
+        Assert.Equal(["th-1"], updated?.Sensors["thermal"]);
+        Assert.False(updated?.Sensors.ContainsKey(""));
+    }
+
+    [Fact]
+    public async Task PatchOneCanClearMaxLookBackDayAndOptionalGeometry()
+    {
+        var rule = ValidRule("rule-1", "one");
+        rule.MaxLookBackDay = 7;
+        rule.GeoJson = JsonDocument.Parse("{\"type\":\"Point\",\"coordinates\":[1,1]}").RootElement.Clone();
+        using var context = CreateContext(rule);
+
+        var response = await context.Client.PatchAsync(
+            "/rules/rule-1",
+            Json("{\"maxLookBackDay\":null,\"wkt\":null}"));
+        var updated = await response.Content.ReadFromJsonAsync<RuleConfigDto>(JsonOptions);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Null(updated?.MaxLookBackDay);
+        Assert.Null(updated?.Wkt);
+        Assert.Equal(JsonValueKind.Object, updated?.GeoJson?.ValueKind);
+    }
+
+    [Fact]
     public async Task PatchOneReturnsConflictWhenRuleNameBelongsToAnotherRule()
     {
         using var context = CreateContext(ValidRule("rule-1", "one"), ValidRule("rule-2", "two"));
@@ -156,6 +297,22 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
+    public async Task PatchOneRejectsInvalidFieldValuesBeforeLookup()
+    {
+        using var context = CreateContext(ValidRule("rule-1", "one"));
+
+        var blankName = await context.Client.PatchAsync("/rules/rule-1", Json("{\"ruleName\":\" \"}"));
+        var invalidResolution = await context.Client.PatchAsync("/rules/rule-1", Json("{\"minResolution\":0}"));
+        var nullAlgorithm = await context.Client.PatchAsync("/rules/rule-1", Json("{\"algorithmName\":null}"));
+        var unknownOnly = await context.Client.PatchAsync("/rules/rule-1", Json("{\"unknown\":\"value\"}"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, blankName.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidResolution.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, nullAlgorithm.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, unknownOnly.StatusCode);
+    }
+
+    [Fact]
     public async Task PatchOneReturnsNotFoundAndBadRequest()
     {
         using var context = CreateContext();
@@ -163,10 +320,12 @@ public sealed class RulesApiRouteTests
         var missing = await context.Client.PatchAsync("/rules/missing", Json("{\"isActive\":true}"));
         var bad = await context.Client.PatchAsync("/rules/missing", Json("{}"));
         var malformed = await context.Client.PatchAsync("/rules/missing", Json("{\"isActive\":"));
+        var nullBody = await context.Client.PatchAsync("/rules/missing", Json("null"));
 
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, nullBody.StatusCode);
     }
 
     [Fact]
@@ -188,6 +347,21 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
+    public async Task PatchBulkAllowsSingleRuleRename()
+    {
+        using var context = CreateContext(ValidRule("rule-1", "one"));
+
+        var response = await context.Client.PatchAsync(
+            "/rules/bulk?ids=rule-1",
+            Json("{\"ruleName\":\"renamed\"}"));
+        var result = await response.Content.ReadFromJsonAsync<BulkOperationResult>(JsonOptions);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(["rule-1"], result?.SuccessIds);
+        Assert.Equal("renamed", (await context.Repository.GetByIdAsync("rule-1"))?.RuleName);
+    }
+
+    [Fact]
     public async Task PatchBulkReturnsBadRequestForEmptyIdsAndConflictForSharedRuleName()
     {
         using var context = CreateContext(ValidRule("rule-1", "one"), ValidRule("rule-2", "two"));
@@ -199,6 +373,22 @@ public sealed class RulesApiRouteTests
 
         Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
+    }
+
+    [Fact]
+    public async Task PatchBulkParsesCommaSeparatedIdsWithWhitespaceAndEmptySegments()
+    {
+        using var context = CreateContext(ValidRule("rule-1", "one"), ValidRule("rule-2", "two"));
+
+        var response = await context.Client.PatchAsync(
+            "/rules/bulk?ids=%20rule-1%20,,%20rule-2%20,",
+            Json("{\"isActive\":false}"));
+        var result = await response.Content.ReadFromJsonAsync<BulkOperationResult>(JsonOptions);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(["rule-1", "rule-2"], result?.SuccessIds);
+        Assert.False((await context.Repository.GetByIdAsync("rule-1"))?.IsActive);
+        Assert.False((await context.Repository.GetByIdAsync("rule-2"))?.IsActive);
     }
 
     [Fact]
@@ -230,6 +420,35 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
+    public async Task ActivityRouteReturnsNotFoundForMissingRule()
+    {
+        using var context = CreateContext();
+
+        var response = await context.Client.PatchAsJsonAsync(
+            "/rules/missing/activity",
+            new { isActive = true },
+            JsonOptions);
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ActivityRouteReturnsBadRequestForMalformedJsonOrMissingBody()
+    {
+        using var context = CreateContext(ValidRule("rule-1", "one"));
+
+        var malformed = await context.Client.PatchAsync(
+            "/rules/rule-1/activity",
+            Json("{\"isActive\":"));
+        var nullBody = await context.Client.PatchAsync(
+            "/rules/rule-1/activity",
+            Json("null"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, nullBody.StatusCode);
+    }
+
+    [Fact]
     public async Task AddSensorsRouteAddsUniqueValuesAndReportsMissingIds()
     {
         var rule = ValidRule("rule-1", "one");
@@ -249,6 +468,20 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
+    public async Task AddSensorsRouteCreatesNewSensorKey()
+    {
+        using var context = CreateContext(ValidRule("rule-1", "one"));
+
+        var response = await context.Client.PatchAsJsonAsync(
+            "/rules/sensors/add?ids=rule-1",
+            new { sensorName = "thermal", values = new[] { "th-1", "th-2" } },
+            JsonOptions);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(["th-1", "th-2"], (await context.Repository.GetByIdAsync("rule-1"))?.Sensors["thermal"]);
+    }
+
+    [Fact]
     public async Task RemoveSensorsRouteRemovesValuesAndDeletesEmptyKey()
     {
         var rule = ValidRule("rule-1", "one");
@@ -262,6 +495,22 @@ public sealed class RulesApiRouteTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.False((await context.Repository.GetByIdAsync("rule-1"))?.Sensors.ContainsKey("camera"));
+    }
+
+    [Fact]
+    public async Task RemoveSensorsRouteLeavesRuleUnchangedWhenSensorIsMissing()
+    {
+        var rule = ValidRule("rule-1", "one");
+        rule.Sensors["camera"] = ["cam-1"];
+        using var context = CreateContext(rule);
+
+        var response = await context.Client.PatchAsJsonAsync(
+            "/rules/sensors/remove?ids=rule-1",
+            new { sensorName = "thermal", values = new[] { "th-1" } },
+            JsonOptions);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(["cam-1"], (await context.Repository.GetByIdAsync("rule-1"))?.Sensors["camera"]);
     }
 
     [Fact]
@@ -283,6 +532,34 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
+    public async Task SensorRoutesReturnBadRequestForMalformedJsonAndMissingBody()
+    {
+        using var context = CreateContext(ValidRule("rule-1", "one"));
+
+        var malformed = await context.Client.PatchAsync(
+            "/rules/sensors/add?ids=rule-1",
+            Json("{\"sensorName\":\"camera\""));
+        var nullBody = await context.Client.PatchAsync(
+            "/rules/sensors/remove?ids=rule-1",
+            Json("null"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, nullBody.StatusCode);
+    }
+
+    [Fact]
+    public async Task UnsupportedMethodsReturnMethodNotAllowedForExistingRoutes()
+    {
+        using var context = CreateContext();
+
+        var postToId = await context.Client.PostAsJsonAsync("/rules/rule-1", ValidRule("rule-1", "one"), JsonOptions);
+        var getToSensorAdd = await context.Client.GetAsync("/rules/sensors/add?ids=rule-1");
+
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, postToId.StatusCode);
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, getToSensorAdd.StatusCode);
+    }
+
+    [Fact]
     public async Task RepositoryFailureReturnsServiceUnavailableInsteadOfUnexpectedServerError()
     {
         using var factory = new RulesApiFactory(new ThrowingRuleRepository());
@@ -293,6 +570,35 @@ public sealed class RulesApiRouteTests
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Contains("Elasticsearch dependency is unavailable.", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RepositoryFailuresOnWriteRoutesReturnServiceUnavailable()
+    {
+        using var factory = new RulesApiFactory(new ThrowingRuleRepository());
+        using var client = factory.CreateClient();
+
+        var create = await client.PostAsJsonAsync("/rules", ValidRule("rule-1", "one"), JsonOptions);
+        var patch = await client.PatchAsync("/rules/rule-1", Json("{\"description\":\"new\"}"));
+        var bulk = await client.PatchAsync("/rules/bulk?ids=rule-1", Json("{\"description\":\"new\"}"));
+        var activity = await client.PatchAsJsonAsync("/rules/rule-1/activity", new { isActive = true }, JsonOptions);
+        var addSensor = await client.PatchAsJsonAsync(
+            "/rules/sensors/add?ids=rule-1",
+            new { sensorName = "camera", values = new[] { "cam-1" } },
+            JsonOptions);
+        var removeSensor = await client.PatchAsJsonAsync(
+            "/rules/sensors/remove?ids=rule-1",
+            new { sensorName = "camera", values = new[] { "cam-1" } },
+            JsonOptions);
+        var delete = await client.DeleteAsync("/rules/rule-1");
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, create.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, patch.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, bulk.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, activity.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, addSensor.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, removeSensor.StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, delete.StatusCode);
     }
 
     private static TestContext CreateContext(params RuleConfigDto[] rules)

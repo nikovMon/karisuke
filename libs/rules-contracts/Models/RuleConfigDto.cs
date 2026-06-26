@@ -29,10 +29,10 @@ public sealed class RuleConfigDto : IValidatableObject
     [JsonPropertyName("tenants")]
     public List<TenantConfigDto> Tenants { get; set; } = [];
 
-    [JsonPropertyName("minResulution")]
+    [JsonPropertyName("minResolution")]
     public double MinResolution { get; set; }
 
-    [JsonPropertyName("maxResulution")]
+    [JsonPropertyName("maxResolution")]
     public double MaxResolution { get; set; }
 
     [JsonPropertyName("area")]
@@ -75,7 +75,7 @@ public sealed class RuleConfigDto : IValidatableObject
 
         if (MinResolution <= 0)
         {
-            yield return new ValidationResult("minResulution must be greater than 0", [nameof(MinResolution)]);
+            yield return new ValidationResult("minResolution must be greater than 0", [nameof(MinResolution)]);
         }
 
         var hasWkt = !string.IsNullOrWhiteSpace(Wkt);

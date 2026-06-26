@@ -30,6 +30,7 @@ public static class ElasticsearchClientServiceCollectionExtensions
 
             return new ElasticClient(settings);
         });
+        services.AddSingleton<IElasticsearchDocumentClient, ElasticsearchDocumentClient>();
 
         return services;
     }

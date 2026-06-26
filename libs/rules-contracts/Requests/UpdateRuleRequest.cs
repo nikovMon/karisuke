@@ -28,10 +28,10 @@ public sealed class UpdateRuleRequest
     [JsonPropertyName("tenants")]
     public List<TenantConfigDto>? Tenants { get; set; }
 
-    [JsonPropertyName("minResulution")]
+    [JsonPropertyName("minResolution")]
     public double? MinResolution { get; set; }
 
-    [JsonPropertyName("maxResulution")]
+    [JsonPropertyName("maxResolution")]
     public double? MaxResolution { get; set; }
 
     [JsonPropertyName("area")]

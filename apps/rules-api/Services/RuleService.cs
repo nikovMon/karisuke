@@ -243,12 +243,12 @@ public sealed class RuleService : IRuleService
             rule.Tenants = request.Tenants ?? [];
         }
 
-        if (request.HasField("minResulution"))
+        if (request.HasField("minResolution"))
         {
             rule.MinResolution = request.MinResolution.GetValueOrDefault();
         }
 
-        if (request.HasField("maxResulution"))
+        if (request.HasField("maxResolution"))
         {
             rule.MaxResolution = request.MaxResolution.GetValueOrDefault();
         }
