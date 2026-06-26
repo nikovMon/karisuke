@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace ImagingPipeline.Rules.Contracts.Models;
+namespace ImagingPipeline.Common.Dtos.Rules.Models;
 
 public sealed class RuleConfigDto : IValidatableObject
 {

@@ -9,6 +9,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\libs\elasticsearch-client\ElasticsearchClient.csproj" />
-    <ProjectReference Include="..\..\libs\rules-contracts\RulesContracts.csproj" />
+    <ProjectReference Include="..\..\libs\common-dtos\ImagingPipeline.Common.Dtos.csproj" />
   </ItemGroup>
 </Project>

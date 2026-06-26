@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace ImagingPipeline.Rules.Contracts.Responses;
+namespace ImagingPipeline.Common.Dtos.Rules.Responses;
 
 public sealed class BulkOperationResult
 {

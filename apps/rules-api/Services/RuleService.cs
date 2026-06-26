@@ -1,7 +1,7 @@
-using ImagingPipeline.Rules.Contracts.Models;
+using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Rules.Api.Repositories;
-using ImagingPipeline.Rules.Contracts.Requests;
-using ImagingPipeline.Rules.Contracts.Responses;
+using ImagingPipeline.Common.Dtos.Rules.Requests;
+using ImagingPipeline.Common.Dtos.Rules.Responses;
 using Microsoft.Extensions.Logging;
 
 namespace ImagingPipeline.Rules.Api.Services;

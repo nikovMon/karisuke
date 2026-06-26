@@ -1,6 +1,6 @@
 using Elasticsearch.Net;
 using ImagingPipeline.Rules.Api.Configuration;
-using ImagingPipeline.Rules.Contracts.Models;
+using ImagingPipeline.Common.Dtos.Rules.Models;
 using Microsoft.Extensions.Options;
 using Nest;
 

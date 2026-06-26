@@ -1,5 +1,5 @@
 using ImagingPipeline.Rules.Api.Repositories;
-using ImagingPipeline.Rules.Contracts.Models;
+using ImagingPipeline.Common.Dtos.Rules.Models;
 
 namespace ImagingPipeline.Rules.Api.Tests.Fakes;
 

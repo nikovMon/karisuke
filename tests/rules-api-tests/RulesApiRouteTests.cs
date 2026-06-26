@@ -3,8 +3,8 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using ImagingPipeline.Rules.Contracts.Models;
-using ImagingPipeline.Rules.Contracts.Responses;
+using ImagingPipeline.Common.Dtos.Rules.Models;
+using ImagingPipeline.Common.Dtos.Rules.Responses;
 using ImagingPipeline.Rules.Api.Tests.Fakes;
 
 namespace ImagingPipeline.Rules.Api.Tests;

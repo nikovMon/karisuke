@@ -1,5 +1,5 @@
-using ImagingPipeline.Rules.Contracts.Models;
-using ImagingPipeline.Rules.Contracts.Requests;
+using ImagingPipeline.Common.Dtos.Rules.Models;
+using ImagingPipeline.Common.Dtos.Rules.Requests;
 using ImagingPipeline.Rules.Api.Services;
 using System.Text.Json;
 

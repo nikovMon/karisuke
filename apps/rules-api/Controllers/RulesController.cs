@@ -1,6 +1,6 @@
-using ImagingPipeline.Rules.Contracts.Models;
-using ImagingPipeline.Rules.Contracts.Requests;
-using ImagingPipeline.Rules.Contracts.Responses;
+using ImagingPipeline.Common.Dtos.Rules.Models;
+using ImagingPipeline.Common.Dtos.Rules.Requests;
+using ImagingPipeline.Common.Dtos.Rules.Responses;
 using ImagingPipeline.Rules.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 

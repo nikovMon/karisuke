@@ -1,4 +1,4 @@
-namespace ImagingPipeline.Rules.Contracts.Responses;
+namespace ImagingPipeline.Common.Dtos.Rules.Responses;
 
 public enum RuleOperationStatus
 {

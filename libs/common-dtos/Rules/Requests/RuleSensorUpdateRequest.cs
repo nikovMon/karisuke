@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace ImagingPipeline.Rules.Contracts.Requests;
+namespace ImagingPipeline.Common.Dtos.Rules.Requests;
 
 public sealed class RuleSensorUpdateRequest
 {

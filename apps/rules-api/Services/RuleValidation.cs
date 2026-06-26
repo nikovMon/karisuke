@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
-using ImagingPipeline.Rules.Contracts.Models;
-using ImagingPipeline.Rules.Contracts.Requests;
+using ImagingPipeline.Common.Dtos.Rules.Models;
+using ImagingPipeline.Common.Dtos.Rules.Requests;
 
 namespace ImagingPipeline.Rules.Api.Services;
 

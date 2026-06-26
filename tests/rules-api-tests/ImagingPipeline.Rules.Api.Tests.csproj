@@ -22,7 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\apps\rules-api\ImagingPipeline.Rules.Api.csproj" />
-    <ProjectReference Include="..\..\libs\rules-contracts\RulesContracts.csproj" />
+    <ProjectReference Include="..\..\libs\common-dtos\ImagingPipeline.Common.Dtos.csproj" />
   </ItemGroup>
 
   <ItemGroup>
