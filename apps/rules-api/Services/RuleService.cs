@@ -43,6 +43,8 @@ public sealed class RuleService : IRuleService
         RuleConfigDto rule,
         CancellationToken cancellationToken = default)
     {
+        rule.Id = Guid.NewGuid().ToString();
+
         var errors = RuleValidation.ValidateRule(rule);
         if (errors.Count > 0)
         {
@@ -250,7 +252,7 @@ public sealed class RuleService : IRuleService
 
         if (request.HasField("maxResolution"))
         {
-            rule.MaxResolution = request.MaxResolution.GetValueOrDefault();
+            rule.MaxResolution = request.MaxResolution ?? 999;
         }
 
         if (request.HasField("area"))

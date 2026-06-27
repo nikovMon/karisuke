@@ -1,3 +1,4 @@
+using Elasticsearch.Net;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -19,7 +20,10 @@ public static class ElasticsearchClientServiceCollectionExtensions
         services.AddSingleton<IElasticClient>(provider =>
         {
             var options = provider.GetRequiredService<IOptions<ElasticsearchClientOptions>>().Value;
-            var settings = new ConnectionSettings(new Uri(options.Uri))
+            var pool = new SingleNodeConnectionPool(new Uri(options.Uri));
+            var settings = new ConnectionSettings(
+                    pool,
+                    sourceSerializer: (_, _) => new SystemTextJsonSourceSerializer())
                 .DefaultIndex(options.DefaultIndex)
                 .DisableDirectStreaming();
 

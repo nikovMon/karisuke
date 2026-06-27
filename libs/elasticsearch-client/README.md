@@ -2,6 +2,8 @@
 
 `libs/elasticsearch-client` contains reusable Elasticsearch wiring and generic document helpers for application components.
 
+The registered NEST client uses a `System.Text.Json` source serializer so shared DTO attributes and string enums keep the same JSON representation in APIs and Elasticsearch.
+
 It exposes two clients through DI:
 
 - `IElasticClient`: the raw NEST client for advanced Elasticsearch operations.

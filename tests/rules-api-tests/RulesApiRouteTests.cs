@@ -31,6 +31,19 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
+    public async Task HealthRouteReturnsServiceUnavailableWhenElasticsearchIsUnhealthy()
+    {
+        using var factory = new RulesApiFactory(new InMemoryRuleRepository(), isHealthy: false);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/health");
+        var json = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Contains("Unhealthy", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SwaggerRouteIsAvailable()
     {
         using var context = CreateContext();
@@ -143,12 +156,16 @@ public sealed class RulesApiRouteTests
     public async Task CreateReturnsCreatedAndStoresRule()
     {
         using var context = CreateContext();
+        var request = ValidRule("client-controlled-id", "one");
+        request.Id = string.Empty;
 
-        var response = await context.Client.PostAsJsonAsync("/rules", ValidRule("rule-1", "one"), JsonOptions);
+        var response = await context.Client.PostAsJsonAsync("/rules", request, JsonOptions);
+        var created = await response.Content.ReadFromJsonAsync<RuleConfigDto>(JsonOptions);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        Assert.True(response.Headers.Location?.ToString().Contains("/rules/rule-1", StringComparison.Ordinal));
-        Assert.NotNull(await context.Repository.GetByIdAsync("rule-1"));
+        Assert.True(Guid.TryParse(created?.Id, out var generatedId));
+        Assert.EndsWith($"/rules/{generatedId}", response.Headers.Location?.ToString(), StringComparison.Ordinal);
+        Assert.NotNull(await context.Repository.GetByIdAsync(generatedId.ToString()));
     }
 
     [Fact]
@@ -160,9 +177,10 @@ public sealed class RulesApiRouteTests
         rule.GeoJson = JsonDocument.Parse("{\"type\":\"Point\",\"coordinates\":[1,1]}").RootElement.Clone();
 
         var response = await context.Client.PostAsJsonAsync("/rules", rule, JsonOptions);
+        var created = await response.Content.ReadFromJsonAsync<RuleConfigDto>(JsonOptions);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var stored = await context.Repository.GetByIdAsync("rule-1");
+        var stored = await context.Repository.GetByIdAsync(created!.Id);
         Assert.Null(stored?.Wkt);
         Assert.Equal(JsonValueKind.Object, stored?.GeoJson?.ValueKind);
     }
@@ -570,6 +588,7 @@ public sealed class RulesApiRouteTests
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Contains("Elasticsearch dependency is unavailable.", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("Sensitive Elasticsearch failure details.", body, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -37,6 +37,16 @@ public static class RuleValidation
             errors.Add("minResolution must be greater than 0.");
         }
 
+        if (request.HasField("maxResolution") && request.MaxResolution is null or <= 0)
+        {
+            errors.Add("maxResolution must be greater than 0.");
+        }
+
+        if (request.HasField("isActive") && request.IsActive is null)
+        {
+            errors.Add("isActive cannot be null.");
+        }
+
         return errors;
     }
 

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Runtime.Serialization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -7,6 +8,7 @@ namespace ImagingPipeline.Common.Dtos.Rules.Models;
 public sealed class RuleConfigDto : IValidatableObject
 {
     [JsonPropertyName("_id")]
+    [DataMember(Name = "_id")]
     public string Id { get; set; } = string.Empty;
 
     [JsonPropertyName("ruleName")]
@@ -33,7 +35,7 @@ public sealed class RuleConfigDto : IValidatableObject
     public double MinResolution { get; set; }
 
     [JsonPropertyName("maxResolution")]
-    public double MaxResolution { get; set; }
+    public double MaxResolution { get; set; } = 999;
 
     [JsonPropertyName("area")]
     public string Area { get; set; } = string.Empty;
@@ -58,11 +60,6 @@ public sealed class RuleConfigDto : IValidatableObject
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
-        if (string.IsNullOrWhiteSpace(Id))
-        {
-            yield return new ValidationResult("_id cannot be empty", [nameof(Id)]);
-        }
-
         if (string.IsNullOrWhiteSpace(RuleName))
         {
             yield return new ValidationResult("ruleName cannot be empty", [nameof(RuleName)]);
@@ -76,6 +73,18 @@ public sealed class RuleConfigDto : IValidatableObject
         if (MinResolution <= 0)
         {
             yield return new ValidationResult("minResolution must be greater than 0", [nameof(MinResolution)]);
+        }
+
+        if (MaxResolution <= 0)
+        {
+            yield return new ValidationResult("maxResolution must be greater than 0", [nameof(MaxResolution)]);
+        }
+
+        if (MaxResolution < MinResolution)
+        {
+            yield return new ValidationResult(
+                "maxResolution must be greater than or equal to minResolution",
+                [nameof(MaxResolution), nameof(MinResolution)]);
         }
 
         var hasWkt = !string.IsNullOrWhiteSpace(Wkt);

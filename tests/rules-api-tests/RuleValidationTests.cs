@@ -14,7 +14,6 @@ public sealed class RuleValidationTests
 
         var errors = RuleValidation.ValidateRule(rule);
 
-        Assert.Contains("_id cannot be empty", errors);
         Assert.Contains("ruleName cannot be empty", errors);
         Assert.Contains("algorithmName is required", errors);
         Assert.Contains("minResolution must be greater than 0", errors);
@@ -54,6 +53,31 @@ public sealed class RuleValidationTests
         Assert.Contains("ruleName cannot be empty.", invalidErrors);
         Assert.Contains("algorithmName is required.", invalidErrors);
         Assert.Contains("minResolution must be greater than 0.", invalidErrors);
+    }
+
+    [Fact]
+    public void ValidateUpdateRejectsNullActivityAndInvalidMaximumResolution()
+    {
+        var request = new UpdateRuleRequest
+        {
+            IsActive = null,
+            MaxResolution = null
+        };
+        request.ProvidedFields.Add("isActive");
+        request.ProvidedFields.Add("maxResolution");
+
+        var errors = RuleValidation.ValidateUpdate(request);
+
+        Assert.Contains("isActive cannot be null.", errors);
+        Assert.Contains("maxResolution must be greater than 0.", errors);
+    }
+
+    [Fact]
+    public void RuleDefaultsMaximumResolutionTo999()
+    {
+        var rule = new RuleConfigDto();
+
+        Assert.Equal(999, rule.MaxResolution);
     }
 
     [Fact]

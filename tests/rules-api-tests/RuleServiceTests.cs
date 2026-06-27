@@ -35,10 +35,28 @@ public sealed class RuleServiceTests
         var result = await service.CreateAsync(rule);
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
+        Assert.True(Guid.TryParse(result.Value?.Id, out _));
+        Assert.NotEqual("rule-1", result.Value?.Id);
         Assert.Equal(["cam-1", "cam-2"], result.Value?.Sensors["camera"]);
         Assert.False(result.Value?.Sensors.ContainsKey(" "));
         Assert.True(result.Value?.CreatedAt > DateTimeOffset.MinValue);
         Assert.True(result.Value?.ModifiedAt > DateTimeOffset.MinValue);
+    }
+
+    [Fact]
+    public async Task CreateAlwaysReplacesClientProvidedIdWithServerUuid()
+    {
+        var repository = new InMemoryRuleRepository();
+        var service = CreateService(repository);
+        var rule = ValidRule("client-controlled-id", "one");
+
+        var result = await service.CreateAsync(rule);
+
+        Assert.Equal(RuleOperationStatus.Success, result.Status);
+        Assert.True(Guid.TryParse(result.Value?.Id, out var generatedId));
+        Assert.NotEqual("client-controlled-id", generatedId.ToString());
+        Assert.Null(await repository.GetByIdAsync("client-controlled-id"));
+        Assert.NotNull(await repository.GetByIdAsync(generatedId.ToString()));
     }
 
     [Fact]

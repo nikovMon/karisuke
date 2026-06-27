@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using ImagingPipeline.ElasticsearchClient;
 using ImagingPipeline.Rules.Api.Configuration;
+using ImagingPipeline.Rules.Api.Health;
 using ImagingPipeline.Rules.Api.Repositories;
 using ImagingPipeline.Rules.Api.Services;
 using Microsoft.AspNetCore.Diagnostics;
@@ -34,6 +35,7 @@ public sealed partial class Program
             .ValidateOnStart();
         builder.Services.AddScoped<IRuleRepository, ElasticsearchRuleRepository>();
         builder.Services.AddScoped<IRuleService, RuleService>();
+        builder.Services.AddSingleton<IElasticsearchHealthProbe, ElasticsearchHealthProbe>();
 
         var app = builder.Build();
 
@@ -44,11 +46,13 @@ public sealed partial class Program
                 var exception = context.Features.Get<IExceptionHandlerPathFeature>()?.Error;
                 if (exception is RuleRepositoryException repositoryException)
                 {
+                    app.Logger.LogError(repositoryException, "Elasticsearch repository operation failed.");
                     context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-                    await context.Response.WriteAsJsonAsync(new { error = repositoryException.Message });
+                    await context.Response.WriteAsJsonAsync(new { error = "Elasticsearch dependency is unavailable." });
                     return;
                 }
 
+                app.Logger.LogError(exception, "Unexpected server error.");
                 context.Response.StatusCode = StatusCodes.Status500InternalServerError;
                 await context.Response.WriteAsJsonAsync(new { error = "Unexpected server error." });
             });
@@ -57,7 +61,17 @@ public sealed partial class Program
         app.UseSwagger();
         app.UseSwaggerUI();
         app.MapControllers();
-        app.MapGet("/health", () => Results.Ok(new { status = "Healthy" }));
+        app.MapGet(
+            "/health",
+            async (IElasticsearchHealthProbe healthProbe, CancellationToken cancellationToken) =>
+            {
+                var isHealthy = await healthProbe.IsHealthyAsync(cancellationToken);
+                return isHealthy
+                    ? Results.Ok(new { status = "Healthy" })
+                    : Results.Json(
+                        new { status = "Unhealthy" },
+                        statusCode: StatusCodes.Status503ServiceUnavailable);
+            });
 
         await app.RunAsync();
     }
