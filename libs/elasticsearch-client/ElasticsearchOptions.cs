@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Elasticsearch.Net;
 
 namespace ImagingPipeline.ElasticsearchClient;
@@ -76,7 +77,21 @@ public sealed class SystemTextJsonSourceSerializer : IElasticsearchSerializer
 
     private static JsonSerializerOptions CreateOptions()
     {
-        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var resolver = new DefaultJsonTypeInfoResolver();
+        resolver.Modifiers.Add(typeInfo =>
+        {
+            var metadataId = typeInfo.Properties.FirstOrDefault(property =>
+                string.Equals(property.Name, "_id", StringComparison.Ordinal));
+            if (metadataId is not null)
+            {
+                metadataId.ShouldSerialize = static (_, _) => false;
+            }
+        });
+
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            TypeInfoResolver = resolver
+        };
         options.Converters.Add(new JsonStringEnumConverter());
         return options;
     }

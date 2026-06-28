@@ -87,6 +87,15 @@ public sealed class RuleConfigDto : IValidatableObject
                 [nameof(MaxResolution), nameof(MinResolution)]);
         }
 
+        if (Sensors is null)
+        {
+            yield return new ValidationResult("sensors cannot be null", [nameof(Sensors)]);
+        }
+        else if (Sensors.Any(sensor => sensor.Value is null))
+        {
+            yield return new ValidationResult("sensor value lists cannot be null", [nameof(Sensors)]);
+        }
+
         var hasWkt = !string.IsNullOrWhiteSpace(Wkt);
         var hasGeoJson = GeoJson.HasValue &&
             GeoJson.Value.ValueKind != JsonValueKind.Null &&

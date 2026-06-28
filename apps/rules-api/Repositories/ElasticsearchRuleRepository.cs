@@ -33,7 +33,10 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
         }, cancellationToken);
 
         EnsureValid(response, "search rules");
-        return response.Documents.ToArray();
+        return response.Hits
+            .Where(hit => hit.Source is not null)
+            .Select(HydrateId)
+            .ToArray();
     }
 
     public async Task<RuleConfigDto?> GetByIdAsync(
@@ -45,12 +48,18 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
             descriptor => descriptor.Index(_indexName),
             cancellationToken);
 
-        if (!response.Found)
+        if (!response.Found && response.ApiCall?.HttpStatusCode == StatusCodes.Status404NotFound)
         {
             return null;
         }
 
         EnsureValid(response, $"get rule '{id}'");
+        if (response.Source is null)
+        {
+            return null;
+        }
+
+        response.Source.Id = response.Id;
         return response.Source;
     }
 
@@ -64,7 +73,8 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
             .Query(query => query.Term("ruleName.keyword", ruleName)), cancellationToken);
 
         EnsureValid(response, $"get rule by name '{ruleName}'");
-        return response.Documents.FirstOrDefault();
+        var hit = response.Hits.FirstOrDefault();
+        return hit?.Source is null ? null : HydrateId(hit);
     }
 
     public async Task<bool> ExistsByNameAsync(
@@ -78,17 +88,25 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
             .Query(query => query.Term("ruleName.keyword", ruleName)), cancellationToken);
 
         EnsureValid(response, $"check duplicate ruleName '{ruleName}'");
-        return response.Documents.Any(rule => !string.Equals(rule.Id, excludingId, StringComparison.Ordinal));
+        return response.Hits.Any(hit =>
+            !string.Equals(hit.Id, excludingId, StringComparison.Ordinal));
     }
 
     public async Task SaveAsync(RuleConfigDto rule, CancellationToken cancellationToken = default)
     {
         var response = await _client.IndexAsync(
             rule,
-            descriptor => descriptor.Index(_indexName).Id(rule.Id).Refresh(Refresh.WaitFor),
+            descriptor =>
+            {
+                descriptor = descriptor.Index(_indexName).Refresh(Refresh.WaitFor);
+                return string.IsNullOrWhiteSpace(rule.Id)
+                    ? descriptor
+                    : descriptor.Id(rule.Id);
+            },
             cancellationToken);
 
         EnsureValid(response, $"save rule '{rule.Id}'");
+        rule.Id = response.Id;
     }
 
     public async Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default)
@@ -118,5 +136,11 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
             response.OriginalException?.Message ??
             response.DebugInformation;
         throw new RuleRepositoryException($"Elasticsearch failed to {operation}: {reason}");
+    }
+
+    private static RuleConfigDto HydrateId(IHit<RuleConfigDto> hit)
+    {
+        hit.Source.Id = hit.Id;
+        return hit.Source;
     }
 }

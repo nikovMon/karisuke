@@ -56,6 +56,11 @@ internal sealed class InMemoryRuleRepository : IRuleRepository
 
     public Task SaveAsync(RuleConfigDto rule, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(rule.Id))
+        {
+            rule.Id = Guid.NewGuid().ToString();
+        }
+
         _rules[rule.Id] = Clone(rule);
         return Task.CompletedTask;
     }

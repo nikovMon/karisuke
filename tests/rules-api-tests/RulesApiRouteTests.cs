@@ -163,9 +163,10 @@ public sealed class RulesApiRouteTests
         var created = await response.Content.ReadFromJsonAsync<RuleConfigDto>(JsonOptions);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        Assert.True(Guid.TryParse(created?.Id, out var generatedId));
-        Assert.EndsWith($"/rules/{generatedId}", response.Headers.Location?.ToString(), StringComparison.Ordinal);
-        Assert.NotNull(await context.Repository.GetByIdAsync(generatedId.ToString()));
+        Assert.False(string.IsNullOrWhiteSpace(created?.Id));
+        Assert.NotEqual("client-controlled-id", created.Id);
+        Assert.EndsWith($"/rules/{created.Id}", response.Headers.Location?.ToString(), StringComparison.Ordinal);
+        Assert.NotNull(await context.Repository.GetByIdAsync(created.Id));
     }
 
     [Fact]
@@ -465,9 +466,38 @@ public sealed class RulesApiRouteTests
         var nullBody = await context.Client.PatchAsync(
             "/rules/rule-1/activity",
             Json("null"));
+        var missingActivity = await context.Client.PatchAsync(
+            "/rules/rule-1/activity",
+            Json("{}"));
 
         Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, nullBody.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, missingActivity.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateAndUpdateRejectNullSensorValueLists()
+    {
+        using var context = CreateContext(ValidRule("rule-1", "one"));
+
+        var create = await context.Client.PostAsync(
+            "/rules",
+            Json("""
+                {
+                  "ruleName": "invalid-sensors",
+                  "algorithmName": "Finder",
+                  "sensors": { "camera": null },
+                  "minResolution": 0.5,
+                  "maxResolution": 999,
+                  "wkt": "POINT (1 1)"
+                }
+                """));
+        var update = await context.Client.PatchAsync(
+            "/rules/rule-1",
+            Json("""{ "sensors": { "camera": null } }"""));
+
+        Assert.Equal(HttpStatusCode.BadRequest, create.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, update.StatusCode);
     }
 
     [Fact]

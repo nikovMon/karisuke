@@ -43,7 +43,7 @@ public sealed class RuleService : IRuleService
         RuleConfigDto rule,
         CancellationToken cancellationToken = default)
     {
-        rule.Id = Guid.NewGuid().ToString();
+        rule.Id = string.Empty;
         _logger.LogDebug(
             "Starting rule operation {Operation}. RuleId: {RuleId}; RuleName: {RuleName}",
             "create",
@@ -217,6 +217,13 @@ public sealed class RuleService : IRuleService
         ChangeRuleActivityRequest request,
         CancellationToken cancellationToken = default)
     {
+        if (!request.IsActive.HasValue)
+        {
+            const string error = "isActive is required.";
+            LogValidationFailure("change_activity", id, [error]);
+            return RuleOperationResult<RuleConfigDto>.ValidationFailed(error);
+        }
+
         _logger.LogDebug(
             "Starting rule operation {Operation}. RuleId: {RuleId}; IsActive: {IsActive}",
             "change_activity",
@@ -225,7 +232,7 @@ public sealed class RuleService : IRuleService
 
         var update = new UpdateRuleRequest
         {
-            IsActive = request.IsActive
+            IsActive = request.IsActive.Value
         };
         update.ProvidedFields.Add("isActive");
         return await UpdateCoreAsync(id, update, "change_activity", cancellationToken);
@@ -259,7 +266,7 @@ public sealed class RuleService : IRuleService
             operation,
             ids.Count,
             request.SensorName,
-            request.Values.Count);
+            request.Values?.Count ?? 0);
 
         var errors = RuleValidation.ValidateIds(ids)
             .Concat(RuleValidation.ValidateSensorRequest(request))
@@ -405,11 +412,14 @@ public sealed class RuleService : IRuleService
     private static void NormalizeCollections(RuleConfigDto rule)
     {
         rule.Sensors = new Dictionary<string, List<string>>(
-            rule.Sensors
+            (rule.Sensors ?? new Dictionary<string, List<string>>(StringComparer.Ordinal))
                 .Where(item => !string.IsNullOrWhiteSpace(item.Key))
                 .Select(item => new KeyValuePair<string, List<string>>(
                     item.Key,
-                    item.Value.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal).ToList())),
+                    (item.Value ?? [])
+                        .Where(value => !string.IsNullOrWhiteSpace(value))
+                        .Distinct(StringComparer.Ordinal)
+                        .ToList())),
             StringComparer.Ordinal);
         rule.Tenants ??= [];
     }

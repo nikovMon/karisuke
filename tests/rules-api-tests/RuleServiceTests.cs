@@ -36,7 +36,7 @@ public sealed class RuleServiceTests
         var result = await service.CreateAsync(rule);
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
-        Assert.True(Guid.TryParse(result.Value?.Id, out _));
+        Assert.False(string.IsNullOrWhiteSpace(result.Value?.Id));
         Assert.NotEqual("rule-1", result.Value?.Id);
         Assert.Equal(["cam-1", "cam-2"], result.Value?.Sensors["camera"]);
         Assert.False(result.Value?.Sensors.ContainsKey(" "));
@@ -45,7 +45,7 @@ public sealed class RuleServiceTests
     }
 
     [Fact]
-    public async Task CreateAlwaysReplacesClientProvidedIdWithServerUuid()
+    public async Task CreateUsesRepositoryGeneratedIdInsteadOfClientId()
     {
         var repository = new InMemoryRuleRepository();
         var service = CreateService(repository);
@@ -54,10 +54,11 @@ public sealed class RuleServiceTests
         var result = await service.CreateAsync(rule);
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
-        Assert.True(Guid.TryParse(result.Value?.Id, out var generatedId));
-        Assert.NotEqual("client-controlled-id", generatedId.ToString());
+        var generatedId = Assert.IsType<string>(result.Value?.Id);
+        Assert.NotEmpty(generatedId);
+        Assert.NotEqual("client-controlled-id", generatedId);
         Assert.Null(await repository.GetByIdAsync("client-controlled-id"));
-        Assert.NotNull(await repository.GetByIdAsync(generatedId.ToString()));
+        Assert.NotNull(await repository.GetByIdAsync(generatedId));
     }
 
     [Fact]
@@ -312,9 +313,16 @@ public sealed class RuleServiceTests
             SensorName = "camera",
             Values = ["cam-1", "cam-1"]
         });
+        var nullValuesResult = await service.AddSensorsAsync(["rule-1"], new RuleSensorUpdateRequest
+        {
+            SensorName = "camera",
+            Values = null!
+        });
 
         Assert.Equal(RuleOperationStatus.ValidationFailed, result.Status);
         Assert.Contains("unique", result.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(RuleOperationStatus.ValidationFailed, nullValuesResult.Status);
+        Assert.Contains("empty", nullValuesResult.Error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

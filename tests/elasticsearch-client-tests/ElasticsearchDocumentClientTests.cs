@@ -128,6 +128,23 @@ public sealed class ElasticsearchDocumentClientTests
     }
 
     [Fact]
+    public async Task GetAsyncThrowsClientExceptionWhenElasticsearchFails()
+    {
+        var client = CreateDocumentClient("""
+            {
+              "error": {
+                "reason": "Elasticsearch unavailable"
+              }
+            }
+            """, statusCode: 503);
+
+        var exception = await Assert.ThrowsAsync<ElasticsearchClientException>(() =>
+            client.GetAsync<TestRuleDocument>("rules", "rule-1"));
+
+        Assert.Contains("get document 'rule-1'", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task DeleteAsyncReturnsFalseWhenDocumentIsMissing()
     {
         var client = CreateDocumentClient("""

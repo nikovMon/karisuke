@@ -107,6 +107,36 @@ public sealed class RuleValidationTests
     }
 
     [Fact]
+    public void SensorValidationRejectsNullCollectionsWithoutThrowing()
+    {
+        var rule = ValidRule();
+        rule.Sensors = new Dictionary<string, List<string>>(StringComparer.Ordinal)
+        {
+            ["camera"] = null!
+        };
+        var update = new UpdateRuleRequest
+        {
+            Sensors = new Dictionary<string, List<string>>(StringComparer.Ordinal)
+            {
+                ["camera"] = null!
+            }
+        };
+        update.ProvidedFields.Add("sensors");
+
+        var ruleErrors = RuleValidation.ValidateRule(rule);
+        var updateErrors = RuleValidation.ValidateUpdate(update);
+        var requestErrors = RuleValidation.ValidateSensorRequest(new RuleSensorUpdateRequest
+        {
+            SensorName = "camera",
+            Values = null!
+        });
+
+        Assert.Contains(ruleErrors, error => error.Contains("cannot be null", StringComparison.Ordinal));
+        Assert.Contains("sensor value lists cannot be null.", updateErrors);
+        Assert.Contains("sensor values cannot be empty.", requestErrors);
+    }
+
+    [Fact]
     public async Task UpdateReaderTracksOnlySentFieldsIncludingNulls()
     {
         await using var body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(
