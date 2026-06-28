@@ -6,37 +6,28 @@ namespace ImagingPipeline.ElasticsearchClient;
 
 public interface IElasticsearchDocumentClient
 {
-    Task<IReadOnlyList<TDocument>> SearchAsync<TDocument>(
-        ElasticsearchSearchRequest request,
-        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<TDocument>> SearchAsync<TDocument>(ElasticsearchSearchRequest request);
 
-    Task<IReadOnlyList<TDocument>> SearchBySensorAsync<TDocument>(
-        ElasticsearchSensorSearchRequest request,
-        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<TDocument>> SearchBySensorAsync<TDocument>(ElasticsearchSensorSearchRequest request);
 
-    Task<IReadOnlyList<TDocument>> SearchByGeoShapeAsync<TDocument>(
-        ElasticsearchGeoShapeSearchRequest request,
-        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<TDocument>> SearchByGeoShapeAsync<TDocument>(ElasticsearchGeoShapeSearchRequest request);
 
     Task<TDocument?> GetAsync<TDocument>(
         string indexName,
-        string id,
-        CancellationToken cancellationToken = default)
+        string id)
         where TDocument : class;
 
     Task IndexAsync<TDocument>(
         string indexName,
         string id,
         TDocument document,
-        bool waitForRefresh = true,
-        CancellationToken cancellationToken = default)
+        bool waitForRefresh = true)
         where TDocument : class;
 
     Task<bool> DeleteAsync<TDocument>(
         string indexName,
         string id,
-        bool waitForRefresh = true,
-        CancellationToken cancellationToken = default)
+        bool waitForRefresh = true)
         where TDocument : class;
 }
 
@@ -50,24 +41,20 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
         _client = client;
     }
 
-    public async Task<IReadOnlyList<TDocument>> SearchAsync<TDocument>(
-        ElasticsearchSearchRequest request,
-        CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<TDocument>> SearchAsync<TDocument>(ElasticsearchSearchRequest request)
     {
         var body = ElasticsearchQueryJsonBuilder.BuildSearchBody(request);
         var response = await _client.LowLevel.SearchAsync<StringResponse>(
             request.IndexName,
             PostData.String(body),
-            new SearchRequestParameters(),
-            cancellationToken);
+            new SearchRequestParameters());
 
         EnsureValid(response, $"search index '{request.IndexName}'");
         return DeserializeSearchResponse<TDocument>(response.Body);
     }
 
     public Task<IReadOnlyList<TDocument>> SearchBySensorAsync<TDocument>(
-        ElasticsearchSensorSearchRequest request,
-        CancellationToken cancellationToken = default) =>
+        ElasticsearchSensorSearchRequest request) =>
         SearchAsync<TDocument>(
             new ElasticsearchSearchRequest
             {
@@ -84,12 +71,10 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
                         KeywordSuffix = request.KeywordSuffix
                     }
                 ]
-            },
-            cancellationToken);
+            });
 
     public Task<IReadOnlyList<TDocument>> SearchByGeoShapeAsync<TDocument>(
-        ElasticsearchGeoShapeSearchRequest request,
-        CancellationToken cancellationToken = default) =>
+        ElasticsearchGeoShapeSearchRequest request) =>
         SearchAsync<TDocument>(
             new ElasticsearchSearchRequest
             {
@@ -105,21 +90,18 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
                         Relation = request.Relation
                     }
                 ]
-            },
-            cancellationToken);
+            });
 
     public async Task<TDocument?> GetAsync<TDocument>(
         string indexName,
-        string id,
-        CancellationToken cancellationToken = default)
+        string id)
         where TDocument : class
     {
         ValidateIndexAndId(indexName, id);
 
         var response = await _client.GetAsync<TDocument>(
             id,
-            descriptor => descriptor.Index(indexName),
-            cancellationToken);
+            descriptor => descriptor.Index(indexName));
 
         if (!response.Found)
         {
@@ -134,8 +116,7 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
         string indexName,
         string id,
         TDocument document,
-        bool waitForRefresh = true,
-        CancellationToken cancellationToken = default)
+        bool waitForRefresh = true)
         where TDocument : class
     {
         ValidateIndexAndId(indexName, id);
@@ -147,8 +128,7 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
             {
                 descriptor = descriptor.Index(indexName).Id(id);
                 return waitForRefresh ? descriptor.Refresh(Refresh.WaitFor) : descriptor;
-            },
-            cancellationToken);
+            });
 
         EnsureValid(response, $"index document '{id}' into index '{indexName}'");
     }
@@ -156,8 +136,7 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
     public async Task<bool> DeleteAsync<TDocument>(
         string indexName,
         string id,
-        bool waitForRefresh = true,
-        CancellationToken cancellationToken = default)
+        bool waitForRefresh = true)
         where TDocument : class
     {
         ValidateIndexAndId(indexName, id);
@@ -168,8 +147,7 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
             {
                 descriptor = descriptor.Index(indexName);
                 return waitForRefresh ? descriptor.Refresh(Refresh.WaitFor) : descriptor;
-            },
-            cancellationToken);
+            });
 
         if (response.Result == Result.NotFound)
         {
