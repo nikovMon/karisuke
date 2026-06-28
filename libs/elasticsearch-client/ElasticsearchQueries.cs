@@ -1,12 +1,80 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace ImagingPipeline.ElasticsearchClient;
+
+public enum ElasticsearchGeoShapeRelation
+{
+    Intersects,
+    Disjoint,
+    Within,
+    Contains
+}
+
+public sealed class ElasticsearchTermFilter
+{
+    public required string Field { get; init; }
+    public required object Value { get; init; }
+}
+
+public sealed class ElasticsearchTermsFilter
+{
+    public required string Field { get; init; }
+    public required IReadOnlyCollection<object> Values { get; init; }
+}
+
+public sealed class ElasticsearchSensorFilter
+{
+    public string SensorRootField { get; init; } = "sensors";
+    public required string SensorName { get; init; }
+    public required IReadOnlyCollection<string> Values { get; init; }
+    public string KeywordSuffix { get; init; } = ".keyword";
+}
+
+public sealed class ElasticsearchGeoShapeFilter
+{
+    public required string Field { get; init; }
+    public required JsonElement Shape { get; init; }
+    public ElasticsearchGeoShapeRelation Relation { get; init; } = ElasticsearchGeoShapeRelation.Intersects;
+}
+
+public sealed class ElasticsearchSearchRequest
+{
+    public required string IndexName { get; init; }
+    public int From { get; init; }
+    public int Size { get; init; } = 100;
+    public List<ElasticsearchTermFilter> TermFilters { get; init; } = [];
+    public List<ElasticsearchTermsFilter> TermsFilters { get; init; } = [];
+    public List<ElasticsearchSensorFilter> SensorFilters { get; init; } = [];
+    public List<ElasticsearchGeoShapeFilter> GeoShapeFilters { get; init; } = [];
+}
+
+public sealed class ElasticsearchSensorSearchRequest
+{
+    public required string IndexName { get; init; }
+    public string SensorRootField { get; init; } = "sensors";
+    public required string SensorName { get; init; }
+    public required IReadOnlyCollection<string> Values { get; init; }
+    public string KeywordSuffix { get; init; } = ".keyword";
+    public int From { get; init; }
+    public int Size { get; init; } = 100;
+}
+
+public sealed class ElasticsearchGeoShapeSearchRequest
+{
+    public required string IndexName { get; init; }
+    public required string Field { get; init; }
+    public required JsonElement Shape { get; init; }
+    public ElasticsearchGeoShapeRelation Relation { get; init; } = ElasticsearchGeoShapeRelation.Intersects;
+    public int From { get; init; }
+    public int Size { get; init; } = 100;
+}
 
 public static class ElasticsearchQueryJsonBuilder
 {
     public static string BuildSearchBody(ElasticsearchSearchRequest request)
     {
-        ValidateSearchRequest(request);
+        Validate(request);
 
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -22,7 +90,7 @@ public static class ElasticsearchQueryJsonBuilder
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
     }
 
-    internal static void ValidateSearchRequest(ElasticsearchSearchRequest request)
+    private static void Validate(ElasticsearchSearchRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.IndexName))
         {
@@ -41,19 +109,12 @@ public static class ElasticsearchQueryJsonBuilder
 
         foreach (var filter in request.TermFilters)
         {
-            if (string.IsNullOrWhiteSpace(filter.Field))
-            {
-                throw new ArgumentException("Term filter field must not be empty.", nameof(request));
-            }
+            RequireField(filter.Field, "Term filter field must not be empty.", request);
         }
 
         foreach (var filter in request.TermsFilters)
         {
-            if (string.IsNullOrWhiteSpace(filter.Field))
-            {
-                throw new ArgumentException("Terms filter field must not be empty.", nameof(request));
-            }
-
+            RequireField(filter.Field, "Terms filter field must not be empty.", request);
             if (filter.Values.Count == 0)
             {
                 throw new ArgumentException("Terms filter values must not be empty.", nameof(request));
@@ -62,16 +123,8 @@ public static class ElasticsearchQueryJsonBuilder
 
         foreach (var filter in request.SensorFilters)
         {
-            if (string.IsNullOrWhiteSpace(filter.SensorRootField))
-            {
-                throw new ArgumentException("Sensor root field must not be empty.", nameof(request));
-            }
-
-            if (string.IsNullOrWhiteSpace(filter.SensorName))
-            {
-                throw new ArgumentException("Sensor name must not be empty.", nameof(request));
-            }
-
+            RequireField(filter.SensorRootField, "Sensor root field must not be empty.", request);
+            RequireField(filter.SensorName, "Sensor name must not be empty.", request);
             if (filter.Values.Count == 0 || filter.Values.Any(string.IsNullOrWhiteSpace))
             {
                 throw new ArgumentException("Sensor values must not be empty.", nameof(request));
@@ -80,11 +133,7 @@ public static class ElasticsearchQueryJsonBuilder
 
         foreach (var filter in request.GeoShapeFilters)
         {
-            if (string.IsNullOrWhiteSpace(filter.Field))
-            {
-                throw new ArgumentException("Geo shape field must not be empty.", nameof(request));
-            }
-
+            RequireField(filter.Field, "Geo shape field must not be empty.", request);
             if (filter.Shape.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
             {
                 throw new ArgumentException("Geo shape must not be null.", nameof(request));
@@ -92,14 +141,20 @@ public static class ElasticsearchQueryJsonBuilder
         }
     }
 
+    private static void RequireField(
+        string field,
+        string error,
+        ElasticsearchSearchRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(field))
+        {
+            throw new ArgumentException(error, nameof(request));
+        }
+    }
+
     private static void WriteQuery(Utf8JsonWriter writer, ElasticsearchSearchRequest request)
     {
-        var hasFilters = request.TermFilters.Count > 0 ||
-            request.TermsFilters.Count > 0 ||
-            request.SensorFilters.Count > 0 ||
-            request.GeoShapeFilters.Count > 0;
-
-        if (!hasFilters)
+        if (!HasFilters(request))
         {
             writer.WriteStartObject();
             writer.WriteStartObject("match_all");
@@ -125,8 +180,9 @@ public static class ElasticsearchQueryJsonBuilder
 
         foreach (var filter in request.SensorFilters)
         {
-            var field = BuildSensorField(filter);
-            WriteTermsFilter(writer, field, filter.Values.Distinct(StringComparer.Ordinal).Cast<object>().ToArray());
+            var field = $"{filter.SensorRootField}.{filter.SensorName}{filter.KeywordSuffix}";
+            var values = filter.Values.Distinct(StringComparer.Ordinal).Cast<object>().ToArray();
+            WriteTermsFilter(writer, field, values);
         }
 
         foreach (var filter in request.GeoShapeFilters)
@@ -139,8 +195,11 @@ public static class ElasticsearchQueryJsonBuilder
         writer.WriteEndObject();
     }
 
-    private static string BuildSensorField(ElasticsearchSensorFilter filter) =>
-        $"{filter.SensorRootField}.{filter.SensorName}{filter.KeywordSuffix}";
+    private static bool HasFilters(ElasticsearchSearchRequest request) =>
+        request.TermFilters.Count > 0 ||
+        request.TermsFilters.Count > 0 ||
+        request.SensorFilters.Count > 0 ||
+        request.GeoShapeFilters.Count > 0;
 
     private static void WriteTermFilter(Utf8JsonWriter writer, string field, object value)
     {
@@ -152,7 +211,10 @@ public static class ElasticsearchQueryJsonBuilder
         writer.WriteEndObject();
     }
 
-    private static void WriteTermsFilter(Utf8JsonWriter writer, string field, IReadOnlyCollection<object> values)
+    private static void WriteTermsFilter(
+        Utf8JsonWriter writer,
+        string field,
+        IReadOnlyCollection<object> values)
     {
         writer.WriteStartObject();
         writer.WritePropertyName("terms");
@@ -163,7 +225,9 @@ public static class ElasticsearchQueryJsonBuilder
         writer.WriteEndObject();
     }
 
-    private static void WriteGeoShapeFilter(Utf8JsonWriter writer, ElasticsearchGeoShapeFilter filter)
+    private static void WriteGeoShapeFilter(
+        Utf8JsonWriter writer,
+        ElasticsearchGeoShapeFilter filter)
     {
         writer.WriteStartObject();
         writer.WritePropertyName("geo_shape");
@@ -187,4 +251,22 @@ public static class ElasticsearchQueryJsonBuilder
             ElasticsearchGeoShapeRelation.Contains => "contains",
             _ => throw new ArgumentOutOfRangeException(nameof(relation), relation, "Unsupported geo shape relation.")
         };
+}
+
+internal sealed class ElasticsearchSearchResponse<TDocument>
+{
+    [JsonPropertyName("hits")]
+    public ElasticsearchHits<TDocument>? Hits { get; set; }
+}
+
+internal sealed class ElasticsearchHits<TDocument>
+{
+    [JsonPropertyName("hits")]
+    public List<ElasticsearchHit<TDocument>> Items { get; set; } = [];
+}
+
+internal sealed class ElasticsearchHit<TDocument>
+{
+    [JsonPropertyName("_source")]
+    public TDocument? Source { get; set; }
 }

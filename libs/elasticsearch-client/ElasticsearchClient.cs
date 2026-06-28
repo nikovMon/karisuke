@@ -4,6 +4,42 @@ using Nest;
 
 namespace ImagingPipeline.ElasticsearchClient;
 
+public interface IElasticsearchDocumentClient
+{
+    Task<IReadOnlyList<TDocument>> SearchAsync<TDocument>(
+        ElasticsearchSearchRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<TDocument>> SearchBySensorAsync<TDocument>(
+        ElasticsearchSensorSearchRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<TDocument>> SearchByGeoShapeAsync<TDocument>(
+        ElasticsearchGeoShapeSearchRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<TDocument?> GetAsync<TDocument>(
+        string indexName,
+        string id,
+        CancellationToken cancellationToken = default)
+        where TDocument : class;
+
+    Task IndexAsync<TDocument>(
+        string indexName,
+        string id,
+        TDocument document,
+        bool waitForRefresh = true,
+        CancellationToken cancellationToken = default)
+        where TDocument : class;
+
+    Task<bool> DeleteAsync<TDocument>(
+        string indexName,
+        string id,
+        bool waitForRefresh = true,
+        CancellationToken cancellationToken = default)
+        where TDocument : class;
+}
+
 public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -31,50 +67,46 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
 
     public Task<IReadOnlyList<TDocument>> SearchBySensorAsync<TDocument>(
         ElasticsearchSensorSearchRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var searchRequest = new ElasticsearchSearchRequest
-        {
-            IndexName = request.IndexName,
-            From = request.From,
-            Size = request.Size,
-            SensorFilters =
-            [
-                new ElasticsearchSensorFilter
-                {
-                    SensorRootField = request.SensorRootField,
-                    SensorName = request.SensorName,
-                    Values = request.Values,
-                    KeywordSuffix = request.KeywordSuffix
-                }
-            ]
-        };
-
-        return SearchAsync<TDocument>(searchRequest, cancellationToken);
-    }
+        CancellationToken cancellationToken = default) =>
+        SearchAsync<TDocument>(
+            new ElasticsearchSearchRequest
+            {
+                IndexName = request.IndexName,
+                From = request.From,
+                Size = request.Size,
+                SensorFilters =
+                [
+                    new ElasticsearchSensorFilter
+                    {
+                        SensorRootField = request.SensorRootField,
+                        SensorName = request.SensorName,
+                        Values = request.Values,
+                        KeywordSuffix = request.KeywordSuffix
+                    }
+                ]
+            },
+            cancellationToken);
 
     public Task<IReadOnlyList<TDocument>> SearchByGeoShapeAsync<TDocument>(
         ElasticsearchGeoShapeSearchRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var searchRequest = new ElasticsearchSearchRequest
-        {
-            IndexName = request.IndexName,
-            From = request.From,
-            Size = request.Size,
-            GeoShapeFilters =
-            [
-                new ElasticsearchGeoShapeFilter
-                {
-                    Field = request.Field,
-                    Shape = request.Shape,
-                    Relation = request.Relation
-                }
-            ]
-        };
-
-        return SearchAsync<TDocument>(searchRequest, cancellationToken);
-    }
+        CancellationToken cancellationToken = default) =>
+        SearchAsync<TDocument>(
+            new ElasticsearchSearchRequest
+            {
+                IndexName = request.IndexName,
+                From = request.From,
+                Size = request.Size,
+                GeoShapeFilters =
+                [
+                    new ElasticsearchGeoShapeFilter
+                    {
+                        Field = request.Field,
+                        Shape = request.Shape,
+                        Relation = request.Relation
+                    }
+                ]
+            },
+            cancellationToken);
 
     public async Task<TDocument?> GetAsync<TDocument>(
         string indexName,
@@ -200,5 +232,13 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
             response.Body ??
             response.DebugInformation;
         throw new ElasticsearchClientException($"Elasticsearch failed to {operation}: {reason}");
+    }
+}
+
+public sealed class ElasticsearchClientException : Exception
+{
+    public ElasticsearchClientException(string message)
+        : base(message)
+    {
     }
 }

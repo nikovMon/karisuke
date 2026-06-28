@@ -6,7 +6,7 @@ using Nest;
 
 namespace ImagingPipeline.ElasticsearchClient;
 
-public static class ElasticsearchClientServiceCollectionExtensions
+public static class ElasticsearchExtensions
 {
     public static IServiceCollection AddElasticsearchClient(
         this IServiceCollection services,

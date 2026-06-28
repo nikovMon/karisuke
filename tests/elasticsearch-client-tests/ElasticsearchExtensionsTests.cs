@@ -6,7 +6,7 @@ using Nest;
 
 namespace ImagingPipeline.ElasticsearchClient.Tests;
 
-public sealed class ElasticsearchClientServiceCollectionExtensionsTests
+public sealed class ElasticsearchExtensionsTests
 {
     [Fact]
     public void AddElasticsearchClientRegistersRawAndGenericClients()

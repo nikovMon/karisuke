@@ -9,6 +9,13 @@ It exposes two clients through DI:
 - `IElasticClient`: the raw NEST client for advanced Elasticsearch operations.
 - `IElasticsearchDocumentClient`: a small generic wrapper for common document operations and reusable sensor/geography searches.
 
+## Source Layout
+
+- `ElasticsearchClient.cs`: client interface, implementation, and client exception.
+- `ElasticsearchQueries.cs`: search requests, filters, results, and query JSON builder.
+- `ElasticsearchOptions.cs`: configuration options and JSON serialization.
+- `ElasticsearchExtensions.cs`: dependency injection registration.
+
 ## Registration
 
 ```csharp
