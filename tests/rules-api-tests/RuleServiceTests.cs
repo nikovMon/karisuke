@@ -3,6 +3,7 @@ using ImagingPipeline.Common.Dtos.Rules.Requests;
 using ImagingPipeline.Common.Dtos.Rules.Responses;
 using ImagingPipeline.Rules.Api.Services;
 using ImagingPipeline.Rules.Api.Tests.Fakes;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ImagingPipeline.Rules.Api.Tests;
@@ -314,6 +315,27 @@ public sealed class RuleServiceTests
 
         Assert.Equal(RuleOperationStatus.ValidationFailed, result.Status);
         Assert.Contains("unique", result.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ValidationFailureWritesStructuredWarningMetadata()
+    {
+        var logger = new RecordingLogger<RuleService>();
+        var service = new RuleService(new InMemoryRuleRepository(), logger);
+        var request = new UpdateRuleRequest();
+
+        var result = await service.UpdateAsync("rule-1", request);
+
+        Assert.Equal(RuleOperationStatus.ValidationFailed, result.Status);
+        var debugEntry = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Debug);
+        Assert.Equal("update", debugEntry.Properties["Operation"]);
+        Assert.Equal("rule-1", debugEntry.Properties["RuleId"]);
+        var entry = Assert.Single(logger.Entries, item => item.Level == LogLevel.Warning);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal("update", entry.Properties["Operation"]);
+        Assert.Equal("rule-1", entry.Properties["RuleId"]);
+        Assert.Equal(1, entry.Properties["ErrorCount"]);
+        Assert.Contains("At least one field", entry.Properties["ValidationErrors"]?.ToString(), StringComparison.Ordinal);
     }
 
     private static RuleService CreateService(InMemoryRuleRepository repository) =>

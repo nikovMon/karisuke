@@ -201,8 +201,12 @@ public sealed class RulesApiRouteTests
         using var context = CreateContext();
 
         var response = await context.Client.PostAsJsonAsync("/rules", new RuleConfigDto(), JsonOptions);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.True(body.RootElement.TryGetProperty("type", out _));
+        Assert.Equal(400, body.RootElement.GetProperty("status").GetInt32());
+        Assert.True(body.RootElement.TryGetProperty("traceId", out _));
     }
 
     [Fact]

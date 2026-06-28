@@ -110,6 +110,35 @@ Bulk operation response:
 
 Repository failures, usually Elasticsearch failures, return `503 Service Unavailable`.
 
+## Logging
+
+The API uses the default .NET logging provider and structured message templates.
+
+- Every HTTP request logs method, path, status code, duration, endpoint, route ID, and trace ID.
+- Create, update, bulk, delete, activity, and sensor operations log their outcome and relevant IDs or counts.
+- MVC and domain validation failures log field names, error counts, and safe validation messages.
+- Elasticsearch failures include full exception details in server logs, while clients receive only a stable generic error.
+- Request bodies, credentials, and Elasticsearch debug payloads are not logged.
+
+Debug logs are disabled by default. Enable them temporarily for the Rules API category:
+
+```bash
+Logging__LogLevel__ImagingPipeline.Rules.Api=Debug
+```
+
+Example diagnostic sequence:
+
+```text
+dbug: ImagingPipeline.Rules.Api.Observability.RequestLoggingMiddleware[999]
+      HTTP PATCH /rules/8e771b31-1031-46c3-aacf-e72f96c04c6d started. TraceId: 0HNMK...
+dbug: ImagingPipeline.Rules.Api.Services.RuleService[0]
+      Starting rule operation update. RuleId: 8e771b31-1031-46c3-aacf-e72f96c04c6d; UpdatedFields: description, isActive
+info: ImagingPipeline.Rules.Api.Services.RuleService[0]
+      Rule operation update succeeded. RuleId: 8e771b31-1031-46c3-aacf-e72f96c04c6d; UpdatedFieldCount: 2
+info: ImagingPipeline.Rules.Api.Observability.RequestLoggingMiddleware[1000]
+      HTTP PATCH /rules/8e771b31-1031-46c3-aacf-e72f96c04c6d completed with 200 in 18.42 ms.
+```
+
 ## Routes
 
 ### GET /health

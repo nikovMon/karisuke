@@ -44,15 +44,26 @@ public sealed class RuleService : IRuleService
         CancellationToken cancellationToken = default)
     {
         rule.Id = Guid.NewGuid().ToString();
+        _logger.LogDebug(
+            "Starting rule operation {Operation}. RuleId: {RuleId}; RuleName: {RuleName}",
+            "create",
+            rule.Id,
+            rule.RuleName);
 
         var errors = RuleValidation.ValidateRule(rule);
         if (errors.Count > 0)
         {
+            LogValidationFailure("create", rule.Id, errors);
             return RuleOperationResult<RuleConfigDto>.ValidationFailed(string.Join(" ", errors));
         }
 
         if (await _repository.ExistsByNameAsync(rule.RuleName, cancellationToken: cancellationToken))
         {
+            _logger.LogWarning(
+                "Rule operation {Operation} failed because ruleName {RuleName} already exists. RuleId: {RuleId}",
+                "create",
+                rule.RuleName,
+                rule.Id);
             return RuleOperationResult<RuleConfigDto>.Conflict($"Rule with ruleName '{rule.RuleName}' already exists.");
         }
 
@@ -62,24 +73,46 @@ public sealed class RuleService : IRuleService
         NormalizeCollections(rule);
 
         await _repository.SaveAsync(rule, cancellationToken);
-        _logger.LogInformation("Created rule {RuleId}", rule.Id);
+        _logger.LogInformation(
+            "Rule operation {Operation} succeeded. RuleId: {RuleId}; RuleName: {RuleName}",
+            "create",
+            rule.Id,
+            rule.RuleName);
         return RuleOperationResult<RuleConfigDto>.Success(rule);
     }
 
-    public async Task<RuleOperationResult<RuleConfigDto>> UpdateAsync(
+    public Task<RuleOperationResult<RuleConfigDto>> UpdateAsync(
         string id,
         UpdateRuleRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        UpdateCoreAsync(id, request, "update", cancellationToken);
+
+    private async Task<RuleOperationResult<RuleConfigDto>> UpdateCoreAsync(
+        string id,
+        UpdateRuleRequest request,
+        string operation,
+        CancellationToken cancellationToken)
     {
+        _logger.LogDebug(
+            "Starting rule operation {Operation}. RuleId: {RuleId}; UpdatedFields: {UpdatedFields}",
+            operation,
+            id,
+            string.Join(", ", request.ProvidedFields.Order(StringComparer.Ordinal)));
+
         var validationErrors = RuleValidation.ValidateUpdate(request);
         if (validationErrors.Count > 0)
         {
+            LogValidationFailure(operation, id, validationErrors);
             return RuleOperationResult<RuleConfigDto>.ValidationFailed(string.Join(" ", validationErrors));
         }
 
         var rule = await _repository.GetByIdAsync(id, cancellationToken);
         if (rule is null)
         {
+            _logger.LogWarning(
+                "Rule operation {Operation} failed because the rule was not found. RuleId: {RuleId}",
+                operation,
+                id);
             return RuleOperationResult<RuleConfigDto>.NotFound($"Rule '{id}' was not found.");
         }
 
@@ -87,6 +120,11 @@ public sealed class RuleService : IRuleService
             !string.Equals(rule.RuleName, request.RuleName, StringComparison.Ordinal) &&
             await _repository.ExistsByNameAsync(request.RuleName!, id, cancellationToken))
         {
+            _logger.LogWarning(
+                "Rule operation {Operation} failed because ruleName {RuleName} already exists. RuleId: {RuleId}",
+                operation,
+                request.RuleName,
+                id);
             return RuleOperationResult<RuleConfigDto>.Conflict($"Rule with ruleName '{request.RuleName}' already exists.");
         }
 
@@ -94,11 +132,16 @@ public sealed class RuleService : IRuleService
         var ruleErrors = RuleValidation.ValidateRule(rule);
         if (ruleErrors.Count > 0)
         {
+            LogValidationFailure(operation, id, ruleErrors);
             return RuleOperationResult<RuleConfigDto>.ValidationFailed(string.Join(" ", ruleErrors));
         }
 
         await _repository.SaveAsync(rule, cancellationToken);
-        _logger.LogInformation("Updated rule {RuleId}", id);
+        _logger.LogInformation(
+            "Rule operation {Operation} succeeded. RuleId: {RuleId}; UpdatedFieldCount: {UpdatedFieldCount}",
+            operation,
+            id,
+            request.ProvidedFields.Count);
         return RuleOperationResult<RuleConfigDto>.Success(rule);
     }
 
@@ -107,27 +150,39 @@ public sealed class RuleService : IRuleService
         UpdateRuleRequest request,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogDebug(
+            "Starting rule operation {Operation}. RequestedCount: {RequestedCount}; UpdatedFields: {UpdatedFields}",
+            "bulk_update",
+            ids.Count,
+            string.Join(", ", request.ProvidedFields.Order(StringComparer.Ordinal)));
+
         var errors = RuleValidation.ValidateIds(ids)
             .Concat(RuleValidation.ValidateUpdate(request))
             .ToArray();
 
         if (errors.Length > 0)
         {
+            LogValidationFailure("bulk_update", null, errors);
             return RuleOperationResult<BulkOperationResult>.ValidationFailed(string.Join(" ", errors));
         }
 
         if (request.HasField("ruleName") && ids.Count > 1)
         {
+            _logger.LogWarning(
+                "Rule operation {Operation} failed because one ruleName cannot be assigned to multiple rules. RuleCount: {RuleCount}",
+                "bulk_update",
+                ids.Count);
             return RuleOperationResult<BulkOperationResult>.Conflict("Cannot set the same ruleName on multiple rules.");
         }
 
         var result = new BulkOperationResult();
         foreach (var id in ids)
         {
-            var updated = await UpdateAsync(id, request, cancellationToken);
+            var updated = await UpdateCoreAsync(id, request, "bulk_update_item", cancellationToken);
             AddBulkResult(result, id, updated.Status, updated.Error);
         }
 
+        LogBulkOutcome("bulk_update", ids.Count, result);
         return RuleOperationResult<BulkOperationResult>.Success(result);
     }
 
@@ -135,10 +190,26 @@ public sealed class RuleService : IRuleService
         string id,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogDebug(
+            "Starting rule operation {Operation}. RuleId: {RuleId}",
+            "delete",
+            id);
+
         var deleted = await _repository.DeleteAsync(id, cancellationToken);
-        return deleted
-            ? RuleOperationResult.Success()
-            : RuleOperationResult.NotFound($"Rule '{id}' was not found.");
+        if (deleted)
+        {
+            _logger.LogInformation(
+                "Rule operation {Operation} succeeded. RuleId: {RuleId}",
+                "delete",
+                id);
+            return RuleOperationResult.Success();
+        }
+
+        _logger.LogWarning(
+            "Rule operation {Operation} failed because the rule was not found. RuleId: {RuleId}",
+            "delete",
+            id);
+        return RuleOperationResult.NotFound($"Rule '{id}' was not found.");
     }
 
     public async Task<RuleOperationResult<RuleConfigDto>> ChangeActivityAsync(
@@ -146,12 +217,18 @@ public sealed class RuleService : IRuleService
         ChangeRuleActivityRequest request,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogDebug(
+            "Starting rule operation {Operation}. RuleId: {RuleId}; IsActive: {IsActive}",
+            "change_activity",
+            id,
+            request.IsActive);
+
         var update = new UpdateRuleRequest
         {
             IsActive = request.IsActive
         };
         update.ProvidedFields.Add("isActive");
-        return await UpdateAsync(id, update, cancellationToken);
+        return await UpdateCoreAsync(id, update, "change_activity", cancellationToken);
     }
 
     public Task<RuleOperationResult<BulkOperationResult>> AddSensorsAsync(
@@ -176,12 +253,21 @@ public sealed class RuleService : IRuleService
         bool add,
         CancellationToken cancellationToken)
     {
+        var operation = add ? "add_sensors" : "remove_sensors";
+        _logger.LogDebug(
+            "Starting rule operation {Operation}. RequestedCount: {RequestedCount}; SensorName: {SensorName}; SensorValueCount: {SensorValueCount}",
+            operation,
+            ids.Count,
+            request.SensorName,
+            request.Values.Count);
+
         var errors = RuleValidation.ValidateIds(ids)
             .Concat(RuleValidation.ValidateSensorRequest(request))
             .ToArray();
 
         if (errors.Length > 0)
         {
+            LogValidationFailure(operation, null, errors);
             return RuleOperationResult<BulkOperationResult>.ValidationFailed(string.Join(" ", errors));
         }
 
@@ -191,6 +277,11 @@ public sealed class RuleService : IRuleService
             var rule = await _repository.GetByIdAsync(id, cancellationToken);
             if (rule is null)
             {
+                _logger.LogWarning(
+                    "Rule operation {Operation} skipped a missing rule. RuleId: {RuleId}; SensorName: {SensorName}",
+                    operation,
+                    id,
+                    request.SensorName);
                 result.FailedIds.Add(new BulkOperationFailure(id, "Rule not found"));
                 continue;
             }
@@ -210,6 +301,7 @@ public sealed class RuleService : IRuleService
             result.SuccessIds.Add(id);
         }
 
+        LogBulkOutcome(operation, ids.Count, result, request.SensorName);
         return RuleOperationResult<BulkOperationResult>.Success(result);
     }
 
@@ -335,5 +427,35 @@ public sealed class RuleService : IRuleService
         }
 
         result.FailedIds.Add(new BulkOperationFailure(id, error ?? "Rule update failed"));
+    }
+
+    private void LogValidationFailure(
+        string operation,
+        string? ruleId,
+        IReadOnlyCollection<string> errors)
+    {
+        _logger.LogWarning(
+            "Rule operation {Operation} failed validation. RuleId: {RuleId}; ErrorCount: {ErrorCount}; ValidationErrors: {ValidationErrors}",
+            operation,
+            ruleId,
+            errors.Count,
+            string.Join(" | ", errors));
+    }
+
+    private void LogBulkOutcome(
+        string operation,
+        int requestedCount,
+        BulkOperationResult result,
+        string? sensorName = null)
+    {
+        var level = result.FailedIds.Count > 0 ? LogLevel.Warning : LogLevel.Information;
+        _logger.Log(
+            level,
+            "Rule operation {Operation} completed. RequestedCount: {RequestedCount}; SuccessCount: {SuccessCount}; FailureCount: {FailureCount}; SensorName: {SensorName}",
+            operation,
+            requestedCount,
+            result.SuccessIds.Count,
+            result.FailedIds.Count,
+            sensorName);
     }
 }
