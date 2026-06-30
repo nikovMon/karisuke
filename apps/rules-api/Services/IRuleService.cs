@@ -6,8 +6,17 @@ namespace ImagingPipeline.Rules.Api.Services;
 
 public interface IRuleService
 {
-    Task<IReadOnlyList<RuleConfigDto>> GetRulesAsync(bool isNameOnly, bool? isActive, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<string>> GetRuleNamesAsync(bool? isActive, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<RuleConfigDto>> GetRulesAsync(
+        bool isNameOnly,
+        bool? isActive,
+        int from,
+        int size,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<string>> GetRuleNamesAsync(
+        bool? isActive,
+        int from,
+        int size,
+        CancellationToken cancellationToken = default);
     Task<RuleConfigDto?> GetByIdAsync(string id, CancellationToken cancellationToken = default);
     Task<RuleConfigDto?> GetByNameAsync(string ruleName, CancellationToken cancellationToken = default);
     Task<RuleOperationResult<RuleConfigDto>> CreateAsync(RuleConfigDto rule, CancellationToken cancellationToken = default);

@@ -8,7 +8,6 @@ namespace ImagingPipeline.Rules.Api.Repositories;
 
 public sealed class ElasticsearchRuleRepository : IRuleRepository
 {
-    private const int DefaultSearchSize = 100;
     private readonly IElasticClient _client;
     private readonly string _indexName;
 
@@ -22,11 +21,13 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
 
     public async Task<IReadOnlyList<RuleConfigDto>> GetAllAsync(
         bool? isActive,
+        int from,
+        int size,
         CancellationToken cancellationToken = default)
     {
         var response = await _client.SearchAsync<RuleConfigDto>(descriptor =>
         {
-            descriptor = descriptor.Index(_indexName).Size(DefaultSearchSize);
+            descriptor = descriptor.Index(_indexName).From(from).Size(size);
             return isActive.HasValue
                 ? descriptor.Query(query => query.Term(rule => rule.IsActive, isActive.Value))
                 : descriptor.Query(query => query.MatchAll());

@@ -93,15 +93,40 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
+    public async Task GetAllSupportsConfigurablePagination()
+    {
+        using var context = CreateContext(
+            ValidRule("rule-1", "one"),
+            ValidRule("rule-2", "two"),
+            ValidRule("rule-3", "three"));
+
+        var rules = await context.Client.GetFromJsonAsync<List<RuleConfigDto>>(
+            "/rules?from=1&size=1",
+            JsonOptions);
+        var names = await context.Client.GetFromJsonAsync<List<string>>(
+            "/rules?getNameOnly=true&from=1&size=2",
+            JsonOptions);
+
+        Assert.Equal(["rule-2"], rules?.Select(rule => rule.Id));
+        Assert.Equal(["two", "three"], names);
+    }
+
+    [Fact]
     public async Task GetAllReturnsBadRequestForInvalidBooleanQueryValues()
     {
         using var context = CreateContext();
 
         var invalidIsActive = await context.Client.GetAsync("/rules?isActive=maybe");
         var invalidNameOnly = await context.Client.GetAsync("/rules?getNameOnly=maybe");
+        var invalidFrom = await context.Client.GetAsync("/rules?from=-1");
+        var invalidSize = await context.Client.GetAsync("/rules?size=0");
+        var excessiveSize = await context.Client.GetAsync("/rules?size=1001");
 
         Assert.Equal(HttpStatusCode.BadRequest, invalidIsActive.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, invalidNameOnly.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidFrom.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, invalidSize.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, excessiveSize.StatusCode);
     }
 
     [Fact]

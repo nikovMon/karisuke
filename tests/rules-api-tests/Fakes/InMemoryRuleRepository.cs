@@ -15,10 +15,14 @@ internal sealed class InMemoryRuleRepository : IRuleRepository
 
     public Task<IReadOnlyList<RuleConfigDto>> GetAllAsync(
         bool? isActive,
+        int from,
+        int size,
         CancellationToken cancellationToken = default)
     {
         IReadOnlyList<RuleConfigDto> rules = _rules.Values
             .Where(rule => !isActive.HasValue || rule.IsActive == isActive.Value)
+            .Skip(from)
+            .Take(size)
             .Select(Clone)
             .ToArray();
 

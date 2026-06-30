@@ -12,13 +12,26 @@ Default local settings:
 {
   "Elasticsearch": {
     "Uri": "http://localhost:9200",
-    "DefaultIndex": "rules"
+    "DefaultIndex": "rules",
+    "Username": "",
+    "Password": ""
   },
   "Rules": {
-    "IndexName": "rules"
+    "IndexName": "rules",
+    "DefaultSearchSize": 100,
+    "MaxSearchSize": 1000
   }
 }
 ```
+
+Set both credentials when Elasticsearch authentication is enabled. Prefer environment variables instead of storing secrets in the file:
+
+```bash
+Elasticsearch__Username=elastic
+Elasticsearch__Password=your-secret
+```
+
+The client sends HTTP Basic Authentication whenever both values are configured. Supplying only one credential fails configuration validation during startup.
 
 Run locally:
 
@@ -176,6 +189,8 @@ Query parameters:
 
 - `getNameOnly`: optional boolean. Defaults to `false`.
 - `isActive`: optional boolean. When set, filters active or inactive rules.
+- `from`: optional zero-based result offset. Defaults to `0`.
+- `size`: optional page size. Defaults to `Rules:DefaultSearchSize` and cannot exceed `Rules:MaxSearchSize`.
 
 Examples:
 
@@ -183,6 +198,7 @@ Examples:
 curl "http://localhost:8080/rules"
 curl "http://localhost:8080/rules?isActive=true"
 curl "http://localhost:8080/rules?getNameOnly=true&isActive=true"
+curl "http://localhost:8080/rules?from=100&size=100"
 ```
 
 Response when `getNameOnly=false`:

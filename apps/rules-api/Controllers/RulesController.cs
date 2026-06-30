@@ -1,8 +1,10 @@
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Common.Dtos.Rules.Requests;
 using ImagingPipeline.Common.Dtos.Rules.Responses;
+using ImagingPipeline.Rules.Api.Configuration;
 using ImagingPipeline.Rules.Api.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace ImagingPipeline.Rules.Api.Controllers;
 
@@ -12,10 +14,14 @@ namespace ImagingPipeline.Rules.Api.Controllers;
 public sealed class RulesController : ControllerBase
 {
     private readonly IRuleService _service;
+    private readonly RulesElasticsearchOptions _options;
 
-    public RulesController(IRuleService service)
+    public RulesController(
+        IRuleService service,
+        IOptions<RulesElasticsearchOptions> options)
     {
         _service = service;
+        _options = options.Value;
     }
 
     // Read routes
@@ -25,15 +31,26 @@ public sealed class RulesController : ControllerBase
     public async Task<IActionResult> GetAll(
         [FromQuery] bool getNameOnly = false,
         [FromQuery] bool? isActive = null,
+        [FromQuery] int from = 0,
+        [FromQuery] int? size = null,
         CancellationToken cancellationToken = default)
     {
+        var searchSize = size ?? _options.DefaultSearchSize;
+        if (from < 0 || searchSize <= 0 || searchSize > _options.MaxSearchSize)
+        {
+            return BadRequest(new
+            {
+                error = $"from must be at least 0 and size must be between 1 and {_options.MaxSearchSize}."
+            });
+        }
+
         if (getNameOnly)
         {
-            var names = await _service.GetRuleNamesAsync(isActive, cancellationToken);
+            var names = await _service.GetRuleNamesAsync(isActive, from, searchSize, cancellationToken);
             return Ok(names);
         }
 
-        var rules = await _service.GetRulesAsync(getNameOnly, isActive, cancellationToken);
+        var rules = await _service.GetRulesAsync(getNameOnly, isActive, from, searchSize, cancellationToken);
         return Ok(rules);
     }
 

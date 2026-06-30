@@ -92,6 +92,7 @@ public sealed class ElasticsearchRuleRepositoryTests
     [Fact]
     public async Task GetAllHydratesIdsFromSearchHits()
     {
+        byte[]? requestBody = null;
         var repository = CreateRepository(
             Encoding.UTF8.GetBytes("""
                 {
@@ -123,12 +124,17 @@ public sealed class ElasticsearchRuleRepositoryTests
                   }
                 }
                 """),
-            200);
+            200,
+            call => requestBody = call.RequestBodyInBytes);
 
-        var rules = await repository.GetAllAsync(isActive: null);
+        var rules = await repository.GetAllAsync(isActive: null, from: 25, size: 50);
 
         var rule = Assert.Single(rules);
         Assert.Equal("elastic-id", rule.Id);
+        Assert.NotNull(requestBody);
+        using var request = JsonDocument.Parse(requestBody);
+        Assert.Equal(25, request.RootElement.GetProperty("from").GetInt32());
+        Assert.Equal(50, request.RootElement.GetProperty("size").GetInt32());
     }
 
     [Fact]

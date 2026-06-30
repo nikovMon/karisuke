@@ -20,16 +20,20 @@ public sealed class RuleService : IRuleService
     public Task<IReadOnlyList<RuleConfigDto>> GetRulesAsync(
         bool isNameOnly,
         bool? isActive,
+        int from,
+        int size,
         CancellationToken cancellationToken = default)
     {
-        return _repository.GetAllAsync(isActive, cancellationToken);
+        return _repository.GetAllAsync(isActive, from, size, cancellationToken);
     }
 
     public async Task<IReadOnlyList<string>> GetRuleNamesAsync(
         bool? isActive,
+        int from,
+        int size,
         CancellationToken cancellationToken = default)
     {
-        var rules = await _repository.GetAllAsync(isActive, cancellationToken);
+        var rules = await _repository.GetAllAsync(isActive, from, size, cancellationToken);
         return rules.Select(rule => rule.RuleName).ToArray();
     }
 
