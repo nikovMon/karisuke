@@ -20,6 +20,7 @@ apps/
   tb-consumer/
   rules-api/
 libs/
+  common-dtos/
   rabbitmq-client/
 tests/
   gateway-tests/
@@ -29,7 +30,7 @@ tests/
   integration-tests/
 ```
 
-`libs/rabbitmq-client` contains shared RabbitMQ client logic. Application DTOs remain owned by each application until there is a concrete contract to share.
+`libs/common-dtos` contains DTO contracts shared by multiple apps. `libs/rabbitmq-client` contains shared RabbitMQ client logic.
 
 ## Install
 
@@ -63,6 +64,7 @@ npx nx build gateway
 npx nx build tb-publisher
 npx nx build tb-consumer
 npx nx build rules-api
+npx nx build common-dtos
 npx nx build rabbitmq-client
 ```
 

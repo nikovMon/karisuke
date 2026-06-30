@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>ImagingPipeline.Common.Dtos</AssemblyName>
+    <PackageId>ImagingPipeline.Common.Dtos</PackageId>
+    <RootNamespace>ImagingPipeline.Common.Dtos</RootNamespace>
+  </PropertyGroup>
+</Project>
