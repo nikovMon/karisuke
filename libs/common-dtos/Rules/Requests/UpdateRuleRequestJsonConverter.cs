@@ -43,33 +43,33 @@ public sealed class UpdateRuleRequestJsonConverter : JsonConverter<UpdateRuleReq
                     request.ProvidedFields.Add(property.Name);
                     request.IsActive = ReadNullableValue<bool>(property.Value, options);
                     break;
-                case "tenants":
+                case "tenantsInfo":
                     request.ProvidedFields.Add(property.Name);
-                    request.Tenants = ReadNullable<List<TenantConfigDto>>(property.Value, options);
+                    request.TenantsInfo = ReadNullable<List<TenantInfo>>(property.Value, options);
                     break;
-                case "minResolution":
+                case "minimumResolution":
                     request.ProvidedFields.Add(property.Name);
-                    request.MinResolution = ReadNullableValue<double>(property.Value, options);
+                    request.MinimumResolution = ReadNullableValue<double>(property.Value, options);
                     break;
-                case "maxResolution":
+                case "maximumResolution":
                     request.ProvidedFields.Add(property.Name);
-                    request.MaxResolution = ReadNullableValue<double>(property.Value, options);
+                    request.MaximumResolution = ReadNullableValue<double>(property.Value, options);
                     break;
                 case "area":
                     request.ProvidedFields.Add(property.Name);
                     request.Area = ReadNullable<string>(property.Value, options);
                     break;
-                case "wkt":
+                case "locationWkt":
                     request.ProvidedFields.Add(property.Name);
-                    request.Wkt = ReadNullable<string>(property.Value, options);
+                    request.LocationWkt = ReadNullable<string>(property.Value, options);
                     break;
-                case "geoJson":
+                case "locationGeoJson":
                     request.ProvidedFields.Add(property.Name);
-                    request.GeoJson = property.Value.Clone();
+                    request.LocationGeoJson = property.Value.Clone();
                     break;
-                case "maxLookBackDay":
+                case "isPhotoOld":
                     request.ProvidedFields.Add(property.Name);
-                    request.MaxLookBackDay = ReadNullableValue<int>(property.Value, options);
+                    request.IsPhotoOld = ReadNullableValue<bool>(property.Value, options);
                     break;
             }
         }
@@ -88,13 +88,13 @@ public sealed class UpdateRuleRequestJsonConverter : JsonConverter<UpdateRuleReq
         WriteIfProvided(writer, options, value, "algorithmName", value.AlgorithmName);
         WriteIfProvided(writer, options, value, "sensors", value.Sensors);
         WriteIfProvided(writer, options, value, "isActive", value.IsActive);
-        WriteIfProvided(writer, options, value, "tenants", value.Tenants);
-        WriteIfProvided(writer, options, value, "minResolution", value.MinResolution);
-        WriteIfProvided(writer, options, value, "maxResolution", value.MaxResolution);
+        WriteIfProvided(writer, options, value, "tenantsInfo", value.TenantsInfo);
+        WriteIfProvided(writer, options, value, "minimumResolution", value.MinimumResolution);
+        WriteIfProvided(writer, options, value, "maximumResolution", value.MaximumResolution);
         WriteIfProvided(writer, options, value, "area", value.Area);
-        WriteIfProvided(writer, options, value, "wkt", value.Wkt);
-        WriteIfProvided(writer, options, value, "geoJson", value.GeoJson);
-        WriteIfProvided(writer, options, value, "maxLookBackDay", value.MaxLookBackDay);
+        WriteIfProvided(writer, options, value, "locationWkt", value.LocationWkt);
+        WriteIfProvided(writer, options, value, "locationGeoJson", value.LocationGeoJson);
+        WriteIfProvided(writer, options, value, "isPhotoOld", value.IsPhotoOld);
         writer.WriteEndObject();
     }
 

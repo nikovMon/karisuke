@@ -16,16 +16,17 @@ public sealed class RuleValidationTests
 
         Assert.Contains("ruleName cannot be empty", errors);
         Assert.Contains("algorithmName is required", errors);
-        Assert.Contains("minResolution must be greater than 0", errors);
-        Assert.Contains("RuleConfig must contain wkt, geoJson, or both", errors);
+        Assert.Contains("minimumResolution must be greater than 0", errors);
+        Assert.Contains("tenantsInfo must contain at least one tenant", errors);
+        Assert.Contains("RuleConfig must contain locationWkt, locationGeoJson, or both", errors);
     }
 
     [Fact]
     public void ValidateRuleAcceptsGeoJsonWhenWktIsMissing()
     {
         var rule = ValidRule();
-        rule.Wkt = null;
-        rule.GeoJson = JsonDocument.Parse("{\"type\":\"Point\",\"coordinates\":[1,1]}").RootElement.Clone();
+        rule.LocationWkt = null;
+        rule.LocationGeoJson = JsonDocument.Parse("{\"type\":\"Point\",\"coordinates\":[1,1]}").RootElement.Clone();
 
         var errors = RuleValidation.ValidateRule(rule);
 
@@ -40,11 +41,11 @@ public sealed class RuleValidationTests
         {
             RuleName = " ",
             AlgorithmName = null,
-            MinResolution = 0
+            MinimumResolution = 0
         };
         invalid.ProvidedFields.Add("ruleName");
         invalid.ProvidedFields.Add("algorithmName");
-        invalid.ProvidedFields.Add("minResolution");
+        invalid.ProvidedFields.Add("minimumResolution");
 
         var emptyErrors = RuleValidation.ValidateUpdate(empty);
         var invalidErrors = RuleValidation.ValidateUpdate(invalid);
@@ -52,7 +53,7 @@ public sealed class RuleValidationTests
         Assert.Equal(["At least one field must be provided."], emptyErrors);
         Assert.Contains("ruleName cannot be empty.", invalidErrors);
         Assert.Contains("algorithmName is required.", invalidErrors);
-        Assert.Contains("minResolution must be greater than 0.", invalidErrors);
+        Assert.Contains("minimumResolution must be greater than 0.", invalidErrors);
     }
 
     [Fact]
@@ -61,15 +62,15 @@ public sealed class RuleValidationTests
         var request = new UpdateRuleRequest
         {
             IsActive = null,
-            MaxResolution = null
+            MaximumResolution = null
         };
         request.ProvidedFields.Add("isActive");
-        request.ProvidedFields.Add("maxResolution");
+        request.ProvidedFields.Add("maximumResolution");
 
         var errors = RuleValidation.ValidateUpdate(request);
 
         Assert.Contains("isActive cannot be null.", errors);
-        Assert.Contains("maxResolution must be greater than 0.", errors);
+        Assert.Contains("maximumResolution must be greater than 0.", errors);
     }
 
     [Fact]
@@ -77,7 +78,36 @@ public sealed class RuleValidationTests
     {
         var rule = new RuleConfigDto();
 
-        Assert.Equal(999, rule.MaxResolution);
+        Assert.Equal(999, rule.MaximumResolution);
+        Assert.True(rule.IsActive);
+    }
+
+    [Fact]
+    public void ValidateRuleRejectsInvalidTenantAndTilingConfiguration()
+    {
+        var rule = ValidRule();
+        rule.TenantsInfo =
+        [
+            new TenantInfo
+            {
+                TenantId = " ",
+                TilingConfigs =
+                [
+                    new TilingConfig
+                    {
+                        TileSizeWidth = 0,
+                        TileSizeHeight = -1,
+                        TileOverlapWidth = -1
+                    }
+                ]
+            }
+        ];
+
+        var errors = RuleValidation.ValidateRule(rule);
+
+        Assert.Contains(errors, error => error.Contains("tenantId cannot be empty", StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.Contains("tile dimensions must be greater than 0", StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.Contains("tile overlaps cannot be negative", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -176,11 +206,28 @@ public sealed class RuleValidationTests
         {
             Id = "rule-1",
             RuleName = "one",
-            AlgorithmName = AlgorithmName.Finder,
+            AlgorithmName = AlgorithmName.FindAir,
             IsActive = true,
-            MinResolution = 0.5,
-            MaxResolution = 1,
+            MinimumResolution = 0.5,
+            MaximumResolution = 1,
             Area = "area",
-            Wkt = "POINT (1 1)"
+            LocationWkt = "POINT (1 1)",
+            TenantsInfo = [ValidTenant()]
+        };
+
+    private static TenantInfo ValidTenant() =>
+        new()
+        {
+            TenantId = "tenant-1",
+            TilingConfigs =
+            [
+                new TilingConfig
+                {
+                    TileSizeWidth = 512,
+                    TileSizeHeight = 512,
+                    TileOverlapWidth = 32,
+                    TileOverlapHeight = 32
+                }
+            ]
         };
 }

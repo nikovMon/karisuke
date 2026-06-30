@@ -174,16 +174,16 @@ public sealed class RulesApiRouteTests
     {
         using var context = CreateContext();
         var rule = ValidRule("rule-1", "geo-json-only");
-        rule.Wkt = null;
-        rule.GeoJson = JsonDocument.Parse("{\"type\":\"Point\",\"coordinates\":[1,1]}").RootElement.Clone();
+        rule.LocationWkt = null;
+        rule.LocationGeoJson = JsonDocument.Parse("{\"type\":\"Point\",\"coordinates\":[1,1]}").RootElement.Clone();
 
         var response = await context.Client.PostAsJsonAsync("/rules", rule, JsonOptions);
         var created = await response.Content.ReadFromJsonAsync<RuleConfigDto>(JsonOptions);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var stored = await context.Repository.GetByIdAsync(created!.Id);
-        Assert.Null(stored?.Wkt);
-        Assert.Equal(JsonValueKind.Object, stored?.GeoJson?.ValueKind);
+        Assert.Null(stored?.LocationWkt);
+        Assert.Equal(JsonValueKind.Object, stored?.LocationGeoJson?.ValueKind);
     }
 
     [Fact]
@@ -224,10 +224,10 @@ public sealed class RulesApiRouteTests
                   "ruleName": "one",
                   "algorithmName": "Unknown",
                   "isActive": true,
-                  "minResolution": 0.5,
-                  "maxResolution": 1,
+                  "minimumResolution": 0.5,
+                  "maximumResolution": 1,
                   "area": "area",
-                  "wkt": "POINT (1 1)"
+                  "locationWkt": "POINT (1 1)"
                 }
                 """));
 
@@ -250,9 +250,9 @@ public sealed class RulesApiRouteTests
     {
         var rule = ValidRule("rule-1", "one");
         rule.Description = "old";
-        rule.MaxLookBackDay = 5;
+        rule.IsPhotoOld = true;
         using var context = CreateContext(rule);
-        var body = Json("{\"description\":null,\"isActive\":false,\"minResolution\":0.8}");
+        var body = Json("{\"description\":null,\"isActive\":false,\"minimumResolution\":0.8}");
 
         var response = await context.Client.PatchAsync("/rules/rule-1", body);
         var updated = await response.Content.ReadFromJsonAsync<RuleConfigDto>(JsonOptions);
@@ -261,8 +261,8 @@ public sealed class RulesApiRouteTests
         Assert.Null(updated?.Description);
         Assert.False(updated?.IsActive);
         Assert.Equal("one", updated?.RuleName);
-        Assert.Equal(5, updated?.MaxLookBackDay);
-        Assert.Equal(0.8, updated?.MinResolution);
+        Assert.True(updated?.IsPhotoOld);
+        Assert.Equal(0.8, updated?.MinimumResolution);
     }
 
     [Fact]
@@ -279,7 +279,20 @@ public sealed class RulesApiRouteTests
                   "sensors": {
                     "thermal": ["th-1", "th-1", ""],
                     "": ["ignored"]
-                  }
+                  },
+                  "tenantsInfo": [
+                    {
+                      "tenantId": "tenant-2",
+                      "tilingConfigs": [
+                        {
+                          "tileSizeWidth": 1024,
+                          "tileSizeHeight": 512,
+                          "tileOverlapWidth": 64,
+                          "tileOverlapHeight": 32
+                        }
+                      ]
+                    }
+                  ]
                 }
                 """));
         var updated = await response.Content.ReadFromJsonAsync<RuleConfigDto>(JsonOptions);
@@ -288,25 +301,28 @@ public sealed class RulesApiRouteTests
         Assert.False(updated?.Sensors.ContainsKey("camera"));
         Assert.Equal(["th-1"], updated?.Sensors["thermal"]);
         Assert.False(updated?.Sensors.ContainsKey(""));
+        var tenant = Assert.Single(updated?.TenantsInfo ?? []);
+        Assert.Equal("tenant-2", tenant.TenantId);
+        Assert.Equal(1024, Assert.Single(tenant.TilingConfigs).TileSizeWidth);
     }
 
     [Fact]
-    public async Task PatchOneCanClearMaxLookBackDayAndOptionalGeometry()
+    public async Task PatchOneCanClearIsPhotoOldAndOptionalGeometry()
     {
         var rule = ValidRule("rule-1", "one");
-        rule.MaxLookBackDay = 7;
-        rule.GeoJson = JsonDocument.Parse("{\"type\":\"Point\",\"coordinates\":[1,1]}").RootElement.Clone();
+        rule.IsPhotoOld = true;
+        rule.LocationGeoJson = JsonDocument.Parse("{\"type\":\"Point\",\"coordinates\":[1,1]}").RootElement.Clone();
         using var context = CreateContext(rule);
 
         var response = await context.Client.PatchAsync(
             "/rules/rule-1",
-            Json("{\"maxLookBackDay\":null,\"wkt\":null}"));
+            Json("{\"isPhotoOld\":null,\"locationWkt\":null}"));
         var updated = await response.Content.ReadFromJsonAsync<RuleConfigDto>(JsonOptions);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Null(updated?.MaxLookBackDay);
-        Assert.Null(updated?.Wkt);
-        Assert.Equal(JsonValueKind.Object, updated?.GeoJson?.ValueKind);
+        Assert.Null(updated?.IsPhotoOld);
+        Assert.Null(updated?.LocationWkt);
+        Assert.Equal(JsonValueKind.Object, updated?.LocationGeoJson?.ValueKind);
     }
 
     [Fact]
@@ -325,7 +341,7 @@ public sealed class RulesApiRouteTests
         using var context = CreateContext(ValidRule("rule-1", "one"));
 
         var blankName = await context.Client.PatchAsync("/rules/rule-1", Json("{\"ruleName\":\" \"}"));
-        var invalidResolution = await context.Client.PatchAsync("/rules/rule-1", Json("{\"minResolution\":0}"));
+        var invalidResolution = await context.Client.PatchAsync("/rules/rule-1", Json("{\"minimumResolution\":0}"));
         var nullAlgorithm = await context.Client.PatchAsync("/rules/rule-1", Json("{\"algorithmName\":null}"));
         var unknownOnly = await context.Client.PatchAsync("/rules/rule-1", Json("{\"unknown\":\"value\"}"));
 
@@ -358,7 +374,7 @@ public sealed class RulesApiRouteTests
 
         var response = await context.Client.PatchAsync(
             "/rules/bulk?ids=rule-1,missing,rule-2",
-            Json("{\"isActive\":false,\"maxLookBackDay\":7}"));
+            Json("{\"isActive\":false,\"isPhotoOld\":true}"));
         var result = await response.Content.ReadFromJsonAsync<BulkOperationResult>(JsonOptions);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -366,7 +382,7 @@ public sealed class RulesApiRouteTests
         var failure = Assert.Single(result?.FailedIds ?? []);
         Assert.Equal("missing", failure.Id);
         Assert.False((await context.Repository.GetByIdAsync("rule-1"))?.IsActive);
-        Assert.Equal(7, (await context.Repository.GetByIdAsync("rule-2"))?.MaxLookBackDay);
+        Assert.True((await context.Repository.GetByIdAsync("rule-2"))?.IsPhotoOld);
     }
 
     [Fact]
@@ -485,11 +501,11 @@ public sealed class RulesApiRouteTests
             Json("""
                 {
                   "ruleName": "invalid-sensors",
-                  "algorithmName": "Finder",
+                  "algorithmName": "FindAir",
                   "sensors": { "camera": null },
-                  "minResolution": 0.5,
-                  "maxResolution": 999,
-                  "wkt": "POINT (1 1)"
+                  "minimumResolution": 0.5,
+                  "maximumResolution": 999,
+                  "locationWkt": "POINT (1 1)"
                 }
                 """));
         var update = await context.Client.PatchAsync(
@@ -674,14 +690,29 @@ public sealed class RulesApiRouteTests
         {
             Id = id,
             RuleName = ruleName,
-            AlgorithmName = AlgorithmName.Finder,
+            AlgorithmName = AlgorithmName.FindAir,
             IsActive = isActive,
-            MinResolution = 0.5,
-            MaxResolution = 1,
+            MinimumResolution = 0.5,
+            MaximumResolution = 1,
             Area = "area",
-            Wkt = "POINT (1 1)",
-            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
-            ModifiedAt = DateTimeOffset.UtcNow.AddMinutes(-5)
+            LocationWkt = "POINT (1 1)",
+            TenantsInfo =
+            [
+                new TenantInfo
+                {
+                    TenantId = "tenant-1",
+                    TilingConfigs =
+                    [
+                        new TilingConfig
+                        {
+                            TileSizeWidth = 512,
+                            TileSizeHeight = 512
+                        }
+                    ]
+                }
+            ],
+            CreationTime = DateTimeOffset.UtcNow.AddMinutes(-5),
+            UpdateTime = DateTimeOffset.UtcNow.AddMinutes(-5)
         };
 
     private sealed record TestContext(

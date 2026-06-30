@@ -68,8 +68,8 @@ public sealed class RuleService : IRuleService
         }
 
         var now = DateTimeOffset.UtcNow;
-        rule.CreatedAt = now;
-        rule.ModifiedAt = now;
+        rule.CreationTime = now;
+        rule.UpdateTime = now;
         NormalizeCollections(rule);
 
         await _repository.SaveAsync(rule, cancellationToken);
@@ -302,7 +302,7 @@ public sealed class RuleService : IRuleService
                 RemoveSensorValues(rule, request);
             }
 
-            rule.ModifiedAt = DateTimeOffset.UtcNow;
+            rule.UpdateTime = DateTimeOffset.UtcNow;
             NormalizeCollections(rule);
             await _repository.SaveAsync(rule, cancellationToken);
             result.SuccessIds.Add(id);
@@ -339,19 +339,19 @@ public sealed class RuleService : IRuleService
             rule.IsActive = request.IsActive.GetValueOrDefault();
         }
 
-        if (request.HasField("tenants"))
+        if (request.HasField("tenantsInfo"))
         {
-            rule.Tenants = request.Tenants ?? [];
+            rule.TenantsInfo = request.TenantsInfo ?? [];
         }
 
-        if (request.HasField("minResolution"))
+        if (request.HasField("minimumResolution"))
         {
-            rule.MinResolution = request.MinResolution.GetValueOrDefault();
+            rule.MinimumResolution = request.MinimumResolution.GetValueOrDefault();
         }
 
-        if (request.HasField("maxResolution"))
+        if (request.HasField("maximumResolution"))
         {
-            rule.MaxResolution = request.MaxResolution ?? 999;
+            rule.MaximumResolution = request.MaximumResolution ?? 999;
         }
 
         if (request.HasField("area"))
@@ -359,22 +359,22 @@ public sealed class RuleService : IRuleService
             rule.Area = request.Area ?? string.Empty;
         }
 
-        if (request.HasField("wkt"))
+        if (request.HasField("locationWkt"))
         {
-            rule.Wkt = request.Wkt;
+            rule.LocationWkt = request.LocationWkt;
         }
 
-        if (request.HasField("geoJson"))
+        if (request.HasField("locationGeoJson"))
         {
-            rule.GeoJson = request.GeoJson;
+            rule.LocationGeoJson = request.LocationGeoJson;
         }
 
-        if (request.HasField("maxLookBackDay"))
+        if (request.HasField("isPhotoOld"))
         {
-            rule.MaxLookBackDay = request.MaxLookBackDay;
+            rule.IsPhotoOld = request.IsPhotoOld;
         }
 
-        rule.ModifiedAt = DateTimeOffset.UtcNow;
+        rule.UpdateTime = DateTimeOffset.UtcNow;
         NormalizeCollections(rule);
     }
 
@@ -421,7 +421,7 @@ public sealed class RuleService : IRuleService
                         .Distinct(StringComparer.Ordinal)
                         .ToList())),
             StringComparer.Ordinal);
-        rule.Tenants ??= [];
+        rule.TenantsInfo ??= [];
     }
 
     private static void AddBulkResult(

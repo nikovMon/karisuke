@@ -40,7 +40,7 @@ public sealed class ElasticsearchQueryJsonBuilderTests
             ],
             TermsFilters =
             [
-                new ElasticsearchTermsFilter { Field = "algorithmName.keyword", Values = ["Finder", "rpn"] }
+                new ElasticsearchTermsFilter { Field = "algorithmName.keyword", Values = ["FindAir", "Rpn"] }
             ],
             SensorFilters =
             [
@@ -54,7 +54,7 @@ public sealed class ElasticsearchQueryJsonBuilderTests
             [
                 new ElasticsearchGeoShapeFilter
                 {
-                    Field = "geoJson",
+                    Field = "locationGeoJson",
                     Shape = shape.RootElement.Clone(),
                     Relation = ElasticsearchGeoShapeRelation.Within
                 }
@@ -71,11 +71,11 @@ public sealed class ElasticsearchQueryJsonBuilderTests
 
         Assert.Equal(4, filters.Length);
         Assert.True(filters[0].GetProperty("term").GetProperty("isActive").GetBoolean());
-        Assert.Equal("Finder", filters[1].GetProperty("terms").GetProperty("algorithmName.keyword")[0].GetString());
+        Assert.Equal("FindAir", filters[1].GetProperty("terms").GetProperty("algorithmName.keyword")[0].GetString());
         Assert.Equal("sensors.camera.keyword", filters[2].GetProperty("terms").EnumerateObject().Single().Name);
         Assert.Equal(2, filters[2].GetProperty("terms").GetProperty("sensors.camera.keyword").GetArrayLength());
-        Assert.Equal("within", filters[3].GetProperty("geo_shape").GetProperty("geoJson").GetProperty("relation").GetString());
-        Assert.Equal("Polygon", filters[3].GetProperty("geo_shape").GetProperty("geoJson").GetProperty("shape").GetProperty("type").GetString());
+        Assert.Equal("within", filters[3].GetProperty("geo_shape").GetProperty("locationGeoJson").GetProperty("relation").GetString());
+        Assert.Equal("Polygon", filters[3].GetProperty("geo_shape").GetProperty("locationGeoJson").GetProperty("shape").GetProperty("type").GetString());
     }
 
     [Fact]
@@ -168,7 +168,7 @@ public sealed class ElasticsearchQueryJsonBuilderTests
             IndexName = "rules",
             GeoShapeFilters =
             [
-                new ElasticsearchGeoShapeFilter { Field = "geoJson", Shape = nullShape.RootElement.Clone() }
+                new ElasticsearchGeoShapeFilter { Field = "locationGeoJson", Shape = nullShape.RootElement.Clone() }
             ]
         }));
     }

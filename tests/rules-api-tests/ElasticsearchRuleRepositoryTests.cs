@@ -48,8 +48,10 @@ public sealed class ElasticsearchRuleRepositoryTests
         using var document = JsonDocument.Parse(requestBody);
         Assert.False(document.RootElement.TryGetProperty("_id", out _));
         Assert.False(document.RootElement.TryGetProperty("id", out _));
-        Assert.Equal("Finder", document.RootElement.GetProperty("algorithmName").GetString());
-        Assert.Equal(999, document.RootElement.GetProperty("maxResolution").GetDouble());
+        Assert.Equal("FindAir", document.RootElement.GetProperty("algorithmName").GetString());
+        Assert.Equal(999, document.RootElement.GetProperty("maximumResolution").GetDouble());
+        Assert.Equal("tenant-1",
+            document.RootElement.GetProperty("tenantsInfo")[0].GetProperty("tenantId").GetString());
     }
 
     [Fact]
@@ -67,14 +69,14 @@ public sealed class ElasticsearchRuleRepositoryTests
                   "found": true,
                   "_source": {
                     "ruleName": "one",
-                    "algorithmName": "Finder",
+                    "algorithmName": "FindAir",
                     "sensors": {},
                     "isActive": true,
-                    "tenants": [],
-                    "minResolution": 0.5,
-                    "maxResolution": 999,
+                    "tenantsInfo": [],
+                    "minimumResolution": 0.5,
+                    "maximumResolution": 999,
                     "area": "qa",
-                    "wkt": "POINT (1 1)"
+                    "locationWkt": "POINT (1 1)"
                   }
                 }
                 """),
@@ -107,14 +109,14 @@ public sealed class ElasticsearchRuleRepositoryTests
                         "_score": 1.0,
                         "_source": {
                           "ruleName": "one",
-                          "algorithmName": "Finder",
+                          "algorithmName": "FindAir",
                           "sensors": {},
                           "isActive": true,
-                          "tenants": [],
-                          "minResolution": 0.5,
-                          "maxResolution": 999,
+                          "tenantsInfo": [],
+                          "minimumResolution": 0.5,
+                          "maximumResolution": 999,
                           "area": "qa",
-                          "wkt": "POINT (1 1)"
+                          "locationWkt": "POINT (1 1)"
                         }
                       }
                     ]
@@ -195,8 +197,23 @@ public sealed class ElasticsearchRuleRepositoryTests
         {
             Id = id,
             RuleName = "one",
-            AlgorithmName = AlgorithmName.Finder,
-            MinResolution = 0.5,
-            Wkt = "POINT (1 1)"
+            AlgorithmName = AlgorithmName.FindAir,
+            MinimumResolution = 0.5,
+            LocationWkt = "POINT (1 1)",
+            TenantsInfo =
+            [
+                new TenantInfo
+                {
+                    TenantId = "tenant-1",
+                    TilingConfigs =
+                    [
+                        new TilingConfig
+                        {
+                            TileSizeWidth = 512,
+                            TileSizeHeight = 512
+                        }
+                    ]
+                }
+            ]
         };
 }

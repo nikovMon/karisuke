@@ -32,14 +32,14 @@ public static class RuleValidation
             errors.Add("algorithmName is required.");
         }
 
-        if (request.HasField("minResolution") && request.MinResolution is null or <= 0)
+        if (request.HasField("minimumResolution") && request.MinimumResolution is null or <= 0)
         {
-            errors.Add("minResolution must be greater than 0.");
+            errors.Add("minimumResolution must be greater than 0.");
         }
 
-        if (request.HasField("maxResolution") && request.MaxResolution is null or <= 0)
+        if (request.HasField("maximumResolution") && request.MaximumResolution is null or <= 0)
         {
-            errors.Add("maxResolution must be greater than 0.");
+            errors.Add("maximumResolution must be greater than 0.");
         }
 
         if (request.HasField("isActive") && request.IsActive is null)

@@ -26,37 +26,37 @@ public sealed class RuleConfigDto : IValidatableObject
     public Dictionary<string, List<string>> Sensors { get; set; } = new(StringComparer.Ordinal);
 
     [JsonPropertyName("isActive")]
-    public bool IsActive { get; set; }
+    public bool IsActive { get; set; } = true;
 
-    [JsonPropertyName("tenants")]
-    public List<TenantConfigDto> Tenants { get; set; } = [];
+    [JsonPropertyName("tenantsInfo")]
+    public List<TenantInfo> TenantsInfo { get; set; } = [];
 
-    [JsonPropertyName("minResolution")]
-    public double MinResolution { get; set; }
+    [JsonPropertyName("minimumResolution")]
+    public double MinimumResolution { get; set; }
 
-    [JsonPropertyName("maxResolution")]
-    public double MaxResolution { get; set; } = 999;
+    [JsonPropertyName("maximumResolution")]
+    public double MaximumResolution { get; set; } = 999;
 
     [JsonPropertyName("area")]
     public string Area { get; set; } = string.Empty;
 
-    [JsonPropertyName("wkt")]
+    [JsonPropertyName("locationWkt")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Wkt { get; set; }
+    public string? LocationWkt { get; set; }
 
-    [JsonPropertyName("geoJson")]
+    [JsonPropertyName("locationGeoJson")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public JsonElement? GeoJson { get; set; }
+    public JsonElement? LocationGeoJson { get; set; }
 
-    [JsonPropertyName("maxLookBackDay")]
+    [JsonPropertyName("isPhotoOld")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? MaxLookBackDay { get; set; }
+    public bool? IsPhotoOld { get; set; }
 
-    [JsonPropertyName("createdAt")]
-    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    [JsonPropertyName("creationTime")]
+    public DateTimeOffset CreationTime { get; set; }
 
-    [JsonPropertyName("modifiedAt")]
-    public DateTimeOffset ModifiedAt { get; set; } = DateTimeOffset.UtcNow;
+    [JsonPropertyName("updateTime")]
+    public DateTimeOffset UpdateTime { get; set; }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
@@ -70,21 +70,25 @@ public sealed class RuleConfigDto : IValidatableObject
             yield return new ValidationResult("algorithmName is required", [nameof(AlgorithmName)]);
         }
 
-        if (MinResolution <= 0)
-        {
-            yield return new ValidationResult("minResolution must be greater than 0", [nameof(MinResolution)]);
-        }
-
-        if (MaxResolution <= 0)
-        {
-            yield return new ValidationResult("maxResolution must be greater than 0", [nameof(MaxResolution)]);
-        }
-
-        if (MaxResolution < MinResolution)
+        if (MinimumResolution <= 0)
         {
             yield return new ValidationResult(
-                "maxResolution must be greater than or equal to minResolution",
-                [nameof(MaxResolution), nameof(MinResolution)]);
+                "minimumResolution must be greater than 0",
+                [nameof(MinimumResolution)]);
+        }
+
+        if (MaximumResolution <= 0)
+        {
+            yield return new ValidationResult(
+                "maximumResolution must be greater than 0",
+                [nameof(MaximumResolution)]);
+        }
+
+        if (MaximumResolution < MinimumResolution)
+        {
+            yield return new ValidationResult(
+                "maximumResolution must be greater than or equal to minimumResolution",
+                [nameof(MaximumResolution), nameof(MinimumResolution)]);
         }
 
         if (Sensors is null)
@@ -96,40 +100,101 @@ public sealed class RuleConfigDto : IValidatableObject
             yield return new ValidationResult("sensor value lists cannot be null", [nameof(Sensors)]);
         }
 
-        var hasWkt = !string.IsNullOrWhiteSpace(Wkt);
-        var hasGeoJson = GeoJson.HasValue &&
-            GeoJson.Value.ValueKind != JsonValueKind.Null &&
-            GeoJson.Value.ValueKind != JsonValueKind.Undefined;
+        if (TenantsInfo is null || TenantsInfo.Count == 0)
+        {
+            yield return new ValidationResult(
+                "tenantsInfo must contain at least one tenant",
+                [nameof(TenantsInfo)]);
+        }
+        else
+        {
+            foreach (var result in ValidateTenants(TenantsInfo))
+            {
+                yield return result;
+            }
+        }
+
+        var hasWkt = !string.IsNullOrWhiteSpace(LocationWkt);
+        var hasGeoJson = LocationGeoJson.HasValue &&
+            LocationGeoJson.Value.ValueKind != JsonValueKind.Null &&
+            LocationGeoJson.Value.ValueKind != JsonValueKind.Undefined;
 
         if (!hasWkt && !hasGeoJson)
         {
             yield return new ValidationResult(
-                "RuleConfig must contain wkt, geoJson, or both",
-                [nameof(Wkt), nameof(GeoJson)]);
+                "RuleConfig must contain locationWkt, locationGeoJson, or both",
+                [nameof(LocationWkt), nameof(LocationGeoJson)]);
+        }
+    }
+
+    private static IEnumerable<ValidationResult> ValidateTenants(IReadOnlyList<TenantInfo> tenantsInfo)
+    {
+        for (var tenantIndex = 0; tenantIndex < tenantsInfo.Count; tenantIndex++)
+        {
+            var tenant = tenantsInfo[tenantIndex];
+            if (tenant is null || string.IsNullOrWhiteSpace(tenant.TenantId))
+            {
+                yield return new ValidationResult(
+                    $"tenantsInfo[{tenantIndex}].tenantId cannot be empty",
+                    [nameof(TenantsInfo)]);
+            }
+
+            if (tenant?.TilingConfigs is null || tenant.TilingConfigs.Count == 0)
+            {
+                yield return new ValidationResult(
+                    $"tenantsInfo[{tenantIndex}].tilingConfigs must contain at least one configuration",
+                    [nameof(TenantsInfo)]);
+                continue;
+            }
+
+            for (var tilingIndex = 0; tilingIndex < tenant.TilingConfigs.Count; tilingIndex++)
+            {
+                var tiling = tenant.TilingConfigs[tilingIndex];
+                if (tiling is null || tiling.TileSizeWidth <= 0 || tiling.TileSizeHeight <= 0)
+                {
+                    yield return new ValidationResult(
+                        $"tenantsInfo[{tenantIndex}].tilingConfigs[{tilingIndex}] tile dimensions must be greater than 0",
+                        [nameof(TenantsInfo)]);
+                }
+
+                if (tiling is not null &&
+                    (tiling.TileOverlapWidth < 0 || tiling.TileOverlapHeight < 0))
+                {
+                    yield return new ValidationResult(
+                        $"tenantsInfo[{tenantIndex}].tilingConfigs[{tilingIndex}] tile overlaps cannot be negative",
+                        [nameof(TenantsInfo)]);
+                }
+            }
         }
     }
 }
 
-public sealed class TenantConfigDto
-{
-    [JsonPropertyName("tenantName")]
-    public string TenantName { get; set; } = string.Empty;
-
-    [JsonPropertyName("tilingConfig")]
-    public TilingConfigDto TilingConfig { get; set; } = new();
-}
-
-public sealed class TilingConfigDto
-{
-    [JsonPropertyName("width")]
-    public int Width { get; set; }
-
-    [JsonPropertyName("length")]
-    public int Length { get; set; }
-}
-
 public enum AlgorithmName
 {
-    Finder,
-    rpn
+    FindAir,
+    Rpn
+}
+
+public sealed class TenantInfo
+{
+    [JsonPropertyName("tenantId")]
+    public string TenantId { get; set; } = string.Empty;
+
+    [JsonPropertyName("tilingConfigs")]
+    public List<TilingConfig> TilingConfigs { get; set; } = [];
+}
+
+public sealed class TilingConfig
+{
+    [JsonPropertyName("tileSizeWidth")]
+    public int TileSizeWidth { get; set; }
+
+    [JsonPropertyName("tileSizeHeight")]
+    public int TileSizeHeight { get; set; }
+
+    [JsonPropertyName("tileOverlapWidth")]
+    public int TileOverlapWidth { get; set; }
+
+    [JsonPropertyName("tileOverlapHeight")]
+    public int TileOverlapHeight { get; set; }
 }

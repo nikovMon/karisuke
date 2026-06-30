@@ -66,7 +66,7 @@ public sealed class ElasticsearchDocumentClientTests
         var results = await client.SearchByGeoShapeAsync<TestRuleDocument>(new ElasticsearchGeoShapeSearchRequest
         {
             IndexName = "rules",
-            Field = "geoJson",
+            Field = "locationGeoJson",
             Shape = shape.RootElement.Clone()
         });
 
