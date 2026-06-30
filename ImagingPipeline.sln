@@ -53,6 +53,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "rabbitmq-client-tests", "ra
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImagingPipeline.RabbitMqClient.Tests", "tests\rabbitmq-client-tests\ImagingPipeline.RabbitMqClient.Tests.csproj", "{CD52AAA6-3A65-4AB8-B250-515F7813BBAA}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "common-dtos", "common-dtos", "{6EA2F6DE-1296-9ABE-1DB3-AAAF767A5FB8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImagingPipeline.Common.Dtos", "libs\common-dtos\ImagingPipeline.Common.Dtos.csproj", "{3D66C24C-603C-4381-A25A-8A006BECFC32}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -195,6 +199,18 @@ Global
 		{CD52AAA6-3A65-4AB8-B250-515F7813BBAA}.Release|x64.Build.0 = Release|Any CPU
 		{CD52AAA6-3A65-4AB8-B250-515F7813BBAA}.Release|x86.ActiveCfg = Release|Any CPU
 		{CD52AAA6-3A65-4AB8-B250-515F7813BBAA}.Release|x86.Build.0 = Release|Any CPU
+		{3D66C24C-603C-4381-A25A-8A006BECFC32}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3D66C24C-603C-4381-A25A-8A006BECFC32}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3D66C24C-603C-4381-A25A-8A006BECFC32}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{3D66C24C-603C-4381-A25A-8A006BECFC32}.Debug|x64.Build.0 = Debug|Any CPU
+		{3D66C24C-603C-4381-A25A-8A006BECFC32}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{3D66C24C-603C-4381-A25A-8A006BECFC32}.Debug|x86.Build.0 = Debug|Any CPU
+		{3D66C24C-603C-4381-A25A-8A006BECFC32}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3D66C24C-603C-4381-A25A-8A006BECFC32}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3D66C24C-603C-4381-A25A-8A006BECFC32}.Release|x64.ActiveCfg = Release|Any CPU
+		{3D66C24C-603C-4381-A25A-8A006BECFC32}.Release|x64.Build.0 = Release|Any CPU
+		{3D66C24C-603C-4381-A25A-8A006BECFC32}.Release|x86.ActiveCfg = Release|Any CPU
+		{3D66C24C-603C-4381-A25A-8A006BECFC32}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -222,5 +238,7 @@ Global
 		{71AF2DF5-2384-4597-9415-8CDB82B00D98} = {A4BAC550-D58B-8619-B999-9F7910577AA8}
 		{8ECA6851-2785-403A-AA1F-443458ED755C} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{CD52AAA6-3A65-4AB8-B250-515F7813BBAA} = {8ECA6851-2785-403A-AA1F-443458ED755C}
+		{6EA2F6DE-1296-9ABE-1DB3-AAAF767A5FB8} = {6C4D298B-81FB-2B6B-5AB6-46205EDDC72C}
+		{3D66C24C-603C-4381-A25A-8A006BECFC32} = {6EA2F6DE-1296-9ABE-1DB3-AAAF767A5FB8}
 	EndGlobalSection
 EndGlobal
