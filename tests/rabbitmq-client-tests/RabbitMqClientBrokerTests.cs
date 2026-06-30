@@ -1,0 +1,372 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using RabbitMQ.Client;
+using System.Text;
+
+namespace ImagingPipeline.RabbitMqClient.Tests;
+
+public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixture>
+{
+    private readonly RabbitMqBrokerFixture _broker;
+
+    public RabbitMqClientBrokerTests(RabbitMqBrokerFixture broker)
+    {
+        _broker = broker;
+    }
+
+    [RabbitMqBrokerFact]
+    public async Task PublishToInputAsyncPublishesPersistentMessageToInputQueue()
+    {
+        var topology = CreateTopology();
+        await using var provider = BuildProvider(topology);
+        var publisher = provider.GetRequiredService<IRabbitMqPublisher>();
+
+        await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8("hello"));
+
+        var message = await WaitForMessageAsync(topology.InputQueue);
+
+        Assert.Equal("hello", message);
+    }
+
+    [RabbitMqBrokerFact]
+    public async Task SuccessfulHandlerOutputIsPublishedToOutputQueue()
+    {
+        var topology = CreateTopology();
+        await using var provider = BuildProvider(topology);
+        var publisher = provider.GetRequiredService<IRabbitMqPublisher>();
+        var consumer = provider.GetRequiredService<IRabbitMqConsumer>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var consumerTask = consumer.ConsumeAsync(new SuccessHandler(), cts.Token);
+        await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8("ok"), cts.Token);
+
+        var output = await WaitForMessageAsync(topology.OutputQueue, cts.Token);
+        await StopConsumerAsync(consumerTask, cts);
+
+        Assert.Equal("OK", output);
+        Assert.Null(await BasicGetAsync(topology.DeadLetterQueue, CancellationToken.None));
+    }
+
+    [RabbitMqBrokerFact]
+    public async Task FailedHandlerIsDeadLetteredByBroker()
+    {
+        var topology = CreateTopology();
+        await using var provider = BuildProvider(topology);
+        var publisher = provider.GetRequiredService<IRabbitMqPublisher>();
+        var consumer = provider.GetRequiredService<IRabbitMqConsumer>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var consumerTask = consumer.ConsumeAsync(new FailureHandler(), cts.Token);
+        await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8("fail"), cts.Token);
+
+        var deadLetter = await WaitForMessageAsync(topology.DeadLetterQueue, cts.Token);
+        await StopConsumerAsync(consumerTask, cts);
+
+        Assert.Equal("fail", deadLetter);
+        Assert.Null(await BasicGetAsync(topology.OutputQueue, CancellationToken.None));
+    }
+
+    [RabbitMqBrokerFact]
+    public async Task HandlerExceptionIsDeadLetteredByBroker()
+    {
+        var topology = CreateTopology();
+        await using var provider = BuildProvider(topology);
+        var publisher = provider.GetRequiredService<IRabbitMqPublisher>();
+        var consumer = provider.GetRequiredService<IRabbitMqConsumer>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var consumerTask = consumer.ConsumeAsync(new ThrowingHandler(), cts.Token);
+        await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8("boom"), cts.Token);
+
+        var deadLetter = await WaitForMessageAsync(topology.DeadLetterQueue, cts.Token);
+        await StopConsumerAsync(consumerTask, cts);
+
+        Assert.Equal("boom", deadLetter);
+        Assert.Null(await BasicGetAsync(topology.OutputQueue, CancellationToken.None));
+    }
+
+    [RabbitMqBrokerFact]
+    public async Task SuccessWithoutOutputBodyOnlyAcknowledgesInputMessage()
+    {
+        var topology = CreateTopology();
+        await using var provider = BuildProvider(topology);
+        var publisher = provider.GetRequiredService<IRabbitMqPublisher>();
+        var consumer = provider.GetRequiredService<IRabbitMqConsumer>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var consumerTask = consumer.ConsumeAsync(new AckOnlyHandler(), cts.Token);
+        await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8("ack"), cts.Token);
+
+        await WaitForQueueMessageCountAsync(topology.InputQueue, 0, cts.Token);
+        await StopConsumerAsync(consumerTask, cts);
+
+        Assert.Null(await BasicGetAsync(topology.OutputQueue, CancellationToken.None));
+        Assert.Null(await BasicGetAsync(topology.DeadLetterQueue, CancellationToken.None));
+    }
+
+    [RabbitMqBrokerFact]
+    public async Task DefaultExchangeConfigurationRoutesFailureDirectlyToDeadLetterQueue()
+    {
+        var topology = CreateTopology(useExchanges: false);
+        await using var provider = BuildProvider(topology);
+        var publisher = provider.GetRequiredService<IRabbitMqPublisher>();
+        var consumer = provider.GetRequiredService<IRabbitMqConsumer>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var consumerTask = consumer.ConsumeAsync(new FailureHandler(), cts.Token);
+        await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8("default-exchange"), cts.Token);
+
+        var deadLetter = await WaitForMessageAsync(topology.DeadLetterQueue, cts.Token);
+        await StopConsumerAsync(consumerTask, cts);
+
+        Assert.Equal("default-exchange", deadLetter);
+    }
+
+    [RabbitMqBrokerFact]
+    public async Task HeaderDeadLetterSettingsOverrideExplicitDeadLetterExchangeAndRoutingKey()
+    {
+        var topology = CreateTopology();
+        var headerDeadLetterExchange = _broker.CreateName("header.dlx");
+        _broker.TrackExchange(headerDeadLetterExchange);
+        var configuration = BuildConfiguration(topology, new Dictionary<string, string?>
+        {
+            ["RabbitMq:DeadLetterRoutingKey"] = "",
+            ["RabbitMq:HeadersArguments:x-dead-letter-exchange"] = headerDeadLetterExchange,
+            ["RabbitMq:HeadersArguments:x-dead-letter-routing-key"] = topology.DeadLetterQueue
+        });
+        await using var provider = BuildProvider(configuration);
+        var publisher = provider.GetRequiredService<IRabbitMqPublisher>();
+        var consumer = provider.GetRequiredService<IRabbitMqConsumer>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var consumerTask = consumer.ConsumeAsync(new FailureHandler(), cts.Token);
+        await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8("header-dlx"), cts.Token);
+
+        var deadLetter = await WaitForMessageAsync(topology.DeadLetterQueue, cts.Token);
+        await StopConsumerAsync(consumerTask, cts);
+
+        Assert.Equal("header-dlx", deadLetter);
+    }
+
+    [RabbitMqBrokerFact]
+    public async Task HeadersArgumentsAreAppliedToInputQueue()
+    {
+        var topology = CreateTopology();
+        var configuration = BuildConfiguration(topology, new Dictionary<string, string?>
+        {
+            ["RabbitMq:HeadersArguments:x-message-ttl"] = "60000"
+        });
+        await using var provider = BuildProvider(configuration);
+        var publisher = provider.GetRequiredService<IRabbitMqPublisher>();
+
+        await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8("ttl"));
+
+        var info = await PassiveQueueDeclareAsync(topology.InputQueue);
+        var message = await WaitForMessageAsync(topology.InputQueue);
+
+        Assert.Equal((uint)1, info.MessageCount);
+        Assert.Equal("ttl", message);
+    }
+
+    private TestTopology CreateTopology(bool useExchanges = true)
+    {
+        var topology = new TestTopology(
+            _broker.CreateName("input"),
+            _broker.CreateName("output"),
+            _broker.CreateName("dlq"),
+            useExchanges ? _broker.CreateName("input.exchange") : string.Empty,
+            useExchanges ? _broker.CreateName("output.exchange") : string.Empty,
+            useExchanges ? _broker.CreateName("dlx") : string.Empty);
+
+        _broker.TrackQueue(topology.InputQueue);
+        _broker.TrackQueue(topology.OutputQueue);
+        _broker.TrackQueue(topology.DeadLetterQueue);
+        _broker.TrackExchange(topology.InputExchange);
+        _broker.TrackExchange(topology.OutputExchange);
+        _broker.TrackExchange(topology.DeadLetterExchange);
+        return topology;
+    }
+
+    private static ServiceProvider BuildProvider(TestTopology topology) =>
+        BuildProvider(BuildConfiguration(topology));
+
+    private static ServiceProvider BuildProvider(IConfiguration configuration) =>
+        new ServiceCollection()
+            .AddSingleton(configuration)
+            .AddLogging(builder => builder.SetMinimumLevel(LogLevel.Warning))
+            .AddRabbitMqClient(configuration)
+            .BuildServiceProvider(validateScopes: true);
+
+    private static IConfiguration BuildConfiguration(
+        TestTopology topology,
+        IReadOnlyDictionary<string, string?>? extra = null)
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["RabbitMq:Host"] = "localhost",
+            ["RabbitMq:Port"] = "5672",
+            ["RabbitMq:Username"] = "admin",
+            ["RabbitMq:Password"] = "admin",
+            ["RabbitMq:VirtualHost"] = "/",
+            ["RabbitMq:InputQueue"] = topology.InputQueue,
+            ["RabbitMq:OutputQueue"] = topology.OutputQueue,
+            ["RabbitMq:DeadLetterQueue"] = topology.DeadLetterQueue,
+            ["RabbitMq:InputExchange"] = topology.InputExchange,
+            ["RabbitMq:OutputExchange"] = topology.OutputExchange,
+            ["RabbitMq:DeadLetterExchange"] = topology.DeadLetterExchange,
+            ["RabbitMq:InputExchangeType"] = "direct",
+            ["RabbitMq:OutputExchangeType"] = "direct",
+            ["RabbitMq:DeadLetterExchangeType"] = "direct",
+            ["RabbitMq:InputRoutingKey"] = topology.InputQueue,
+            ["RabbitMq:OutputRoutingKey"] = topology.OutputQueue,
+            ["RabbitMq:DeadLetterRoutingKey"] = topology.DeadLetterQueue,
+            ["RabbitMq:PrefetchCount"] = "1",
+            ["RabbitMq:PublisherChannelPoolSize"] = "2",
+            ["RabbitMq:ReconnectDelaySeconds"] = "1"
+        };
+
+        if (extra is not null)
+        {
+            foreach (var item in extra)
+            {
+                values[item.Key] = item.Value;
+            }
+        }
+
+        return new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+    }
+
+    private static async Task<string> WaitForMessageAsync(
+        string queue,
+        CancellationToken cancellationToken = default)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+
+        while (!timeout.IsCancellationRequested)
+        {
+            var message = await BasicGetAsync(queue, timeout.Token);
+            if (message is not null)
+            {
+                return message;
+            }
+
+            await Task.Delay(250, timeout.Token);
+        }
+
+        throw new TimeoutException($"Timed out waiting for message in {queue}.");
+    }
+
+    private static async Task WaitForQueueMessageCountAsync(
+        string queue,
+        uint expectedCount,
+        CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+
+        while (!timeout.IsCancellationRequested)
+        {
+            var info = await PassiveQueueDeclareAsync(queue);
+            if (info.MessageCount == expectedCount)
+            {
+                return;
+            }
+
+            await Task.Delay(250, timeout.Token);
+        }
+
+        throw new TimeoutException($"Timed out waiting for {queue} to have {expectedCount} messages.");
+    }
+
+    private static async Task<string?> BasicGetAsync(string queue, CancellationToken cancellationToken)
+    {
+        await using var connection = await CreateConnectionAsync(cancellationToken);
+        await using var channel = await connection.CreateChannelAsync(cancellationToken: cancellationToken);
+        var result = await channel.BasicGetAsync(queue, autoAck: true, cancellationToken);
+        return result is null ? null : Encoding.UTF8.GetString(result.Body.Span);
+    }
+
+    private static async Task<QueueDeclareOk> PassiveQueueDeclareAsync(string queue)
+    {
+        await using var connection = await CreateConnectionAsync(CancellationToken.None);
+        await using var channel = await connection.CreateChannelAsync();
+        return await channel.QueueDeclarePassiveAsync(queue);
+    }
+
+    private static Task<IConnection> CreateConnectionAsync(CancellationToken cancellationToken)
+    {
+        var factory = new ConnectionFactory
+        {
+            HostName = "localhost",
+            Port = 5672,
+            UserName = "admin",
+            Password = "admin",
+            VirtualHost = "/"
+        };
+
+        return factory.CreateConnectionAsync(cancellationToken);
+    }
+
+    private static async Task StopConsumerAsync(Task consumerTask, CancellationTokenSource cts)
+    {
+        await cts.CancelAsync();
+        try
+        {
+            await consumerTask;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private sealed record TestTopology(
+        string InputQueue,
+        string OutputQueue,
+        string DeadLetterQueue,
+        string InputExchange,
+        string OutputExchange,
+        string DeadLetterExchange);
+
+    private sealed class SuccessHandler : IRabbitMqMessageHandler
+    {
+        public Task<RabbitMqMessageProcessingResult> HandleAsync(
+            RabbitMqMessageEnvelope message,
+            CancellationToken cancellationToken = default)
+        {
+            var output = Encoding.UTF8.GetBytes(message.BodyAsUtf8().ToUpperInvariant());
+            return Task.FromResult(RabbitMqMessageProcessingResult.Success(output));
+        }
+    }
+
+    private sealed class AckOnlyHandler : IRabbitMqMessageHandler
+    {
+        public Task<RabbitMqMessageProcessingResult> HandleAsync(
+            RabbitMqMessageEnvelope message,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(new RabbitMqMessageProcessingResult(true, null, null));
+        }
+    }
+
+    private sealed class FailureHandler : IRabbitMqMessageHandler
+    {
+        public Task<RabbitMqMessageProcessingResult> HandleAsync(
+            RabbitMqMessageEnvelope message,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(RabbitMqMessageProcessingResult.Failure("expected failure"));
+        }
+    }
+
+    private sealed class ThrowingHandler : IRabbitMqMessageHandler
+    {
+        public Task<RabbitMqMessageProcessingResult> HandleAsync(
+            RabbitMqMessageEnvelope message,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("expected exception");
+        }
+    }
+}
