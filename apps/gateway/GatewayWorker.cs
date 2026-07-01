@@ -1,6 +1,7 @@
 namespace ImagingPipeline.Gateway;
 
 using ImagingPipeline.Gateway.Errors;
+using ImagingPipeline.Gateway.Contracts.Messages;
 using ImagingPipeline.Gateway.Health;
 using ImagingPipeline.Gateway.Processing.Messages;
 using ImagingPipeline.Gateway.Processing.Rules;

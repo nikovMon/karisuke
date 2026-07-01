@@ -1,5 +1,5 @@
 using ImagingPipeline.Common.Dtos.Rules.Models;
-using ImagingPipeline.Gateway.Processing.Messages;
+using ImagingPipeline.Gateway.Contracts.Messages;
 
 namespace ImagingPipeline.Gateway.Processing.Rules;
 

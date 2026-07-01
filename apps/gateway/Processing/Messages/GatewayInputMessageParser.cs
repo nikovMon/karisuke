@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ImagingPipeline.Gateway.Contracts.Messages;
 using ImagingPipeline.Gateway.Errors;
 using NetTopologySuite.Geometries;
 
@@ -59,7 +60,6 @@ public sealed class GatewayInputMessageParser
         var geometry = ReadGeometry(root);
 
         return new GatewayInputMessage(
-            root,
             imageId,
             sensorName,
             sensorType,
@@ -107,12 +107,3 @@ public sealed class GatewayInputMessageParser
             "gateway.missing_geometry");
     }
 }
-
-public sealed record GatewayInputMessage(
-    JsonElement OriginalPayload,
-    string ImageId,
-    string SensorName,
-    string? SensorType,
-    double Resolution,
-    DateTimeOffset? AcquisitionTime,
-    Geometry Geometry);

@@ -31,11 +31,6 @@ public static class Program
             .Validate(options => options.IsValid(out _), "Gateway configuration is invalid.")
             .ValidateOnStart();
 
-        builder.Services.AddOptions<OutputSettings>()
-            .Bind(builder.Configuration.GetSection(OutputSettings.SectionName))
-            .Validate(options => options.IsValid(out _), "Output configuration is invalid.")
-            .ValidateOnStart();
-
         builder.Services.AddElasticsearchClient(builder.Configuration);
         builder.Services.AddRabbitMqClient(builder.Configuration);
 

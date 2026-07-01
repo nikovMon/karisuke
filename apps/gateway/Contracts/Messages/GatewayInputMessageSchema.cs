@@ -1,4 +1,4 @@
-namespace ImagingPipeline.Gateway.Processing.Messages;
+namespace ImagingPipeline.Gateway.Contracts.Messages;
 
 public static class GatewayInputMessageSchema
 {

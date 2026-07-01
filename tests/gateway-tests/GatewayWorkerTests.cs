@@ -30,16 +30,28 @@ public sealed class GatewayWorkerTests
 
         using var first = JsonDocument.Parse(harness.Publisher.Outputs[0].Body);
         using var second = JsonDocument.Parse(harness.Publisher.Outputs[1].Body);
-        var firstGateway = first.RootElement.GetProperty("gateway");
-        var secondGateway = second.RootElement.GetProperty("gateway");
-
-        Assert.Equal("rule-1", firstGateway.GetProperty("ruleId").GetString());
-        Assert.Equal("FindAir", firstGateway.GetProperty("algorithmName").GetString());
-        Assert.Equal("der", firstGateway.GetProperty("tenantId").GetString());
-        Assert.Single(firstGateway.GetProperty("tilingConfigs").EnumerateArray());
-        Assert.Equal("findair", secondGateway.GetProperty("tenantId").GetString());
-        Assert.Equal(2, secondGateway.GetProperty("tilingConfigs").GetArrayLength());
-        Assert.True(first.RootElement.TryGetProperty("focusedGeometry", out _));
+        Assert.Equal("rule-1", first.RootElement.GetProperty("ruleId").GetString());
+        Assert.Equal("FindAir", first.RootElement.GetProperty("algorithmName").GetString());
+        Assert.Equal("der", first.RootElement.GetProperty("tenantId").GetString());
+        Assert.Single(first.RootElement.GetProperty("tilingConfigs").EnumerateArray());
+        Assert.Equal("image-1", first.RootElement.GetProperty("imageId").GetString());
+        Assert.Equal("2026-06-30T06:54:07+00:00", first.RootElement.GetProperty("photoTime").GetString());
+        Assert.Equal("camera", first.RootElement.GetProperty("sensorType").GetString());
+        Assert.Equal("Polygon", first.RootElement.GetProperty("roiFootprint").GetProperty("type").GetString());
+        Assert.Equal("findair", second.RootElement.GetProperty("tenantId").GetString());
+        Assert.Equal(2, second.RootElement.GetProperty("tilingConfigs").GetArrayLength());
+        Assert.Equal(
+            [
+                "ruleId",
+                "algorithmName",
+                "tenantId",
+                "tilingConfigs",
+                "imageId",
+                "roiFootprint",
+                "photoTime",
+                "sensorType"
+            ],
+            first.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
         Assert.All(harness.Publisher.Outputs, output =>
         {
             Assert.Equal("message-1", output.CorrelationId);
@@ -170,9 +182,7 @@ public sealed class GatewayWorkerTests
             var inputParser = new GatewayInputMessageParser(
                 pathReader,
                 geometry);
-            var outputBuilder = new GatewayOutputMessageBuilder(
-                Options.Create(new OutputSettings()),
-                geometry);
+            var outputBuilder = new GatewayOutputMessageBuilder(geometry);
             var ruleCache = new ActiveRuleCache(
                 new StaticRuleRepository(rules),
                 new RuleValidator(geometry),

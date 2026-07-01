@@ -1,9 +1,8 @@
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Rules.Models;
-using ImagingPipeline.Gateway.Configuration;
-using ImagingPipeline.Gateway.Dtos.Messages;
+using ImagingPipeline.Gateway.Contracts.Messages;
+using ImagingPipeline.Gateway.Errors;
 using ImagingPipeline.Gateway.Processing.Rules;
-using Microsoft.Extensions.Options;
 
 namespace ImagingPipeline.Gateway.Processing.Messages;
 
@@ -11,14 +10,10 @@ public sealed class GatewayOutputMessageBuilder
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    private readonly OutputSettings _settings;
     private readonly GatewayGeometryConverter _geometry;
 
-    public GatewayOutputMessageBuilder(
-        IOptions<OutputSettings> settings,
-        GatewayGeometryConverter geometry)
+    public GatewayOutputMessageBuilder(GatewayGeometryConverter geometry)
     {
-        _settings = settings.Value;
         _geometry = geometry;
     }
 
@@ -47,75 +42,25 @@ public sealed class GatewayOutputMessageBuilder
         RuleMatchResult match,
         TenantInfo tenant)
     {
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
+        if (match.Rule.AlgorithmName is null)
         {
-            writer.WriteStartObject();
-
-            if (_settings.PreserveOriginalMessage)
-            {
-                CopyOriginalProperties(input.OriginalPayload, writer);
-            }
-
-            WriteGatewayMetadata(writer, match.Rule, tenant);
-            WriteFocusedGeometry(writer, match);
-
-            if (!_settings.PreserveOriginalMessage)
-            {
-                writer.WritePropertyName("payload");
-                input.OriginalPayload.WriteTo(writer);
-            }
-
-            writer.WriteEndObject();
+            throw new GatewayValidationException(
+                $"Rule '{match.Rule.Id}' cannot build output without algorithmName.",
+                "gateway.rule_missing_algorithm");
         }
 
-        return stream.ToArray();
-    }
-
-    private void CopyOriginalProperties(JsonElement original, Utf8JsonWriter writer)
-    {
-        foreach (var property in original.EnumerateObject())
+        var payload = new GatewayOutputPayload
         {
-            if (string.Equals(property.Name, _settings.RoutingMetadataPropertyName, StringComparison.Ordinal) ||
-                string.Equals(property.Name, _settings.FocusedGeometryPropertyName, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            property.WriteTo(writer);
-        }
-    }
-
-    private void WriteGatewayMetadata(
-        Utf8JsonWriter writer,
-        RuleConfigDto rule,
-        TenantInfo tenant)
-    {
-        var metadata = new GatewayMatchedOutputDto
-        {
-            RuleId = rule.Id,
-            RuleName = rule.RuleName,
-            Description = rule.Description,
-            AlgorithmName = rule.AlgorithmName?.ToString() ?? string.Empty,
-            Area = rule.Area,
+            RuleId = match.Rule.Id,
+            AlgorithmName = match.Rule.AlgorithmName.Value,
             TenantId = tenant.TenantId,
             TilingConfigs = tenant.TilingConfigs,
-            MatchedAt = DateTimeOffset.UtcNow
+            ImageId = input.ImageId,
+            RoiFootprint = _geometry.WriteGeoJson(match.IntersectionGeometry),
+            PhotoTime = input.AcquisitionTime,
+            SensorType = input.SensorType
         };
 
-        writer.WritePropertyName(_settings.RoutingMetadataPropertyName);
-        JsonSerializer.Serialize(writer, metadata, JsonOptions);
-    }
-
-    private void WriteFocusedGeometry(Utf8JsonWriter writer, RuleMatchResult match)
-    {
-        writer.WritePropertyName(_settings.FocusedGeometryPropertyName);
-        writer.WriteStartObject();
-        writer.WriteString("wkt", _geometry.WriteWkt(match.IntersectionGeometry));
-        writer.WritePropertyName("geoJson");
-        _geometry.WriteGeoJson(match.IntersectionGeometry).WriteTo(writer);
-        writer.WriteEndObject();
+        return JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);
     }
 }
-
-public sealed record GatewayOutputMessage(byte[] Body, string RuleId, string TenantId);
