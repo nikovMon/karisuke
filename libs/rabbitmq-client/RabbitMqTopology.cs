@@ -21,11 +21,11 @@ internal static class RabbitMqTopology
         await DeclareQueueAsync(channel, options.EffectiveDeadLetterQueue, options.DeadLetterQueueHeaders, cancellationToken);
 
         await BindQueueAsync(channel, options.InputQueue, options.EffectiveInputExchange, options.EffectiveInputRoutingKey,
-            cancellationToken);
+            options.InputBindingArguments, cancellationToken);
         await BindQueueAsync(channel, options.OutputQueue, options.OutputExchange, options.EffectiveOutputRoutingKey,
-            cancellationToken);
+            options.OutputBindingArguments, cancellationToken);
         await BindQueueAsync(channel, options.EffectiveDeadLetterQueue, options.EffectiveDeadLetterExchange,
-            options.EffectiveDeadLetterRoutingKey, cancellationToken);
+            options.EffectiveDeadLetterRoutingKey, options.DeadLetterBindingArguments, cancellationToken);
     }
 
     private static Dictionary<string, object?> BuildInputQueueArguments(RabbitMqClientOptions options)
@@ -108,6 +108,7 @@ internal static class RabbitMqTopology
         string queue,
         string exchange,
         string routingKey,
+        IDictionary<string, object?> arguments,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(exchange))
@@ -115,6 +116,11 @@ internal static class RabbitMqTopology
             return Task.CompletedTask;
         }
 
-        return channel.QueueBindAsync(queue, exchange, routingKey, cancellationToken: cancellationToken);
+        return channel.QueueBindAsync(
+            queue,
+            exchange,
+            routingKey,
+            arguments: NormalizeArguments(arguments),
+            cancellationToken: cancellationToken);
     }
 }

@@ -52,6 +52,32 @@ public sealed class ElasticsearchDocumentClientTests
     }
 
     [Fact]
+    public async Task SearchAsyncHydratesIdFromHitMetadataWhenSourceIdIsMissing()
+    {
+        var client = CreateDocumentClient("""
+            {
+              "hits": {
+                "hits": [
+                  {
+                    "_id": "rule-from-hit",
+                    "_source": {
+                      "ruleName": "one"
+                    }
+                  }
+                ]
+              }
+            }
+            """);
+
+        var result = Assert.Single(await client.SearchAsync<TestRuleDocument>(new ElasticsearchSearchRequest
+        {
+            IndexName = "rules"
+        }));
+
+        Assert.Equal("rule-from-hit", result.Id);
+    }
+
+    [Fact]
     public async Task SearchByGeoShapeAsyncReturnsEmptyArrayWhenThereAreNoHits()
     {
         using var shape = JsonDocument.Parse("{\"type\":\"Point\",\"coordinates\":[1,1]}");

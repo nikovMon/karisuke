@@ -28,6 +28,9 @@ public sealed class RabbitMqClientOptions
     public Dictionary<string, object?> InputExchangeHeaders { get; set; } = new(StringComparer.Ordinal);
     public Dictionary<string, object?> OutputExchangeHeaders { get; set; } = new(StringComparer.Ordinal);
     public Dictionary<string, object?> DeadLetterExchangeHeaders { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, object?> InputBindingArguments { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, object?> OutputBindingArguments { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, object?> DeadLetterBindingArguments { get; set; } = new(StringComparer.Ordinal);
     public ushort PrefetchCount { get; set; } = 1;
     public int PublisherChannelPoolSize { get; set; } = 4;
     public int ReconnectDelaySeconds { get; set; } = 5;

@@ -24,8 +24,8 @@ public sealed class GatewayMatchedOutputDto
     [JsonPropertyName("tenantId")]
     public string TenantId { get; set; } = string.Empty;
 
-    [JsonPropertyName("tilingConfig")]
-    public TilingConfig TilingConfig { get; set; } = new();
+    [JsonPropertyName("tilingConfigs")]
+    public List<TilingConfig> TilingConfigs { get; set; } = [];
 
     [JsonPropertyName("matchedAt")]
     public DateTimeOffset MatchedAt { get; set; }

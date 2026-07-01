@@ -12,7 +12,8 @@ public sealed class ElasticsearchClientOptions
     public string Uri { get; set; } = "http://localhost:9200";
     public string? Username { get; set; }
     public string? Password { get; set; }
-    public string DefaultIndex { get; set; } = "rules";
+    public string Index { get; set; } = "rules";
+    public int TimeoutSeconds { get; set; } = 30;
 
     internal bool IsValid(out string error)
     {
@@ -23,9 +24,15 @@ public sealed class ElasticsearchClientOptions
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(DefaultIndex))
+        if (string.IsNullOrWhiteSpace(Index))
         {
-            error = "Elasticsearch DefaultIndex must not be empty.";
+            error = "Elasticsearch Index must not be empty.";
+            return false;
+        }
+
+        if (TimeoutSeconds <= 0)
+        {
+            error = "Elasticsearch TimeoutSeconds must be greater than zero.";
             return false;
         }
 

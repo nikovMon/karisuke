@@ -3,6 +3,10 @@ WORKDIR /src
 
 COPY global.json Directory.Build.props Directory.Packages.props ./
 COPY apps/gateway/ImagingPipeline.Gateway.csproj apps/gateway/
+COPY libs/common-dtos/ImagingPipeline.Common.Dtos.csproj libs/common-dtos/
+COPY libs/elasticsearch-client/ElasticsearchClient.csproj libs/elasticsearch-client/
+COPY libs/geometry-utils/GeometryUtils.csproj libs/geometry-utils/
+COPY libs/rabbitmq-client/RabbitMqClient.csproj libs/rabbitmq-client/
 RUN dotnet restore apps/gateway/ImagingPipeline.Gateway.csproj
 
 COPY . .

@@ -15,7 +15,7 @@ public sealed class ElasticsearchExtensionsTests
         using var provider = BuildProvider(new Dictionary<string, string?>
         {
             ["Elasticsearch:Uri"] = "http://localhost:9200",
-            ["Elasticsearch:DefaultIndex"] = "rules"
+            ["Elasticsearch:Index"] = "rules"
         });
 
         Assert.NotNull(provider.GetRequiredService<IElasticClient>());
@@ -28,17 +28,19 @@ public sealed class ElasticsearchExtensionsTests
         using var provider = BuildProvider(new Dictionary<string, string?>
         {
             ["Elasticsearch:Uri"] = "https://elastic.example",
-            ["Elasticsearch:DefaultIndex"] = "rules",
+            ["Elasticsearch:Index"] = "rules",
             ["Elasticsearch:Username"] = "user",
-            ["Elasticsearch:Password"] = "password"
+            ["Elasticsearch:Password"] = "password",
+            ["Elasticsearch:TimeoutSeconds"] = "45"
         });
 
         var options = provider.GetRequiredService<IOptions<ElasticsearchClientOptions>>().Value;
 
         Assert.Equal("https://elastic.example", options.Uri);
-        Assert.Equal("rules", options.DefaultIndex);
+        Assert.Equal("rules", options.Index);
         Assert.Equal("user", options.Username);
         Assert.Equal("password", options.Password);
+        Assert.Equal(45, options.TimeoutSeconds);
         var clientSettings = (IConnectionConfigurationValues)provider
             .GetRequiredService<IElasticClient>()
             .ConnectionSettings;
@@ -51,7 +53,7 @@ public sealed class ElasticsearchExtensionsTests
         using var provider = BuildProvider(new Dictionary<string, string?>
         {
             ["Elasticsearch:Uri"] = "ftp://localhost:9200",
-            ["Elasticsearch:DefaultIndex"] = "rules"
+            ["Elasticsearch:Index"] = "rules"
         });
 
         Assert.Throws<OptionsValidationException>(() =>
@@ -59,12 +61,12 @@ public sealed class ElasticsearchExtensionsTests
     }
 
     [Fact]
-    public void AddElasticsearchClientRejectsMissingDefaultIndexWhenOptionsAreResolved()
+    public void AddElasticsearchClientRejectsMissingIndexWhenOptionsAreResolved()
     {
         using var provider = BuildProvider(new Dictionary<string, string?>
         {
             ["Elasticsearch:Uri"] = "http://localhost:9200",
-            ["Elasticsearch:DefaultIndex"] = ""
+            ["Elasticsearch:Index"] = ""
         });
 
         Assert.Throws<OptionsValidationException>(() =>
@@ -77,7 +79,7 @@ public sealed class ElasticsearchExtensionsTests
         using var provider = BuildProvider(new Dictionary<string, string?>
         {
             ["Elasticsearch:Uri"] = "http://localhost:9200",
-            ["Elasticsearch:DefaultIndex"] = "rules",
+            ["Elasticsearch:Index"] = "rules",
             ["Elasticsearch:Username"] = "user"
         });
 

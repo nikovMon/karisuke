@@ -267,6 +267,9 @@ internal sealed class ElasticsearchHits<TDocument>
 
 internal sealed class ElasticsearchHit<TDocument>
 {
+    [JsonPropertyName("_id")]
+    public string? Id { get; set; }
+
     [JsonPropertyName("_source")]
     public TDocument? Source { get; set; }
 }
