@@ -22,8 +22,7 @@ public sealed class RuleMatcher
         {
             if (!rule.IsActive ||
                 !MatchesSensor(input, rule) ||
-                !MatchesResolution(input, rule) ||
-                !MatchesLookback(input, rule))
+                !MatchesResolution(input, rule))
             {
                 continue;
             }
@@ -63,21 +62,5 @@ public sealed class RuleMatcher
     }
 
     private static bool MatchesResolution(ValidatedInputMessage input, RuleConfigDto rule) =>
-        input.Resolution >= rule.MinResolution && input.Resolution <= rule.MaxResolution;
-
-    private static bool MatchesLookback(ValidatedInputMessage input, RuleConfigDto rule)
-    {
-        if (!rule.MaxLookBackDay.HasValue)
-        {
-            return true;
-        }
-
-        if (!input.AcquisitionTime.HasValue)
-        {
-            return false;
-        }
-
-        var earliest = DateTimeOffset.UtcNow.AddDays(-rule.MaxLookBackDay.Value);
-        return input.AcquisitionTime.Value.ToUniversalTime() >= earliest;
-    }
+        input.Resolution >= rule.MinimumResolution && input.Resolution <= rule.MaximumResolution;
 }

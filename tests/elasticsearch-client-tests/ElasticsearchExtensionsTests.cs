@@ -1,3 +1,4 @@
+using Elasticsearch.Net;
 using ImagingPipeline.ElasticsearchClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -38,6 +39,10 @@ public sealed class ElasticsearchExtensionsTests
         Assert.Equal("rules", options.DefaultIndex);
         Assert.Equal("user", options.Username);
         Assert.Equal("password", options.Password);
+        var clientSettings = (IConnectionConfigurationValues)provider
+            .GetRequiredService<IElasticClient>()
+            .ConnectionSettings;
+        Assert.Equal("user", clientSettings.BasicAuthenticationCredentials?.Username);
     }
 
     [Fact]

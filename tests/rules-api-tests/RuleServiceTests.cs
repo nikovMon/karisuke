@@ -28,24 +28,24 @@ public sealed class RuleServiceTests
         var repository = new InMemoryRuleRepository();
         var service = CreateService(repository);
         var rule = ValidRule("rule-1", "one");
-        rule.CreatedAt = DateTimeOffset.MinValue;
-        rule.ModifiedAt = DateTimeOffset.MinValue;
+        rule.CreationTime = DateTimeOffset.MinValue;
+        rule.UpdateTime = DateTimeOffset.MinValue;
         rule.Sensors["camera"] = ["cam-1", "cam-1", "", "cam-2"];
         rule.Sensors[" "] = ["ignored"];
 
         var result = await service.CreateAsync(rule);
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
-        Assert.True(Guid.TryParse(result.Value?.Id, out _));
+        Assert.False(string.IsNullOrWhiteSpace(result.Value?.Id));
         Assert.NotEqual("rule-1", result.Value?.Id);
         Assert.Equal(["cam-1", "cam-2"], result.Value?.Sensors["camera"]);
         Assert.False(result.Value?.Sensors.ContainsKey(" "));
-        Assert.True(result.Value?.CreatedAt > DateTimeOffset.MinValue);
-        Assert.True(result.Value?.ModifiedAt > DateTimeOffset.MinValue);
+        Assert.True(result.Value?.CreationTime > DateTimeOffset.MinValue);
+        Assert.True(result.Value?.UpdateTime > DateTimeOffset.MinValue);
     }
 
     [Fact]
-    public async Task CreateAlwaysReplacesClientProvidedIdWithServerUuid()
+    public async Task CreateUsesRepositoryGeneratedIdInsteadOfClientId()
     {
         var repository = new InMemoryRuleRepository();
         var service = CreateService(repository);
@@ -54,10 +54,11 @@ public sealed class RuleServiceTests
         var result = await service.CreateAsync(rule);
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
-        Assert.True(Guid.TryParse(result.Value?.Id, out var generatedId));
-        Assert.NotEqual("client-controlled-id", generatedId.ToString());
+        var generatedId = Assert.IsType<string>(result.Value?.Id);
+        Assert.NotEmpty(generatedId);
+        Assert.NotEqual("client-controlled-id", generatedId);
         Assert.Null(await repository.GetByIdAsync("client-controlled-id"));
-        Assert.NotNull(await repository.GetByIdAsync(generatedId.ToString()));
+        Assert.NotNull(await repository.GetByIdAsync(generatedId));
     }
 
     [Fact]
@@ -78,7 +79,7 @@ public sealed class RuleServiceTests
         Assert.Equal(RuleOperationStatus.Success, result.Status);
         Assert.Equal("old-name", result.Value?.RuleName);
         Assert.Equal("new description", result.Value?.Description);
-        Assert.True(result.Value?.ModifiedAt > original.ModifiedAt);
+        Assert.True(result.Value?.UpdateTime > original.UpdateTime);
     }
 
     [Fact]
@@ -95,18 +96,18 @@ public sealed class RuleServiceTests
         renameToSame.ProvidedFields.Add("ruleName");
         var clearLocation = new UpdateRuleRequest
         {
-            Wkt = null,
-            GeoJson = null
+            LocationWkt = null,
+            LocationGeoJson = null
         };
-        clearLocation.ProvidedFields.Add("wkt");
-        clearLocation.ProvidedFields.Add("geoJson");
+        clearLocation.ProvidedFields.Add("locationWkt");
+        clearLocation.ProvidedFields.Add("locationGeoJson");
 
         var sameNameResult = await service.UpdateAsync("rule-1", renameToSame);
         var invalidResult = await service.UpdateAsync("rule-1", clearLocation);
 
         Assert.Equal(RuleOperationStatus.Success, sameNameResult.Status);
         Assert.Equal(RuleOperationStatus.ValidationFailed, invalidResult.Status);
-        Assert.Contains("wkt, geoJson, or both", invalidResult.Error, StringComparison.Ordinal);
+        Assert.Contains("locationWkt, locationGeoJson, or both", invalidResult.Error, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -116,12 +117,19 @@ public sealed class RuleServiceTests
         var rule = ValidRule("rule-1", "one");
         rule.Description = "old description";
         rule.Sensors["camera"] = ["cam-1"];
-        rule.Tenants =
+        rule.TenantsInfo =
         [
-            new TenantConfigDto
+            new TenantInfo
             {
-                TenantName = "old-tenant",
-                TilingConfig = new TilingConfigDto { Width = 256, Length = 256 }
+                TenantId = "old-tenant",
+                TilingConfigs =
+                [
+                    new TilingConfig
+                    {
+                        TileSizeWidth = 256,
+                        TileSizeHeight = 256
+                    }
+                ]
             }
         ];
         repository.Add(rule);
@@ -133,18 +141,27 @@ public sealed class RuleServiceTests
             {
                 ["thermal"] = ["th-1", "th-1", ""]
             },
-            Tenants =
+            TenantsInfo =
             [
-                new TenantConfigDto
+                new TenantInfo
                 {
-                    TenantName = "new-tenant",
-                    TilingConfig = new TilingConfigDto { Width = 512, Length = 512 }
+                    TenantId = "new-tenant",
+                    TilingConfigs =
+                    [
+                        new TilingConfig
+                        {
+                            TileSizeWidth = 512,
+                            TileSizeHeight = 512,
+                            TileOverlapWidth = 32,
+                            TileOverlapHeight = 32
+                        }
+                    ]
                 }
             ]
         };
         request.ProvidedFields.Add("description");
         request.ProvidedFields.Add("sensors");
-        request.ProvidedFields.Add("tenants");
+        request.ProvidedFields.Add("tenantsInfo");
 
         var result = await service.UpdateAsync("rule-1", request);
 
@@ -152,9 +169,11 @@ public sealed class RuleServiceTests
         Assert.Null(result.Value?.Description);
         Assert.False(result.Value?.Sensors.ContainsKey("camera"));
         Assert.Equal(["th-1"], result.Value?.Sensors["thermal"]);
-        var tenant = Assert.Single(result.Value?.Tenants ?? []);
-        Assert.Equal("new-tenant", tenant.TenantName);
-        Assert.Equal(512, tenant.TilingConfig.Width);
+        var tenant = Assert.Single(result.Value?.TenantsInfo ?? []);
+        Assert.Equal("new-tenant", tenant.TenantId);
+        var tiling = Assert.Single(tenant.TilingConfigs);
+        Assert.Equal(512, tiling.TileSizeWidth);
+        Assert.Equal(32, tiling.TileOverlapWidth);
     }
 
     [Fact]
@@ -312,9 +331,16 @@ public sealed class RuleServiceTests
             SensorName = "camera",
             Values = ["cam-1", "cam-1"]
         });
+        var nullValuesResult = await service.AddSensorsAsync(["rule-1"], new RuleSensorUpdateRequest
+        {
+            SensorName = "camera",
+            Values = null!
+        });
 
         Assert.Equal(RuleOperationStatus.ValidationFailed, result.Status);
         Assert.Contains("unique", result.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(RuleOperationStatus.ValidationFailed, nullValuesResult.Status);
+        Assert.Contains("empty", nullValuesResult.Error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -346,13 +372,28 @@ public sealed class RuleServiceTests
         {
             Id = id,
             RuleName = ruleName,
-            AlgorithmName = AlgorithmName.Finder,
+            AlgorithmName = AlgorithmName.FindAir,
             IsActive = true,
-            MinResolution = 0.5,
-            MaxResolution = 1,
+            MinimumResolution = 0.5,
+            MaximumResolution = 1,
             Area = "area",
-            Wkt = "POINT (1 1)",
-            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
-            ModifiedAt = DateTimeOffset.UtcNow.AddMinutes(-5)
+            LocationWkt = "POINT (1 1)",
+            TenantsInfo =
+            [
+                new TenantInfo
+                {
+                    TenantId = "tenant-1",
+                    TilingConfigs =
+                    [
+                        new TilingConfig
+                        {
+                            TileSizeWidth = 512,
+                            TileSizeHeight = 512
+                        }
+                    ]
+                }
+            ],
+            CreationTime = DateTimeOffset.UtcNow.AddMinutes(-5),
+            UpdateTime = DateTimeOffset.UtcNow.AddMinutes(-5)
         };
 }

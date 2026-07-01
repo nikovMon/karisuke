@@ -37,15 +37,15 @@ public sealed class GeometryExtractor
 
     public Geometry ReadRuleGeometry(RuleConfigDto rule)
     {
-        if (!string.IsNullOrWhiteSpace(rule.Wkt))
+        if (!string.IsNullOrWhiteSpace(rule.LocationWkt))
         {
-            return ReadWkt(rule.Wkt, $"rule '{RuleLabel(rule)}'");
+            return ReadWkt(rule.LocationWkt, $"rule '{RuleLabel(rule)}'");
         }
 
-        if (rule.GeoJson.HasValue &&
-            rule.GeoJson.Value.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
+        if (rule.LocationGeoJson.HasValue &&
+            rule.LocationGeoJson.Value.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
         {
-            return ReadGeoJson(rule.GeoJson.Value, $"rule '{RuleLabel(rule)}'");
+            return ReadGeoJson(rule.LocationGeoJson.Value, $"rule '{RuleLabel(rule)}'");
         }
 
         throw new NonRetryableGatewayException(

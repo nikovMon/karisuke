@@ -7,6 +7,8 @@ internal sealed class ThrowingRuleRepository : IRuleRepository
 {
     public Task<IReadOnlyList<RuleConfigDto>> GetAllAsync(
         bool? isActive,
+        int from,
+        int size,
         CancellationToken cancellationToken = default)
     {
         throw new RuleRepositoryException("Sensitive Elasticsearch failure details.");

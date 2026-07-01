@@ -66,7 +66,7 @@ public sealed class ElasticsearchDocumentClientTests
         var results = await client.SearchByGeoShapeAsync<TestRuleDocument>(new ElasticsearchGeoShapeSearchRequest
         {
             IndexName = "rules",
-            Field = "geoJson",
+            Field = "locationGeoJson",
             Shape = shape.RootElement.Clone()
         });
 
@@ -125,6 +125,23 @@ public sealed class ElasticsearchDocumentClientTests
         var result = await client.GetAsync<TestRuleDocument>("rules", "missing");
 
         Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetAsyncThrowsClientExceptionWhenElasticsearchFails()
+    {
+        var client = CreateDocumentClient("""
+            {
+              "error": {
+                "reason": "Elasticsearch unavailable"
+              }
+            }
+            """, statusCode: 503);
+
+        var exception = await Assert.ThrowsAsync<ElasticsearchClientException>(() =>
+            client.GetAsync<TestRuleDocument>("rules", "rule-1"));
+
+        Assert.Contains("get document 'rule-1'", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

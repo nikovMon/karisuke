@@ -23,9 +23,7 @@ public sealed class InputMessageValidator
         _paths = paths.Value;
     }
 
-    public ValidatedInputMessage Validate(
-        ReadOnlyMemory<byte> body,
-        IReadOnlyList<RuleConfigDto> activeRules)
+    public ValidatedInputMessage Validate(ReadOnlyMemory<byte> body)
     {
         JsonElement root;
         try
@@ -63,7 +61,7 @@ public sealed class InputMessageValidator
             throw new NonRetryableGatewayException("Input resolution is required and must be a positive number.", "gateway.invalid_resolution");
         }
 
-        var acquisitionTime = ReadAcquisitionTime(root, activeRules);
+        var acquisitionTime = ReadAcquisitionTime(root);
         var geometry = ReadGeometry(root);
 
         return new ValidatedInputMessage(
@@ -76,21 +74,11 @@ public sealed class InputMessageValidator
             geometry);
     }
 
-    private DateTimeOffset? ReadAcquisitionTime(
-        JsonElement root,
-        IReadOnlyList<RuleConfigDto> activeRules)
+    private DateTimeOffset? ReadAcquisitionTime(JsonElement root)
     {
-        var hasLookbackRule = activeRules.Any(rule => rule.MaxLookBackDay.HasValue);
         if (!_pathReader.TryRead(root, _paths.AcquisitionTimePath, out var element) ||
             element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
         {
-            if (hasLookbackRule)
-            {
-                throw new NonRetryableGatewayException(
-                    "Input acquisition time is required because at least one active rule has maxLookBackDay.",
-                    "gateway.missing_acquisition_time");
-            }
-
             return null;
         }
 

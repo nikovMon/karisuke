@@ -32,19 +32,24 @@ public static class RuleValidation
             errors.Add("algorithmName is required.");
         }
 
-        if (request.HasField("minResolution") && request.MinResolution is null or <= 0)
+        if (request.HasField("minimumResolution") && request.MinimumResolution is null or <= 0)
         {
-            errors.Add("minResolution must be greater than 0.");
+            errors.Add("minimumResolution must be greater than 0.");
         }
 
-        if (request.HasField("maxResolution") && request.MaxResolution is null or <= 0)
+        if (request.HasField("maximumResolution") && request.MaximumResolution is null or <= 0)
         {
-            errors.Add("maxResolution must be greater than 0.");
+            errors.Add("maximumResolution must be greater than 0.");
         }
 
         if (request.HasField("isActive") && request.IsActive is null)
         {
             errors.Add("isActive cannot be null.");
+        }
+
+        if (request.HasField("sensors"))
+        {
+            AddSensorCollectionErrors(request.Sensors, errors);
         }
 
         return errors;
@@ -59,12 +64,12 @@ public static class RuleValidation
             errors.Add("sensorName cannot be empty.");
         }
 
-        if (request.Values.Count == 0 || request.Values.Any(string.IsNullOrWhiteSpace))
+        if (request.Values is null || request.Values.Count == 0 || request.Values.Any(string.IsNullOrWhiteSpace))
         {
             errors.Add("sensor values cannot be empty.");
         }
-
-        if (request.Values.Count != request.Values.Distinct(StringComparer.Ordinal).Count())
+        if (request.Values is not null &&
+            request.Values.Count != request.Values.Distinct(StringComparer.Ordinal).Count())
         {
             errors.Add("sensor values must be unique.");
         }
@@ -85,5 +90,21 @@ public static class RuleValidation
         }
 
         return [];
+    }
+
+    private static void AddSensorCollectionErrors(
+        IReadOnlyDictionary<string, List<string>>? sensors,
+        ICollection<string> errors)
+    {
+        if (sensors is null)
+        {
+            errors.Add("sensors cannot be null.");
+            return;
+        }
+
+        if (sensors.Any(sensor => sensor.Value is null))
+        {
+            errors.Add("sensor value lists cannot be null.");
+        }
     }
 }

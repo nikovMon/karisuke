@@ -25,26 +25,26 @@ public sealed class UpdateRuleRequest
     [JsonPropertyName("isActive")]
     public bool? IsActive { get; set; }
 
-    [JsonPropertyName("tenants")]
-    public List<TenantConfigDto>? Tenants { get; set; }
+    [JsonPropertyName("tenantsInfo")]
+    public List<TenantInfo>? TenantsInfo { get; set; }
 
-    [JsonPropertyName("minResolution")]
-    public double? MinResolution { get; set; }
+    [JsonPropertyName("minimumResolution")]
+    public double? MinimumResolution { get; set; }
 
-    [JsonPropertyName("maxResolution")]
-    public double? MaxResolution { get; set; }
+    [JsonPropertyName("maximumResolution")]
+    public double? MaximumResolution { get; set; }
 
     [JsonPropertyName("area")]
     public string? Area { get; set; }
 
-    [JsonPropertyName("wkt")]
-    public string? Wkt { get; set; }
+    [JsonPropertyName("locationWkt")]
+    public string? LocationWkt { get; set; }
 
-    [JsonPropertyName("geoJson")]
-    public JsonElement? GeoJson { get; set; }
+    [JsonPropertyName("locationGeoJson")]
+    public JsonElement? LocationGeoJson { get; set; }
 
-    [JsonPropertyName("maxLookBackDay")]
-    public int? MaxLookBackDay { get; set; }
+    [JsonPropertyName("isPhotoOld")]
+    public bool? IsPhotoOld { get; set; }
 
     public bool HasField(string jsonPropertyName) => ProvidedFields.Contains(jsonPropertyName);
 }

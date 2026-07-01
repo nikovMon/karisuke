@@ -42,17 +42,25 @@ public sealed class RuleValidator
     private static void Normalize(RuleConfigDto rule)
     {
         rule.Sensors ??= new Dictionary<string, List<string>>(StringComparer.Ordinal);
-        rule.Tenants ??= [];
+        rule.TenantsInfo ??= [];
 
         foreach (var sensorKey in rule.Sensors.Keys.ToArray())
         {
             rule.Sensors[sensorKey] ??= [];
         }
+
+        foreach (var tenant in rule.TenantsInfo)
+        {
+            if (tenant is not null)
+            {
+                tenant.TilingConfigs ??= [];
+            }
+        }
     }
 
     private static void ValidateTenantConfig(RuleConfigDto rule, List<string> errors)
     {
-        foreach (var tenant in rule.Tenants)
+        foreach (var tenant in rule.TenantsInfo)
         {
             if (tenant is null)
             {
@@ -60,25 +68,34 @@ public sealed class RuleValidator
                 continue;
             }
 
-            if (string.IsNullOrWhiteSpace(tenant.TenantName))
+            if (string.IsNullOrWhiteSpace(tenant.TenantId))
             {
-                errors.Add($"{RuleLabel(rule)}: tenantName cannot be empty");
+                errors.Add($"{RuleLabel(rule)}: tenantId cannot be empty");
             }
 
-            if (tenant.TilingConfig is null)
+            if (tenant.TilingConfigs is null || tenant.TilingConfigs.Count == 0)
             {
-                errors.Add($"{RuleLabel(rule)}: tilingConfig cannot be null");
+                errors.Add($"{RuleLabel(rule)}: tilingConfigs cannot be empty");
                 continue;
             }
 
-            if (tenant.TilingConfig.Width <= 0)
+            foreach (var tiling in tenant.TilingConfigs)
             {
-                errors.Add($"{RuleLabel(rule)}: tilingConfig.width must be greater than 0");
-            }
+                if (tiling is null)
+                {
+                    errors.Add($"{RuleLabel(rule)}: tilingConfig cannot be null");
+                    continue;
+                }
 
-            if (tenant.TilingConfig.Length <= 0)
-            {
-                errors.Add($"{RuleLabel(rule)}: tilingConfig.length must be greater than 0");
+                if (tiling.TileSizeWidth <= 0 || tiling.TileSizeHeight <= 0)
+                {
+                    errors.Add($"{RuleLabel(rule)}: tilingConfig tile dimensions must be greater than 0");
+                }
+
+                if (tiling.TileOverlapWidth < 0 || tiling.TileOverlapHeight < 0)
+                {
+                    errors.Add($"{RuleLabel(rule)}: tilingConfig tile overlaps cannot be negative");
+                }
             }
         }
     }

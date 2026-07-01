@@ -15,10 +15,14 @@ internal sealed class InMemoryRuleRepository : IRuleRepository
 
     public Task<IReadOnlyList<RuleConfigDto>> GetAllAsync(
         bool? isActive,
+        int from,
+        int size,
         CancellationToken cancellationToken = default)
     {
         IReadOnlyList<RuleConfigDto> rules = _rules.Values
             .Where(rule => !isActive.HasValue || rule.IsActive == isActive.Value)
+            .Skip(from)
+            .Take(size)
             .Select(Clone)
             .ToArray();
 
@@ -56,6 +60,11 @@ internal sealed class InMemoryRuleRepository : IRuleRepository
 
     public Task SaveAsync(RuleConfigDto rule, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(rule.Id))
+        {
+            rule.Id = Guid.NewGuid().ToString();
+        }
+
         _rules[rule.Id] = Clone(rule);
         return Task.CompletedTask;
     }
@@ -77,22 +86,24 @@ internal sealed class InMemoryRuleRepository : IRuleRepository
                 item => item.Value.ToList(),
                 StringComparer.Ordinal),
             IsActive = rule.IsActive,
-            Tenants = rule.Tenants.Select(tenant => new TenantConfigDto
+            TenantsInfo = rule.TenantsInfo.Select(tenant => new TenantInfo
             {
-                TenantName = tenant.TenantName,
-                TilingConfig = new TilingConfigDto
+                TenantId = tenant.TenantId,
+                TilingConfigs = tenant.TilingConfigs.Select(tiling => new TilingConfig
                 {
-                    Width = tenant.TilingConfig.Width,
-                    Length = tenant.TilingConfig.Length
-                }
+                    TileSizeWidth = tiling.TileSizeWidth,
+                    TileSizeHeight = tiling.TileSizeHeight,
+                    TileOverlapWidth = tiling.TileOverlapWidth,
+                    TileOverlapHeight = tiling.TileOverlapHeight
+                }).ToList()
             }).ToList(),
-            MinResolution = rule.MinResolution,
-            MaxResolution = rule.MaxResolution,
+            MinimumResolution = rule.MinimumResolution,
+            MaximumResolution = rule.MaximumResolution,
             Area = rule.Area,
-            Wkt = rule.Wkt,
-            GeoJson = rule.GeoJson,
-            MaxLookBackDay = rule.MaxLookBackDay,
-            CreatedAt = rule.CreatedAt,
-            ModifiedAt = rule.ModifiedAt
+            LocationWkt = rule.LocationWkt,
+            LocationGeoJson = rule.LocationGeoJson,
+            IsPhotoOld = rule.IsPhotoOld,
+            CreationTime = rule.CreationTime,
+            UpdateTime = rule.UpdateTime
         };
 }

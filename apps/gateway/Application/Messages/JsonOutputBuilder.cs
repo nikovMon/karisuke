@@ -30,9 +30,12 @@ public sealed class JsonOutputBuilder
 
         foreach (var match in matches)
         {
-            foreach (var tenant in match.Rule.Tenants)
+            foreach (var tenant in match.Rule.TenantsInfo)
             {
-                outputs.Add(BuildOutput(input, match, tenant));
+                foreach (var tilingConfig in tenant.TilingConfigs)
+                {
+                    outputs.Add(BuildOutput(input, match, tenant, tilingConfig));
+                }
             }
         }
 
@@ -42,7 +45,8 @@ public sealed class JsonOutputBuilder
     private byte[] BuildOutput(
         ValidatedInputMessage input,
         RuleMatchResult match,
-        TenantConfigDto tenant)
+        TenantInfo tenant,
+        TilingConfig tilingConfig)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -54,7 +58,7 @@ public sealed class JsonOutputBuilder
                 CopyOriginalProperties(input.OriginalPayload, writer);
             }
 
-            WriteGatewayMetadata(writer, match.Rule, tenant);
+            WriteGatewayMetadata(writer, match.Rule, tenant, tilingConfig);
             WriteFocusedGeometry(writer, match);
 
             if (!_settings.PreserveOriginalMessage)
@@ -86,7 +90,8 @@ public sealed class JsonOutputBuilder
     private void WriteGatewayMetadata(
         Utf8JsonWriter writer,
         RuleConfigDto rule,
-        TenantConfigDto tenant)
+        TenantInfo tenant,
+        TilingConfig tilingConfig)
     {
         var metadata = new GatewayMatchedOutputDto
         {
@@ -95,8 +100,8 @@ public sealed class JsonOutputBuilder
             Description = rule.Description,
             AlgorithmName = rule.AlgorithmName?.ToString() ?? string.Empty,
             Area = rule.Area,
-            TenantName = tenant.TenantName,
-            TilingConfig = tenant.TilingConfig,
+            TenantId = tenant.TenantId,
+            TilingConfig = tilingConfig,
             MatchedAt = DateTimeOffset.UtcNow
         };
 

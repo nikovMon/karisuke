@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Elasticsearch.Net;
 using Nest;
@@ -103,7 +104,7 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
             id,
             descriptor => descriptor.Index(indexName));
 
-        if (!response.Found)
+        if (!response.Found && response.ApiCall?.HttpStatusCode == (int)HttpStatusCode.NotFound)
         {
             return null;
         }

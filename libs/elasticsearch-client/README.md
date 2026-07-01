@@ -65,7 +65,7 @@ var results = await client.SearchAsync<MyDocument>(new ElasticsearchSearchReques
         new ElasticsearchTermsFilter
         {
             Field = "algorithmName.keyword",
-            Values = ["Finder"]
+            Values = ["FindAir"]
         }
     ]
 });
@@ -126,7 +126,7 @@ using var shape = JsonDocument.Parse("""
 var results = await client.SearchByGeoShapeAsync<MyDocument>(new ElasticsearchGeoShapeSearchRequest
 {
     IndexName = "rules",
-    Field = "geoJson",
+    Field = "locationGeoJson",
     Shape = shape.RootElement.Clone(),
     Relation = ElasticsearchGeoShapeRelation.Intersects
 });
@@ -166,7 +166,7 @@ var results = await client.SearchAsync<MyDocument>(new ElasticsearchSearchReques
     [
         new ElasticsearchGeoShapeFilter
         {
-            Field = "geoJson",
+            Field = "locationGeoJson",
             Shape = shape.RootElement.Clone(),
             Relation = ElasticsearchGeoShapeRelation.Intersects
         }

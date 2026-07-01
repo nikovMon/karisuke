@@ -53,7 +53,7 @@ public sealed class Worker : BackgroundService
         try
         {
             var rules = _ruleCache.Current;
-            var input = _inputValidator.Validate(delivery.Body, rules);
+            var input = _inputValidator.Validate(delivery.Body);
             var matches = _ruleMatcher.Match(input, rules);
             var outputs = _outputBuilder.BuildOutputs(input, matches);
             var correlationId = delivery.CorrelationId ?? delivery.MessageId;

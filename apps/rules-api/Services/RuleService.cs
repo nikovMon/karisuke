@@ -20,16 +20,20 @@ public sealed class RuleService : IRuleService
     public Task<IReadOnlyList<RuleConfigDto>> GetRulesAsync(
         bool isNameOnly,
         bool? isActive,
+        int from,
+        int size,
         CancellationToken cancellationToken = default)
     {
-        return _repository.GetAllAsync(isActive, cancellationToken);
+        return _repository.GetAllAsync(isActive, from, size, cancellationToken);
     }
 
     public async Task<IReadOnlyList<string>> GetRuleNamesAsync(
         bool? isActive,
+        int from,
+        int size,
         CancellationToken cancellationToken = default)
     {
-        var rules = await _repository.GetAllAsync(isActive, cancellationToken);
+        var rules = await _repository.GetAllAsync(isActive, from, size, cancellationToken);
         return rules.Select(rule => rule.RuleName).ToArray();
     }
 
@@ -43,7 +47,7 @@ public sealed class RuleService : IRuleService
         RuleConfigDto rule,
         CancellationToken cancellationToken = default)
     {
-        rule.Id = Guid.NewGuid().ToString();
+        rule.Id = string.Empty;
         _logger.LogDebug(
             "Starting rule operation {Operation}. RuleId: {RuleId}; RuleName: {RuleName}",
             "create",
@@ -68,8 +72,8 @@ public sealed class RuleService : IRuleService
         }
 
         var now = DateTimeOffset.UtcNow;
-        rule.CreatedAt = now;
-        rule.ModifiedAt = now;
+        rule.CreationTime = now;
+        rule.UpdateTime = now;
         NormalizeCollections(rule);
 
         await _repository.SaveAsync(rule, cancellationToken);
@@ -217,6 +221,13 @@ public sealed class RuleService : IRuleService
         ChangeRuleActivityRequest request,
         CancellationToken cancellationToken = default)
     {
+        if (!request.IsActive.HasValue)
+        {
+            const string error = "isActive is required.";
+            LogValidationFailure("change_activity", id, [error]);
+            return RuleOperationResult<RuleConfigDto>.ValidationFailed(error);
+        }
+
         _logger.LogDebug(
             "Starting rule operation {Operation}. RuleId: {RuleId}; IsActive: {IsActive}",
             "change_activity",
@@ -225,7 +236,7 @@ public sealed class RuleService : IRuleService
 
         var update = new UpdateRuleRequest
         {
-            IsActive = request.IsActive
+            IsActive = request.IsActive.Value
         };
         update.ProvidedFields.Add("isActive");
         return await UpdateCoreAsync(id, update, "change_activity", cancellationToken);
@@ -259,7 +270,7 @@ public sealed class RuleService : IRuleService
             operation,
             ids.Count,
             request.SensorName,
-            request.Values.Count);
+            request.Values?.Count ?? 0);
 
         var errors = RuleValidation.ValidateIds(ids)
             .Concat(RuleValidation.ValidateSensorRequest(request))
@@ -295,7 +306,7 @@ public sealed class RuleService : IRuleService
                 RemoveSensorValues(rule, request);
             }
 
-            rule.ModifiedAt = DateTimeOffset.UtcNow;
+            rule.UpdateTime = DateTimeOffset.UtcNow;
             NormalizeCollections(rule);
             await _repository.SaveAsync(rule, cancellationToken);
             result.SuccessIds.Add(id);
@@ -332,19 +343,19 @@ public sealed class RuleService : IRuleService
             rule.IsActive = request.IsActive.GetValueOrDefault();
         }
 
-        if (request.HasField("tenants"))
+        if (request.HasField("tenantsInfo"))
         {
-            rule.Tenants = request.Tenants ?? [];
+            rule.TenantsInfo = request.TenantsInfo ?? [];
         }
 
-        if (request.HasField("minResolution"))
+        if (request.HasField("minimumResolution"))
         {
-            rule.MinResolution = request.MinResolution.GetValueOrDefault();
+            rule.MinimumResolution = request.MinimumResolution.GetValueOrDefault();
         }
 
-        if (request.HasField("maxResolution"))
+        if (request.HasField("maximumResolution"))
         {
-            rule.MaxResolution = request.MaxResolution ?? 999;
+            rule.MaximumResolution = request.MaximumResolution ?? 999;
         }
 
         if (request.HasField("area"))
@@ -352,22 +363,22 @@ public sealed class RuleService : IRuleService
             rule.Area = request.Area ?? string.Empty;
         }
 
-        if (request.HasField("wkt"))
+        if (request.HasField("locationWkt"))
         {
-            rule.Wkt = request.Wkt;
+            rule.LocationWkt = request.LocationWkt;
         }
 
-        if (request.HasField("geoJson"))
+        if (request.HasField("locationGeoJson"))
         {
-            rule.GeoJson = request.GeoJson;
+            rule.LocationGeoJson = request.LocationGeoJson;
         }
 
-        if (request.HasField("maxLookBackDay"))
+        if (request.HasField("isPhotoOld"))
         {
-            rule.MaxLookBackDay = request.MaxLookBackDay;
+            rule.IsPhotoOld = request.IsPhotoOld;
         }
 
-        rule.ModifiedAt = DateTimeOffset.UtcNow;
+        rule.UpdateTime = DateTimeOffset.UtcNow;
         NormalizeCollections(rule);
     }
 
@@ -405,13 +416,16 @@ public sealed class RuleService : IRuleService
     private static void NormalizeCollections(RuleConfigDto rule)
     {
         rule.Sensors = new Dictionary<string, List<string>>(
-            rule.Sensors
+            (rule.Sensors ?? new Dictionary<string, List<string>>(StringComparer.Ordinal))
                 .Where(item => !string.IsNullOrWhiteSpace(item.Key))
                 .Select(item => new KeyValuePair<string, List<string>>(
                     item.Key,
-                    item.Value.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.Ordinal).ToList())),
+                    (item.Value ?? [])
+                        .Where(value => !string.IsNullOrWhiteSpace(value))
+                        .Distinct(StringComparer.Ordinal)
+                        .ToList())),
             StringComparer.Ordinal);
-        rule.Tenants ??= [];
+        rule.TenantsInfo ??= [];
     }
 
     private static void AddBulkResult(
