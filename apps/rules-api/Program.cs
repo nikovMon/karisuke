@@ -27,19 +27,29 @@ public sealed partial class Program
             {
                 var logger = context.HttpContext.RequestServices
                     .GetRequiredService<ILogger<Program>>();
-                var fields = context.ModelState
+
+                var invalidFields = context.ModelState
                     .Where(item => item.Value?.Errors.Count > 0)
                     .Select(item => item.Key)
-                    .Take(20)
                     .ToArray();
-                var errorCount = context.ModelState.Values.Sum(value => value.Errors.Count);
+
+                var fieldsToLog = invalidFields
+                    .Take(100)
+                    .ToArray();
+
+                var totalInvalidFieldsCount = invalidFields.Length;
+
+                var totalErrorsCount = context.ModelState.Values
+                    .Sum(value => value.Errors.Count);
 
                 logger.LogWarning(
-                    "Request model validation failed for {RequestMethod} {RequestPath}. ErrorCount: {ErrorCount}; Fields: {ValidationFields}; TraceId: {TraceId}",
+                    "Request model validation failed for {RequestMethod} {RequestPath}. Total invalid fields: {TotalInvalidFieldsCount}. Total errors: {TotalErrorsCount}. Showing first {ShownFieldsCount} fields: {Fields}. TraceId: {TraceId}",
                     context.HttpContext.Request.Method,
                     context.HttpContext.Request.Path.Value,
-                    errorCount,
-                    string.Join(", ", fields),
+                    totalInvalidFieldsCount,
+                    totalErrorsCount,
+                    fieldsToLog.Length,
+                    string.Join(", ", fieldsToLog),
                     context.HttpContext.TraceIdentifier);
 
                 var problemDetailsFactory = context.HttpContext.RequestServices
@@ -65,10 +75,10 @@ public sealed partial class Program
         builder.Services.AddElasticsearchClient(builder.Configuration);
         builder.Services.AddOptions<RulesElasticsearchOptions>()
             .Bind(builder.Configuration.GetSection(RulesElasticsearchOptions.SectionName))
-            .Validate(options => options.IsValid(out _), "Rules Elasticsearch configuration is invalid.")
+            .Validate(options => options.IsValid(out _), "Fail to build Rules ElasticSearch")
             .ValidateOnStart();
-        builder.Services.AddScoped<IRuleRepository, ElasticsearchRuleRepository>();
-        builder.Services.AddScoped<IRuleService, RuleService>();
+        builder.Services.AddSingleton<IRuleRepository, ElasticsearchRuleRepository>();
+        builder.Services.AddSingleton<IRuleService, RuleService>();
         builder.Services.AddSingleton<IElasticsearchHealthProbe, ElasticsearchHealthProbe>();
 
         var app = builder.Build();

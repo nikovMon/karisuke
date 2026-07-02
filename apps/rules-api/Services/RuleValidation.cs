@@ -6,7 +6,7 @@ namespace ImagingPipeline.Rules.Api.Services;
 
 public static class RuleValidation
 {
-    public static IReadOnlyList<string> ValidateRule(RuleConfigDto rule)
+    public static IReadOnlyList<string> ValidateRule(RuleDto rule)
     {
         var results = new List<ValidationResult>();
         Validator.TryValidateObject(rule, new ValidationContext(rule), results, validateAllProperties: true);
@@ -68,6 +68,7 @@ public static class RuleValidation
         {
             errors.Add("sensor values cannot be empty.");
         }
+
         if (request.Values is not null &&
             request.Values.Count != request.Values.Distinct(StringComparer.Ordinal).Count())
         {

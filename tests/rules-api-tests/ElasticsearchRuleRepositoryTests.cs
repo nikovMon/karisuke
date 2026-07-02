@@ -49,7 +49,7 @@ public sealed class ElasticsearchRuleRepositoryTests
         Assert.False(document.RootElement.TryGetProperty("_id", out _));
         Assert.False(document.RootElement.TryGetProperty("id", out _));
         Assert.Equal("FindAir", document.RootElement.GetProperty("algorithmName").GetString());
-        Assert.Equal(999, document.RootElement.GetProperty("maximumResolution").GetDouble());
+        Assert.Equal(1, document.RootElement.GetProperty("maximumResolution").GetDouble());
         Assert.Equal("tenant-1",
             document.RootElement.GetProperty("tenantsInfo")[0].GetProperty("tenantId").GetString());
     }
@@ -138,6 +138,51 @@ public sealed class ElasticsearchRuleRepositoryTests
     }
 
     [Fact]
+    public async Task GetNamesRequestsOnlyRuleNameFromElasticsearch()
+    {
+        byte[]? requestBody = null;
+        var repository = CreateRepository(
+            Encoding.UTF8.GetBytes("""
+                {
+                  "took": 1,
+                  "timed_out": false,
+                  "_shards": { "total": 1, "successful": 1, "skipped": 0, "failed": 0 },
+                  "hits": {
+                    "total": { "value": 1, "relation": "eq" },
+                    "max_score": 1.0,
+                    "hits": [
+                      {
+                        "_index": "rules",
+                        "_type": "_doc",
+                        "_id": "elastic-id",
+                        "_score": 1.0,
+                        "_source": {
+                          "ruleName": "one"
+                        }
+                      }
+                    ]
+                  }
+                }
+                """),
+            200,
+            call => requestBody = call.RequestBodyInBytes);
+
+        var names = await repository.GetNamesAsync(isActive: true, from: 10, size: 20);
+
+        Assert.Equal(["one"], names);
+        Assert.NotNull(requestBody);
+        using var request = JsonDocument.Parse(requestBody);
+        Assert.Equal(10, request.RootElement.GetProperty("from").GetInt32());
+        Assert.Equal(20, request.RootElement.GetProperty("size").GetInt32());
+
+        var sourceFields = request.RootElement
+            .GetProperty("_source")
+            .GetProperty("includes");
+        var sourceField = Assert.Single(sourceFields.EnumerateArray());
+        Assert.Equal("ruleName", sourceField.GetString());
+    }
+
+    [Fact]
     public async Task GetByIdThrowsRepositoryExceptionForDependencyFailure()
     {
         var repository = CreateRepository(
@@ -198,13 +243,14 @@ public sealed class ElasticsearchRuleRepositoryTests
             Options.Create(new RulesElasticsearchOptions { IndexName = "rules" }));
     }
 
-    private static RuleConfigDto ValidRule(string id) =>
+    private static RuleDto ValidRule(string id) =>
         new()
         {
             Id = id,
             RuleName = "one",
             AlgorithmName = AlgorithmName.FindAir,
             MinimumResolution = 0.5,
+            MaximumResolution = 1,
             LocationWkt = "POINT (1 1)",
             TenantsInfo =
             [

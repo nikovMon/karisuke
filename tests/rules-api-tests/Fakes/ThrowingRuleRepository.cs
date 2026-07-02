@@ -5,7 +5,7 @@ namespace ImagingPipeline.Rules.Api.Tests.Fakes;
 
 internal sealed class ThrowingRuleRepository : IRuleRepository
 {
-    public Task<IReadOnlyList<RuleConfigDto>> GetAllAsync(
+    public Task<IReadOnlyList<RuleDto>> GetAllAsync(
         bool? isActive,
         int from,
         int size,
@@ -14,10 +14,19 @@ internal sealed class ThrowingRuleRepository : IRuleRepository
         throw new RuleRepositoryException("Sensitive Elasticsearch failure details.");
     }
 
-    public Task<RuleConfigDto?> GetByIdAsync(string id, CancellationToken cancellationToken = default) =>
+    public Task<IReadOnlyList<string>> GetNamesAsync(
+        bool? isActive,
+        int from,
+        int size,
+        CancellationToken cancellationToken = default)
+    {
+        throw new RuleRepositoryException("Sensitive Elasticsearch failure details.");
+    }
+
+    public Task<RuleDto?> GetByIdAsync(string id, CancellationToken cancellationToken = default) =>
         throw new RuleRepositoryException("Sensitive Elasticsearch failure details.");
 
-    public Task<RuleConfigDto?> GetByNameAsync(string ruleName, CancellationToken cancellationToken = default) =>
+    public Task<RuleDto?> GetByNameAsync(string ruleName, CancellationToken cancellationToken = default) =>
         throw new RuleRepositoryException("Sensitive Elasticsearch failure details.");
 
     public Task<bool> ExistsByNameAsync(
@@ -28,7 +37,7 @@ internal sealed class ThrowingRuleRepository : IRuleRepository
         throw new RuleRepositoryException("Sensitive Elasticsearch failure details.");
     }
 
-    public Task SaveAsync(RuleConfigDto rule, CancellationToken cancellationToken = default) =>
+    public Task SaveAsync(RuleDto rule, CancellationToken cancellationToken = default) =>
         throw new RuleRepositoryException("Sensitive Elasticsearch failure details.");
 
     public Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default) =>

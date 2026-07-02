@@ -5,21 +5,21 @@ namespace ImagingPipeline.Rules.Api.Tests.Fakes;
 
 internal sealed class InMemoryRuleRepository : IRuleRepository
 {
-    private readonly Dictionary<string, RuleConfigDto> _rules = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, RuleDto> _rules = new(StringComparer.Ordinal);
 
-    public IReadOnlyCollection<RuleConfigDto> SavedRules => _rules.Values;
+    public IReadOnlyCollection<RuleDto> SavedRules => _rules.Values;
 
     public void Clear() => _rules.Clear();
 
-    public void Add(RuleConfigDto rule) => _rules[rule.Id] = Clone(rule);
+    public void Add(RuleDto rule) => _rules[rule.Id] = Clone(rule);
 
-    public Task<IReadOnlyList<RuleConfigDto>> GetAllAsync(
+    public Task<IReadOnlyList<RuleDto>> GetAllAsync(
         bool? isActive,
         int from,
         int size,
         CancellationToken cancellationToken = default)
     {
-        IReadOnlyList<RuleConfigDto> rules = _rules.Values
+        IReadOnlyList<RuleDto> rules = _rules.Values
             .Where(rule => !isActive.HasValue || rule.IsActive == isActive.Value)
             .Skip(from)
             .Take(size)
@@ -29,14 +29,30 @@ internal sealed class InMemoryRuleRepository : IRuleRepository
         return Task.FromResult(rules);
     }
 
-    public Task<RuleConfigDto?> GetByIdAsync(
+    public Task<IReadOnlyList<string>> GetNamesAsync(
+        bool? isActive,
+        int from,
+        int size,
+        CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<string> names = _rules.Values
+            .Where(rule => !isActive.HasValue || rule.IsActive == isActive.Value)
+            .Skip(from)
+            .Take(size)
+            .Select(rule => rule.RuleName)
+            .ToArray();
+
+        return Task.FromResult(names);
+    }
+
+    public Task<RuleDto?> GetByIdAsync(
         string id,
         CancellationToken cancellationToken = default)
     {
         return Task.FromResult(_rules.TryGetValue(id, out var rule) ? Clone(rule) : null);
     }
 
-    public Task<RuleConfigDto?> GetByNameAsync(
+    public Task<RuleDto?> GetByNameAsync(
         string ruleName,
         CancellationToken cancellationToken = default)
     {
@@ -58,7 +74,7 @@ internal sealed class InMemoryRuleRepository : IRuleRepository
         return Task.FromResult(exists);
     }
 
-    public Task SaveAsync(RuleConfigDto rule, CancellationToken cancellationToken = default)
+    public Task SaveAsync(RuleDto rule, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(rule.Id))
         {
@@ -74,7 +90,7 @@ internal sealed class InMemoryRuleRepository : IRuleRepository
         return Task.FromResult(_rules.Remove(id));
     }
 
-    private static RuleConfigDto Clone(RuleConfigDto rule) =>
+    private static RuleDto Clone(RuleDto rule) =>
         new()
         {
             Id = rule.Id,

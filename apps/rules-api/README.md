@@ -97,7 +97,7 @@ Required validation:
 Notes:
 
 - The JSON field names for resolution are `minimumResolution` and `maximumResolution`.
-- Client-provided `_id` values are ignored. Rule IDs cannot be changed through update routes.
+- The create request contract excludes `_id`, `creationTime`, and `updateTime`; these values are owned by the server. Rule IDs cannot be changed through update routes.
 - `_id` is returned from Elasticsearch metadata and is not stored inside the document `_source`.
 - `creationTime` and `updateTime` are set by the service when creating a rule.
 - `updateTime` changes whenever a rule is updated or sensor values are mutated.
@@ -282,7 +282,7 @@ Status codes:
 
 Creates a new rule.
 
-Request body: full rule document without `_id`; the API generates the ID.
+Request body: `CreateRuleRequest`, containing only client-controlled rule fields. The contract excludes `_id`, `creationTime`, and `updateTime`.
 
 Example:
 
@@ -318,7 +318,7 @@ curl -X POST "http://localhost:8080/rules" \
   }'
 ```
 
-On success, Elasticsearch generates `_id`, and `creationTime` and `updateTime` are set to the current UTC time. A client-provided `_id` is ignored. Duplicate sensor values are normalized.
+On success, Elasticsearch generates `_id`, and `creationTime` and `updateTime` are set to the current UTC time. Duplicate sensor values are normalized.
 
 Status codes:
 
@@ -416,9 +416,11 @@ Bulk rules:
 
 Status codes:
 
-- `200 OK` with `BulkOperationResult`.
+- `200 OK` when every item succeeds.
+- `207 Multi-Status` when some items succeed and some fail.
 - `400 Bad Request` for missing ids, empty update, malformed JSON, or invalid field values.
 - `409 Conflict` when trying to set one `ruleName` on multiple rules.
+- `422 Unprocessable Entity` when every item fails.
 - `503 Service Unavailable` when Elasticsearch access fails.
 
 ### PATCH /rules/{id}/activity
@@ -506,8 +508,10 @@ After adding `["rgb-side", "rgb-main"]`:
 
 Status codes:
 
-- `200 OK` with `BulkOperationResult`.
+- `200 OK` when every item succeeds.
+- `207 Multi-Status` when some items succeed and some fail.
 - `400 Bad Request` for missing ids, empty `sensorName`, empty values, duplicate request values, malformed JSON, or missing body.
+- `422 Unprocessable Entity` when every item fails.
 - `503 Service Unavailable` when Elasticsearch access fails.
 
 ### PATCH /rules/sensors/remove
@@ -568,8 +572,10 @@ After removing `["rgb-backup"]`:
 
 Status codes:
 
-- `200 OK` with `BulkOperationResult`.
+- `200 OK` when every item succeeds.
+- `207 Multi-Status` when some items succeed and some fail.
 - `400 Bad Request` for missing ids, empty `sensorName`, empty values, duplicate request values, malformed JSON, or missing body.
+- `422 Unprocessable Entity` when every item fails.
 - `503 Service Unavailable` when Elasticsearch access fails.
 
 ### DELETE /rules/{id}

@@ -3,6 +3,8 @@ namespace ImagingPipeline.Common.Dtos.Rules.Responses;
 public enum RuleOperationStatus
 {
     Success,
+    PartialSuccess,
+    AllFailed,
     ValidationFailed,
     NotFound,
     Conflict
@@ -22,6 +24,8 @@ public sealed class RuleOperationResult<T>
     public string? Error { get; }
 
     public static RuleOperationResult<T> Success(T value) => new(RuleOperationStatus.Success, value, null);
+    public static RuleOperationResult<T> PartialSuccess(T value) => new(RuleOperationStatus.PartialSuccess, value, null);
+    public static RuleOperationResult<T> AllFailed(T value) => new(RuleOperationStatus.AllFailed, value, null);
     public static RuleOperationResult<T> ValidationFailed(string error) => new(RuleOperationStatus.ValidationFailed, default, error);
     public static RuleOperationResult<T> NotFound(string error) => new(RuleOperationStatus.NotFound, default, error);
     public static RuleOperationResult<T> Conflict(string error) => new(RuleOperationStatus.Conflict, default, error);
