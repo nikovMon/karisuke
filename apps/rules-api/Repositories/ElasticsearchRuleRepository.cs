@@ -112,14 +112,21 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
         string? excludingId = null,
         CancellationToken cancellationToken = default)
     {
-        var response = await _client.SearchAsync<RuleDto>(descriptor => descriptor
-            .Index(_indexName)
-            .Size(1)
-            .Query(query => query.Term("ruleName.keyword", ruleName)), cancellationToken);
+        var response = await _client.SearchAsync<RuleDto>(descriptor =>
+        {
+            descriptor = descriptor
+                .Index(_indexName)
+                .Size(1);
+
+            return string.IsNullOrWhiteSpace(excludingId)
+                ? descriptor.Query(query => query.Term("ruleName.keyword", ruleName))
+                : descriptor.Query(query => query.Bool(boolean => boolean
+                    .Must(must => must.Term("ruleName.keyword", ruleName))
+                    .MustNot(mustNot => mustNot.Ids(ids => ids.Values(excludingId)))));
+        }, cancellationToken);
 
         EnsureValid(response, $"check duplicate ruleName '{ruleName}'");
-        return response.Hits.Any(hit =>
-            !string.Equals(hit.Id, excludingId, StringComparison.Ordinal));
+        return response.Hits.Count > 0;
     }
 
     public async Task SaveAsync(RuleDto rule, CancellationToken cancellationToken = default)

@@ -183,6 +183,40 @@ public sealed class ElasticsearchRuleRepositoryTests
     }
 
     [Fact]
+    public async Task ExistsByNameExcludesCurrentIdInsideSizeOneQuery()
+    {
+        byte[]? requestBody = null;
+        var repository = CreateRepository(
+            Encoding.UTF8.GetBytes("""
+                {
+                  "took": 1,
+                  "timed_out": false,
+                  "_shards": { "total": 1, "successful": 1, "skipped": 0, "failed": 0 },
+                  "hits": {
+                    "total": { "value": 0, "relation": "eq" },
+                    "max_score": null,
+                    "hits": []
+                  }
+                }
+                """),
+            200,
+            call => requestBody = call.RequestBodyInBytes);
+
+        var exists = await repository.ExistsByNameAsync("one", excludingId: "rule-1");
+
+        Assert.False(exists);
+        Assert.NotNull(requestBody);
+        using var request = JsonDocument.Parse(requestBody);
+        Assert.Equal(1, request.RootElement.GetProperty("size").GetInt32());
+
+        var queryJson = request.RootElement.GetProperty("query").GetRawText();
+        Assert.Contains("\"ruleName.keyword\"", queryJson, StringComparison.Ordinal);
+        Assert.Contains("\"must_not\"", queryJson, StringComparison.Ordinal);
+        Assert.Contains("\"ids\"", queryJson, StringComparison.Ordinal);
+        Assert.Contains("\"rule-1\"", queryJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetByIdThrowsRepositoryExceptionForDependencyFailure()
     {
         var repository = CreateRepository(
