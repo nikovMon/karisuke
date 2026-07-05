@@ -7,4 +7,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\libs\rabbitmq-client\RabbitMqClient.csproj" />
+  </ItemGroup>
 </Project>

@@ -1,15 +1,16 @@
+using ImagingPipeline.RabbitMqClient;
+using ImagingPipeline.TbConsumer.Application;
+
 namespace ImagingPipeline.TbConsumer;
 
-public sealed class Worker : BackgroundService
+public sealed class Worker(
+    IRabbitMqConsumer consumer,
+    TbMessageHandler handler,
+    ILogger<Worker> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        try
-        {
-            await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
-        }
+        logger.LogInformation("tb-consumer starting RabbitMQ consumption");
+        await consumer.ConsumeAsync(handler, stoppingToken);
     }
 }
