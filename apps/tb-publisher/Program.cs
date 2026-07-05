@@ -1,3 +1,9 @@
+using ImagingPipeline.ProjectionMapperClient;
+using ImagingPipeline.RabbitMqClient;
+using ImagingPipeline.TbPublisher.Application;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+
 namespace ImagingPipeline.TbPublisher;
 
 public static class Program
@@ -5,6 +11,13 @@ public static class Program
     public static async Task Main(string[] args)
     {
         var builder = Host.CreateApplicationBuilder(args);
+
+        builder.Services.AddRabbitMqConsumer(builder.Configuration);
+        builder.Services.AddProjectionMapperClient(builder.Configuration);
+
+        builder.Services.AddSingleton<ITbMessageValidator, TbMessageValidator>();
+        builder.Services.AddSingleton<ITilingConfigMapper, TilingConfigMapper>();
+        builder.Services.AddSingleton<IRabbitMqMessageHandler, TbPublisherMessageHandler>();
 
         builder.Services.AddHostedService<Worker>();
 

@@ -53,9 +53,17 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "rabbitmq-client-tests", "ra
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImagingPipeline.RabbitMqClient.Tests", "tests\rabbitmq-client-tests\ImagingPipeline.RabbitMqClient.Tests.csproj", "{CD52AAA6-3A65-4AB8-B250-515F7813BBAA}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "projection-mapper-client-tests", "projection-mapper-client-tests", "{90A56E10-3513-4767-9E1A-911C726716DB}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImagingPipeline.ProjectionMapperClient.Tests", "tests\projection-mapper-client-tests\ImagingPipeline.ProjectionMapperClient.Tests.csproj", "{A7F4E12D-09B6-4143-8D66-F179412D5147}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "common-dtos", "common-dtos", "{6EA2F6DE-1296-9ABE-1DB3-AAAF767A5FB8}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ImagingPipeline.Common.Dtos", "libs\common-dtos\ImagingPipeline.Common.Dtos.csproj", "{3D66C24C-603C-4381-A25A-8A006BECFC32}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "projection-mapper-client", "projection-mapper-client", "{9E1D3318-032D-4DF5-935B-FAA6E3D37374}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProjectionMapperClient", "libs\projection-mapper-client\ProjectionMapperClient.csproj", "{41FF7F62-C153-4811-915D-AD1EBF167689}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -211,6 +219,30 @@ Global
 		{3D66C24C-603C-4381-A25A-8A006BECFC32}.Release|x64.Build.0 = Release|Any CPU
 		{3D66C24C-603C-4381-A25A-8A006BECFC32}.Release|x86.ActiveCfg = Release|Any CPU
 		{3D66C24C-603C-4381-A25A-8A006BECFC32}.Release|x86.Build.0 = Release|Any CPU
+		{41FF7F62-C153-4811-915D-AD1EBF167689}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{41FF7F62-C153-4811-915D-AD1EBF167689}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{41FF7F62-C153-4811-915D-AD1EBF167689}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{41FF7F62-C153-4811-915D-AD1EBF167689}.Debug|x64.Build.0 = Debug|Any CPU
+		{41FF7F62-C153-4811-915D-AD1EBF167689}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{41FF7F62-C153-4811-915D-AD1EBF167689}.Debug|x86.Build.0 = Debug|Any CPU
+		{41FF7F62-C153-4811-915D-AD1EBF167689}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{41FF7F62-C153-4811-915D-AD1EBF167689}.Release|Any CPU.Build.0 = Release|Any CPU
+		{41FF7F62-C153-4811-915D-AD1EBF167689}.Release|x64.ActiveCfg = Release|Any CPU
+		{41FF7F62-C153-4811-915D-AD1EBF167689}.Release|x64.Build.0 = Release|Any CPU
+		{41FF7F62-C153-4811-915D-AD1EBF167689}.Release|x86.ActiveCfg = Release|Any CPU
+		{41FF7F62-C153-4811-915D-AD1EBF167689}.Release|x86.Build.0 = Release|Any CPU
+		{A7F4E12D-09B6-4143-8D66-F179412D5147}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A7F4E12D-09B6-4143-8D66-F179412D5147}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A7F4E12D-09B6-4143-8D66-F179412D5147}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{A7F4E12D-09B6-4143-8D66-F179412D5147}.Debug|x64.Build.0 = Debug|Any CPU
+		{A7F4E12D-09B6-4143-8D66-F179412D5147}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{A7F4E12D-09B6-4143-8D66-F179412D5147}.Debug|x86.Build.0 = Debug|Any CPU
+		{A7F4E12D-09B6-4143-8D66-F179412D5147}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A7F4E12D-09B6-4143-8D66-F179412D5147}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A7F4E12D-09B6-4143-8D66-F179412D5147}.Release|x64.ActiveCfg = Release|Any CPU
+		{A7F4E12D-09B6-4143-8D66-F179412D5147}.Release|x64.Build.0 = Release|Any CPU
+		{A7F4E12D-09B6-4143-8D66-F179412D5147}.Release|x86.ActiveCfg = Release|Any CPU
+		{A7F4E12D-09B6-4143-8D66-F179412D5147}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -240,5 +272,9 @@ Global
 		{CD52AAA6-3A65-4AB8-B250-515F7813BBAA} = {8ECA6851-2785-403A-AA1F-443458ED755C}
 		{6EA2F6DE-1296-9ABE-1DB3-AAAF767A5FB8} = {6C4D298B-81FB-2B6B-5AB6-46205EDDC72C}
 		{3D66C24C-603C-4381-A25A-8A006BECFC32} = {6EA2F6DE-1296-9ABE-1DB3-AAAF767A5FB8}
+		{9E1D3318-032D-4DF5-935B-FAA6E3D37374} = {6C4D298B-81FB-2B6B-5AB6-46205EDDC72C}
+		{41FF7F62-C153-4811-915D-AD1EBF167689} = {9E1D3318-032D-4DF5-935B-FAA6E3D37374}
+		{90A56E10-3513-4767-9E1A-911C726716DB} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{A7F4E12D-09B6-4143-8D66-F179412D5147} = {90A56E10-3513-4767-9E1A-911C726716DB}
 	EndGlobalSection
 EndGlobal
