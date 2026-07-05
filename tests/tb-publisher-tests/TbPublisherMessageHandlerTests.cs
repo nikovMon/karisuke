@@ -14,18 +14,19 @@ public sealed class TbPublisherMessageHandlerTests
     private static readonly byte[] ValidBody = Encoding.UTF8.GetBytes("""
     {
       "ruleId": "rule-1",
-      "algorithmName": "Flare",
+      "algorithmName": "FindAir",
       "tenantId": "tenant-1",
       "imageId": "image-1",
-      "roiFootprint": [[35.98, 34.15]],
+      "roiFootprint": { "type": "Point", "coordinates": [35.98, 34.15] },
       "tilingConfigs": [
-        { "tiling_size_width": 512, "tiling_size_height": 512, "tile_overlap_width": 32, "tile_overlap_height": 32 },
-        { "tiling_size_width": 256, "tiling_size_height": 256, "tile_overlap_width": 16, "tile_overlap_height": 16 }
+        { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 32, "tileOverlapHeight": 32 },
+        { "tileSizeWidth": 256, "tileSizeHeight": 256, "tileOverlapWidth": 16, "tileOverlapHeight": 16 }
       ]
     }
     """);
 
-    private static readonly IReadOnlyList<IReadOnlyList<double>> Coordinates = [[1, 2], [3, 4]];
+    private static readonly IReadOnlyList<IReadOnlyList<double>> Coordinates =
+        [[0, 0], [1, 0], [1, 1], [0, 1]];
 
     [Fact]
     public async Task HandleAsyncPublishesOneMessagePerTilingConfig()
@@ -41,13 +42,16 @@ public sealed class TbPublisherMessageHandlerTests
         Assert.Equal(2, publisher.PublishedToOutput.Count);
 
         var outputs = publisher.PublishedToOutput
-            .Select(envelope => JsonSerializer.Deserialize<TilingConfigIngestMessageDto>(
+            .Select(envelope => JsonSerializer.Deserialize<TbPublisherOutputMessageDto>(
                 envelope.Body, new JsonSerializerOptions(JsonSerializerDefaults.Web))!)
             .ToList();
-        Assert.Equal("tenant-1", outputs[0].TenantId);
-        Assert.Equal("image-1", outputs[0].ImageId);
-        Assert.Equal(512, outputs[0].TilingConfig.TileSizeWidth);
-        Assert.Equal(256, outputs[1].TilingConfig.TileSizeWidth);
+        Assert.Equal("tenant-1", outputs[0].MissionMetadata.TenantId);
+        Assert.Equal("image-1", outputs[0].MissionMetadata.Overlay.ImageId);
+        Assert.Equal(512, outputs[0].ModelMetadata.TbCropSizeX);
+        Assert.Equal(256, outputs[1].ModelMetadata.TbCropSizeX);
+        Assert.Equal(outputs[0].MissionMetadata.MissionId, outputs[1].MissionMetadata.MissionId);
+        Assert.NotEqual(outputs[0].TaskId, outputs[1].TaskId);
+        Assert.StartsWith("POLYGON", outputs[0].FocusedPxWkt);
         Assert.Equal("image-1", projectionClient.LastOverlayId);
     }
 
@@ -82,12 +86,12 @@ public sealed class TbPublisherMessageHandlerTests
         var invalidTilingBody = Encoding.UTF8.GetBytes("""
         {
           "ruleId": "rule-1",
-          "algorithmName": "Flare",
+          "algorithmName": "FindAir",
           "tenantId": "tenant-1",
           "imageId": "image-1",
-          "roiFootprint": [[35.98, 34.15]],
+          "roiFootprint": { "type": "Point", "coordinates": [35.98, 34.15] },
           "tilingConfigs": [
-            { "tiling_size_width": 512, "tiling_size_height": 512, "tile_overlap_width": 512, "tile_overlap_height": 0 }
+            { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 512, "tileOverlapHeight": 0 }
           ]
         }
         """);

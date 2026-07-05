@@ -1,13 +1,14 @@
+using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.TbPublisher.Domain;
 
 namespace ImagingPipeline.TbPublisher.Tests;
 
-public sealed class TilingConfigParametersTests
+public sealed class TilingConfigValidatorTests
 {
     [Fact]
     public void IsValidReturnsTrueForPositiveSizesAndSmallerOverlap()
     {
-        var parameters = new TilingConfigParameters
+        var config = new TilingConfig
         {
             TileSizeWidth = 512,
             TileSizeHeight = 512,
@@ -15,7 +16,7 @@ public sealed class TilingConfigParametersTests
             TileOverlapHeight = 32
         };
 
-        Assert.True(parameters.IsValid(out var error));
+        Assert.True(TilingConfigValidator.IsValid(config, out var error));
         Assert.Empty(error);
     }
 
@@ -25,9 +26,9 @@ public sealed class TilingConfigParametersTests
     [InlineData(-1, 512)]
     public void IsValidReturnsFalseWhenTileSizeIsNotPositive(int width, int height)
     {
-        var parameters = new TilingConfigParameters { TileSizeWidth = width, TileSizeHeight = height };
+        var config = new TilingConfig { TileSizeWidth = width, TileSizeHeight = height };
 
-        Assert.False(parameters.IsValid(out var error));
+        Assert.False(TilingConfigValidator.IsValid(config, out var error));
         Assert.NotEmpty(error);
     }
 
@@ -36,7 +37,7 @@ public sealed class TilingConfigParametersTests
     [InlineData(0, -1)]
     public void IsValidReturnsFalseWhenOverlapIsNegative(int overlapWidth, int overlapHeight)
     {
-        var parameters = new TilingConfigParameters
+        var config = new TilingConfig
         {
             TileSizeWidth = 512,
             TileSizeHeight = 512,
@@ -44,14 +45,14 @@ public sealed class TilingConfigParametersTests
             TileOverlapHeight = overlapHeight
         };
 
-        Assert.False(parameters.IsValid(out var error));
+        Assert.False(TilingConfigValidator.IsValid(config, out var error));
         Assert.NotEmpty(error);
     }
 
     [Fact]
     public void IsValidReturnsFalseWhenOverlapIsNotSmallerThanTileSize()
     {
-        var parameters = new TilingConfigParameters
+        var config = new TilingConfig
         {
             TileSizeWidth = 512,
             TileSizeHeight = 512,
@@ -59,7 +60,7 @@ public sealed class TilingConfigParametersTests
             TileOverlapHeight = 0
         };
 
-        Assert.False(parameters.IsValid(out var error));
+        Assert.False(TilingConfigValidator.IsValid(config, out var error));
         Assert.NotEmpty(error);
     }
 }

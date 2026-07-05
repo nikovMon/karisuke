@@ -1,4 +1,3 @@
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace ImagingPipeline.ProjectionMapperClient;
@@ -6,5 +5,5 @@ namespace ImagingPipeline.ProjectionMapperClient;
 public sealed class ProjectionMapperRequestDto
 {
     [JsonPropertyName("groundPoints")]
-    public JsonElement GroundPoints { get; set; }
+    public IReadOnlyList<IReadOnlyList<double>> GroundPoints { get; set; } = [];
 }

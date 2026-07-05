@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.TbPublisher.Domain;
 
 namespace ImagingPipeline.TbPublisher.Dtos.Inbound;
@@ -18,7 +19,7 @@ public sealed class TbMessageDto : IValidatableObject
     public string TenantId { get; init; } = string.Empty;
 
     [JsonPropertyName("tilingConfigs")]
-    public IReadOnlyList<TilingConfigParameters> TilingConfigs { get; init; } = [];
+    public IReadOnlyList<TilingConfig> TilingConfigs { get; init; } = [];
 
     [JsonPropertyName("imageId")]
     public string ImageId { get; init; } = string.Empty;
@@ -31,6 +32,21 @@ public sealed class TbMessageDto : IValidatableObject
 
     [JsonPropertyName("sensorType")]
     public string? SensorType { get; init; }
+
+    [JsonPropertyName("imageUrl")]
+    public string? ImageUrl { get; init; }
+
+    [JsonPropertyName("imageWidth")]
+    public int? ImageWidth { get; init; }
+
+    [JsonPropertyName("imageHeight")]
+    public int? ImageHeight { get; init; }
+
+    [JsonPropertyName("resolutionMPerPx")]
+    public double? ResolutionMPerPx { get; init; }
+
+    [JsonPropertyName("sensorName")]
+    public string? SensorName { get; init; }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
@@ -62,7 +78,7 @@ public sealed class TbMessageDto : IValidatableObject
         {
             foreach (var tilingConfig in TilingConfigs)
             {
-                if (!tilingConfig.IsValid(out var tilingError))
+                if (!TilingConfigValidator.IsValid(tilingConfig, out var tilingError))
                 {
                     yield return new ValidationResult(tilingError, [nameof(TilingConfigs)]);
                 }

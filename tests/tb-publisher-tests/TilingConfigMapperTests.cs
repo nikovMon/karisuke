@@ -1,6 +1,6 @@
 using System.Text.Json;
+using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.TbPublisher.Application;
-using ImagingPipeline.TbPublisher.Domain;
 using ImagingPipeline.TbPublisher.Dtos.Inbound;
 
 namespace ImagingPipeline.TbPublisher.Tests;
@@ -9,7 +9,8 @@ public sealed class TilingConfigMapperTests
 {
     private readonly TilingConfigMapper _mapper = new();
 
-    private static readonly IReadOnlyList<IReadOnlyList<double>> Coordinates = [[0, 0], [1, 1]];
+    private const string FocusedPxWkt = "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))";
+    private const string MissionId = "mission-1";
 
     [Fact]
     public void MapReturnsOneMessagePerTilingConfig()
@@ -17,34 +18,39 @@ public sealed class TilingConfigMapperTests
         var message = new TbMessageDto
         {
             RuleId = "rule-1",
-            AlgorithmName = AlgorithmName.Flare,
+            AlgorithmName = AlgorithmName.FindAir,
             TenantId = "tenant-1",
             ImageId = "image-1",
-            RoiFootprint = JsonDocument.Parse("[[35.98, 34.15]]").RootElement,
+            RoiFootprint = JsonDocument.Parse("""{ "type": "Point", "coordinates": [35.98, 34.15] }""").RootElement,
             TilingConfigs =
             [
-                new TilingConfigParameters { TileSizeWidth = 110, TileSizeHeight = 110, TileOverlapWidth = 10, TileOverlapHeight = 10 },
-                new TilingConfigParameters { TileSizeWidth = 250, TileSizeHeight = 250, TileOverlapWidth = 10, TileOverlapHeight = 10 }
+                new TilingConfig { TileSizeWidth = 110, TileSizeHeight = 110, TileOverlapWidth = 10, TileOverlapHeight = 10 },
+                new TilingConfig { TileSizeWidth = 250, TileSizeHeight = 250, TileOverlapWidth = 10, TileOverlapHeight = 10 }
             ]
         };
 
-        var result = _mapper.Map(message, Coordinates);
+        var result = _mapper.Map(message, FocusedPxWkt, MissionId);
 
         Assert.True(result.IsSuccess);
         Assert.NotNull(result.Messages);
         Assert.Equal(2, result.Messages!.Count);
 
-        foreach (var ingestMessage in result.Messages)
+        foreach (var outputMessage in result.Messages)
         {
-            Assert.Equal("rule-1", ingestMessage.RuleId);
-            Assert.Equal("tenant-1", ingestMessage.TenantId);
-            Assert.Equal("image-1", ingestMessage.ImageId);
-            Assert.Same(Coordinates, ingestMessage.Coordinates);
-            Assert.True(ingestMessage.ProcessedAt > DateTimeOffset.MinValue);
+            Assert.Equal(FocusedPxWkt, outputMessage.FocusedPxWkt);
+            Assert.Equal(MissionId, outputMessage.MissionMetadata.MissionId);
+            Assert.Equal("tenant-1", outputMessage.MissionMetadata.TenantId);
+            Assert.Equal("rule-1", outputMessage.MissionMetadata.Overlay.RuleId);
+            Assert.Equal("image-1", outputMessage.MissionMetadata.Overlay.ImageId);
+            Assert.Equal("image-1", outputMessage.FrameMetadata.General.Id);
+            Assert.NotEmpty(outputMessage.RequestId);
+            Assert.NotEmpty(outputMessage.TaskId);
         }
 
-        Assert.Equal(110, result.Messages[0].TilingConfig.TileSizeWidth);
-        Assert.Equal(250, result.Messages[1].TilingConfig.TileSizeWidth);
+        Assert.NotEqual(result.Messages[0].RequestId, result.Messages[1].RequestId);
+        Assert.NotEqual(result.Messages[0].TaskId, result.Messages[1].TaskId);
+        Assert.Equal(110, result.Messages[0].ModelMetadata.TbCropSizeX);
+        Assert.Equal(250, result.Messages[1].ModelMetadata.TbCropSizeX);
     }
 
     [Fact]
@@ -58,7 +64,7 @@ public sealed class TilingConfigMapperTests
             TilingConfigs = []
         };
 
-        var result = _mapper.Map(message, Coordinates);
+        var result = _mapper.Map(message, FocusedPxWkt, MissionId);
 
         Assert.False(result.IsSuccess);
         Assert.Null(result.Messages);
@@ -75,13 +81,13 @@ public sealed class TilingConfigMapperTests
             ImageId = "image-1",
             TilingConfigs =
             [
-                new TilingConfigParameters { TileSizeWidth = 0, TileSizeHeight = 512 }
+                new TilingConfig { TileSizeWidth = 0, TileSizeHeight = 512 }
             ]
         };
 
-        var result = _mapper.Map(message, Coordinates);
+        var result = _mapper.Map(message, FocusedPxWkt, MissionId);
 
         Assert.False(result.IsSuccess);
-        Assert.Contains("tiling_size_width", result.Error);
+        Assert.Contains("tileSizeWidth", result.Error);
     }
 }

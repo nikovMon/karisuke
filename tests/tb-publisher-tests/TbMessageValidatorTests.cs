@@ -10,12 +10,12 @@ public sealed class TbMessageValidatorTests
     private static readonly string ValidBody = """
     {
       "ruleId": "rule-1",
-      "algorithmName": "Flare",
+      "algorithmName": "FindAir",
       "tenantId": "tenant-1",
       "imageId": "image-1",
-      "roiFootprint": [[35.98, 34.15]],
+      "roiFootprint": { "type": "Point", "coordinates": [35.98, 34.15] },
       "tilingConfigs": [
-        { "tiling_size_width": 512, "tiling_size_height": 512, "tile_overlap_width": 32, "tile_overlap_height": 32 }
+        { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 32, "tileOverlapHeight": 32 }
       ]
     }
     """;
@@ -71,17 +71,17 @@ public sealed class TbMessageValidatorTests
     }
 
     [Fact]
-    public void ValidateReturnsFailureWhenTilingConfigParametersAreInvalid()
+    public void ValidateReturnsFailureWhenTilingConfigsAreInvalid()
     {
         var body = """
         {
           "ruleId": "rule-1",
-          "algorithmName": "Flare",
+          "algorithmName": "FindAir",
           "tenantId": "tenant-1",
           "imageId": "image-1",
-          "roiFootprint": [[35.98, 34.15]],
+          "roiFootprint": { "type": "Point", "coordinates": [35.98, 34.15] },
           "tilingConfigs": [
-            { "tiling_size_width": 0, "tiling_size_height": 512, "tile_overlap_width": 0, "tile_overlap_height": 0 }
+            { "tileSizeWidth": 0, "tileSizeHeight": 512, "tileOverlapWidth": 0, "tileOverlapHeight": 0 }
           ]
         }
         """;
@@ -89,6 +89,6 @@ public sealed class TbMessageValidatorTests
         var result = _validator.Validate(Encoding.UTF8.GetBytes(body));
 
         Assert.False(result.IsValid);
-        Assert.Contains(result.Errors, error => error.Contains("tiling_size_width", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, error => error.Contains("tileSizeWidth", StringComparison.Ordinal));
     }
 }

@@ -25,7 +25,7 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
     public async Task ValidMessageIsProjectedAndPublishedToTilingConfigQueue()
     {
         await using var projectionMapper = new FakeProjectionMapperServer(_ => """
-        { "coordinates": [[1, 2], [3, 4]] }
+        { "coordinates": [[0, 0], [1, 0], [1, 1], [0, 1]] }
         """);
 
         var topology = CreateTopology();
@@ -39,12 +39,12 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
         var body = """
         {
           "ruleId": "rule-1",
-          "algorithmName": "Flare",
+          "algorithmName": "FindAir",
           "tenantId": "tenant-1",
           "imageId": "image-1",
-          "roiFootprint": [[35.98, 34.15]],
+          "roiFootprint": { "type": "Point", "coordinates": [35.98, 34.15] },
           "tilingConfigs": [
-            { "tiling_size_width": 512, "tiling_size_height": 512, "tile_overlap_width": 32, "tile_overlap_height": 32 }
+            { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 32, "tileOverlapHeight": 32 }
           ]
         }
         """;
@@ -53,13 +53,13 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
         var output = await WaitForMessageAsync(topology.OutputQueue, cts.Token);
         await StopConsumerAsync(consumerTask, cts);
 
-        var ingestMessage = JsonSerializer.Deserialize<TilingConfigIngestMessageDto>(
+        var outputMessage = JsonSerializer.Deserialize<TbPublisherOutputMessageDto>(
             output, new JsonSerializerOptions(JsonSerializerDefaults.Web));
-        Assert.Equal("rule-1", ingestMessage!.RuleId);
-        Assert.Equal("tenant-1", ingestMessage.TenantId);
-        Assert.Equal("image-1", ingestMessage.ImageId);
-        Assert.Equal(512, ingestMessage.TilingConfig.TileSizeWidth);
-        Assert.Equal([3, 4], ingestMessage.Coordinates[1]);
+        Assert.Equal("rule-1", outputMessage!.MissionMetadata.Overlay.RuleId);
+        Assert.Equal("tenant-1", outputMessage.MissionMetadata.TenantId);
+        Assert.Equal("image-1", outputMessage.MissionMetadata.Overlay.ImageId);
+        Assert.Equal(512, outputMessage.ModelMetadata.TbCropSizeX);
+        Assert.StartsWith("POLYGON", outputMessage.FocusedPxWkt);
         Assert.Null(await BasicGetAsync(topology.DeadLetterQueue, CancellationToken.None));
     }
 
@@ -101,12 +101,12 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
         var body = """
         {
           "ruleId": "rule-1",
-          "algorithmName": "Flare",
+          "algorithmName": "FindAir",
           "tenantId": "tenant-1",
           "imageId": "image-1",
-          "roiFootprint": [[35.98, 34.15]],
+          "roiFootprint": { "type": "Point", "coordinates": [35.98, 34.15] },
           "tilingConfigs": [
-            { "tiling_size_width": 512, "tiling_size_height": 512, "tile_overlap_width": 32, "tile_overlap_height": 32 }
+            { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 32, "tileOverlapHeight": 32 }
           ]
         }
         """;

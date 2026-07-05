@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ImagingPipeline.GeometryUtils;
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbPublisher.Observability;
@@ -52,11 +53,31 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
         TbPublisherDiagnostics.MessagesValidated.Add(1);
         var tbMessage = validation.Message!;
 
-        IReadOnlyList<IReadOnlyList<double>> coordinates;
+        IReadOnlyList<IReadOnlyList<double>> groundPoints;
         try
         {
-            var request = new ProjectionMapperRequestDto { GroundPoints = tbMessage.RoiFootprint };
-            coordinates = await _projectionMapperClient.MapAsync(tbMessage.ImageId, request, cancellationToken);
+            var roiGeometry = GeometryUtilities.ReadGeoJson(tbMessage.RoiFootprint);
+            groundPoints = roiGeometry.Coordinates
+                .Select(coordinate => (IReadOnlyList<double>)[coordinate.X, coordinate.Y])
+                .ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex,
+                "TBPublisher message {MessageId} has an invalid roiFootprint for image {ImageId}.",
+                message.MessageId,
+                tbMessage.ImageId);
+            return RabbitMqMessageProcessingResult.Failure($"roiFootprint is invalid: {ex.Message}");
+        }
+
+        string focusedPxWkt;
+        try
+        {
+            var request = new ProjectionMapperRequestDto { GroundPoints = groundPoints };
+            var coordinates = await _projectionMapperClient.MapAsync(tbMessage.ImageId, request, cancellationToken);
+            var focusedGeometry = GeometryUtilities.CreatePolygonFromCoordinates(coordinates);
+            focusedPxWkt = GeometryUtilities.WriteWkt(focusedGeometry);
         }
         catch (ProjectionMapperClientException ex)
         {
@@ -67,8 +88,18 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                 tbMessage.ImageId);
             return RabbitMqMessageProcessingResult.Failure($"projection mapping failed: {ex.Message}");
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(
+                ex,
+                "TBPublisher message {MessageId} received an invalid pixel geometry from the projection mapper for image {ImageId}.",
+                message.MessageId,
+                tbMessage.ImageId);
+            return RabbitMqMessageProcessingResult.Failure($"projected pixel geometry is invalid: {ex.Message}");
+        }
 
-        var mapping = _tilingConfigMapper.Map(tbMessage, coordinates);
+        var missionId = Guid.NewGuid().ToString();
+        var mapping = _tilingConfigMapper.Map(tbMessage, focusedPxWkt, missionId);
         if (!mapping.IsSuccess)
         {
             TbPublisherDiagnostics.TilingConfigMappingFailures.Add(1);

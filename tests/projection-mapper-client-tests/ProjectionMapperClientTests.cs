@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Text.Json;
 using ImagingPipeline.ProjectionMapperClient.Tests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -18,7 +17,7 @@ public sealed class ProjectionMapperClientTests
         });
         var client = CreateClient(handler);
 
-        var result = await client.MapAsync("image-1", new ProjectionMapperRequestDto { GroundPoints = ParseGroundPoints("[[1,2]]") });
+        var result = await client.MapAsync("image-1", new ProjectionMapperRequestDto { GroundPoints = [[1, 2]] });
 
         Assert.Equal(2, result.Count);
         Assert.Equal([3, 4], result[1]);
@@ -35,7 +34,7 @@ public sealed class ProjectionMapperClientTests
         var client = CreateClient(handler);
 
         await Assert.ThrowsAsync<ProjectionMapperClientException>(
-            () => client.MapAsync("image-1", new ProjectionMapperRequestDto { GroundPoints = ParseGroundPoints("[]") }));
+            () => client.MapAsync("image-1", new ProjectionMapperRequestDto { GroundPoints = [] }));
     }
 
     [Fact]
@@ -45,10 +44,8 @@ public sealed class ProjectionMapperClientTests
         var client = CreateClient(handler);
 
         await Assert.ThrowsAsync<ProjectionMapperClientException>(
-            () => client.MapAsync("image-1", new ProjectionMapperRequestDto { GroundPoints = ParseGroundPoints("[]") }));
+            () => client.MapAsync("image-1", new ProjectionMapperRequestDto { GroundPoints = [] }));
     }
-
-    private static JsonElement ParseGroundPoints(string json) => JsonDocument.Parse(json).RootElement;
 
     private static ProjectionMapperClient CreateClient(FakeHttpMessageHandler handler)
     {
