@@ -169,6 +169,35 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
         Assert.Equal("ttl", message);
     }
 
+    [RabbitMqBrokerFact]
+    public async Task InputBindingArgumentsAreAppliedToQueueBinding()
+    {
+        var topology = CreateTopology();
+        var configuration = BuildConfiguration(topology, new Dictionary<string, string?>
+        {
+            ["RabbitMq:InputExchangeType"] = "headers",
+            ["RabbitMq:InputBindingArguments:x-match"] = "all",
+            ["RabbitMq:InputBindingArguments:message-kind"] = "image"
+        });
+        await using var provider = BuildProvider(configuration);
+        var publisher = provider.GetRequiredService<IRabbitMqPublisher>();
+
+        await publisher.PublishAsync(
+            topology.InputExchange,
+            topology.InputQueue,
+            new RabbitMqMessageEnvelope(
+                "message-1",
+                Encoding.UTF8.GetBytes("headers-route"),
+                Headers: new Dictionary<string, object?>
+                {
+                    ["message-kind"] = "image"
+                }));
+
+        var message = await WaitForMessageAsync(topology.InputQueue);
+
+        Assert.Equal("headers-route", message);
+    }
+
     private TestTopology CreateTopology(bool useExchanges = true)
     {
         var topology = new TestTopology(
