@@ -16,7 +16,7 @@ public static class Program
         builder.Services.AddProjectionMapperClient(builder.Configuration);
 
         builder.Services.AddSingleton<ITbMessageValidator, TbMessageValidator>();
-        builder.Services.AddSingleton<ITilingConfigMapper, TilingConfigMapper>();
+        builder.Services.AddSingleton<ITbPublisherOutputMessageBuilder, TbPublisherOutputMessageBuilder>();
         builder.Services.AddSingleton<IRabbitMqMessageHandler, TbPublisherMessageHandler>();
 
         builder.Services.AddHostedService<Worker>();

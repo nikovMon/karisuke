@@ -5,9 +5,9 @@ using ImagingPipeline.TbPublisher.Dtos.Inbound;
 
 namespace ImagingPipeline.TbPublisher.Tests;
 
-public sealed class TilingConfigMapperTests
+public sealed class TbPublisherOutputMessageBuilderTests
 {
-    private readonly TilingConfigMapper _mapper = new();
+    private readonly TbPublisherOutputMessageBuilder _builder = new();
 
     private const string FocusedPxWkt = "POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))";
     private const string MissionId = "mission-1";
@@ -29,7 +29,7 @@ public sealed class TilingConfigMapperTests
             ]
         };
 
-        var result = _mapper.Map(message, FocusedPxWkt, MissionId);
+        var result = _builder.Map(message, FocusedPxWkt, MissionId);
 
         Assert.True(result.IsSuccess);
         Assert.NotNull(result.Messages);
@@ -51,43 +51,5 @@ public sealed class TilingConfigMapperTests
         Assert.NotEqual(result.Messages[0].TaskId, result.Messages[1].TaskId);
         Assert.Equal(110, result.Messages[0].ModelMetadata.TbCropSizeX);
         Assert.Equal(250, result.Messages[1].ModelMetadata.TbCropSizeX);
-    }
-
-    [Fact]
-    public void MapReturnsFailureWhenTilingConfigsIsEmpty()
-    {
-        var message = new TbMessageDto
-        {
-            RuleId = "rule-1",
-            TenantId = "tenant-1",
-            ImageId = "image-1",
-            TilingConfigs = []
-        };
-
-        var result = _mapper.Map(message, FocusedPxWkt, MissionId);
-
-        Assert.False(result.IsSuccess);
-        Assert.Null(result.Messages);
-        Assert.NotNull(result.Error);
-    }
-
-    [Fact]
-    public void MapReturnsFailureWhenAnyTilingConfigParametersAreInvalid()
-    {
-        var message = new TbMessageDto
-        {
-            RuleId = "rule-1",
-            TenantId = "tenant-1",
-            ImageId = "image-1",
-            TilingConfigs =
-            [
-                new TilingConfig { TileSizeWidth = 0, TileSizeHeight = 512 }
-            ]
-        };
-
-        var result = _mapper.Map(message, FocusedPxWkt, MissionId);
-
-        Assert.False(result.IsSuccess);
-        Assert.Contains("tileSizeWidth", result.Error);
     }
 }

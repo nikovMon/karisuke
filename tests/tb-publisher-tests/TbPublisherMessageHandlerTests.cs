@@ -110,7 +110,7 @@ public sealed class TbPublisherMessageHandlerTests
         new(
             new TbMessageValidator(),
             projectionMapperClient,
-            new TilingConfigMapper(),
+            new TbPublisherOutputMessageBuilder(),
             publisher,
             NullLogger<TbPublisherMessageHandler>.Instance);
 }

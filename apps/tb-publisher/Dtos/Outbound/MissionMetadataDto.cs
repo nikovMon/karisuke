@@ -9,7 +9,7 @@ public sealed class MissionMetadataDto
     [JsonPropertyName("missionId")]
     public string MissionId { get; set; } = string.Empty;
 
-    [JsonPropertyName("tenant_id")]
+    [JsonPropertyName("tenantId")]
     public string TenantId { get; set; } = string.Empty;
 
     [JsonPropertyName("overlay")]
@@ -30,9 +30,9 @@ public sealed class OverlayDto
     [JsonPropertyName("resolution_m_per_px")]
     public double ResolutionMPerPx { get; set; }
 
-    [JsonPropertyName("algoritm_name")]
+    [JsonPropertyName("algorithm_name")]
     [JsonConverter(typeof(JsonStringEnumConverter))]
-    public AlgorithmName AlgoritmName { get; set; }
+    public AlgorithmName AlgorithmName { get; set; }
 
     [JsonPropertyName("image_width")]
     public int ImageWidth { get; set; }
@@ -46,9 +46,9 @@ public sealed class OverlayDto
     [JsonPropertyName("image_time")]
     public DateTimeOffset? ImageTime { get; set; }
 
-    [JsonPropertyName("sensorName")]
+    [JsonPropertyName("sensor_name")]
     public string? SensorName { get; set; }
 
-    [JsonPropertyName("sensorType")]
+    [JsonPropertyName("sensor_type")]
     public string? SensorType { get; set; }
 }

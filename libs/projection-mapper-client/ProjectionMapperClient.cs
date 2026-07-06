@@ -30,7 +30,12 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
             "projection-mapper map", ActivityKind.Client);
         activity?.SetTag("projection_mapper.overlay_id", overlayId);
 
-        var endpoint = _options.Endpoints[ProjectionMapperEndpointKeys.G2IMultiPoints];
+        if (!_options.Endpoints.TryGetValue(ProjectionMapperEndpointKeys.G2IMultiPoints, out var endpoint))
+        {
+            throw new ProjectionMapperClientException(
+                $"ProjectionMapper endpoint '{ProjectionMapperEndpointKeys.G2IMultiPoints}' is not configured.");
+        }
+
         var requestUri = $"{endpoint}?overlayId={Uri.EscapeDataString(overlayId)}&useCache={(_options.UseCache ? "true" : "false")}";
 
         var started = Stopwatch.GetTimestamp();

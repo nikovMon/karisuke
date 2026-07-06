@@ -1,32 +1,18 @@
 using ImagingPipeline.Common.Dtos.Rules.Models;
-using ImagingPipeline.TbPublisher.Domain;
 using ImagingPipeline.TbPublisher.Dtos.Inbound;
 using ImagingPipeline.TbPublisher.Dtos.Outbound;
 
 namespace ImagingPipeline.TbPublisher.Application;
 
-public sealed class TilingConfigMapper : ITilingConfigMapper
+public sealed class TbPublisherOutputMessageBuilder : ITbPublisherOutputMessageBuilder
 {
-    public TilingConfigMappingResult Map(TbMessageDto message, string focusedPxWkt, string missionId)
+    public OutputMessageMappingResult Map(TbMessageDto message, string focusedPxWkt, string missionId)
     {
-        if (message.TilingConfigs.Count == 0)
-        {
-            return TilingConfigMappingResult.Failure("tilingConfigs must contain at least one entry.");
-        }
-
-        foreach (var tilingConfig in message.TilingConfigs)
-        {
-            if (!TilingConfigValidator.IsValid(tilingConfig, out var error))
-            {
-                return TilingConfigMappingResult.Failure(error);
-            }
-        }
-
         var outputMessages = message.TilingConfigs
             .Select(tilingConfig => BuildOutput(message, tilingConfig, focusedPxWkt, missionId))
             .ToList();
 
-        return TilingConfigMappingResult.Success(outputMessages);
+        return OutputMessageMappingResult.Success(outputMessages);
     }
 
     private static TbPublisherOutputMessageDto BuildOutput(
@@ -62,7 +48,7 @@ public sealed class TilingConfigMapper : ITilingConfigMapper
                     ImageUrl = message.ImageUrl ?? string.Empty,
                     RuleId = message.RuleId,
                     ResolutionMPerPx = message.ResolutionMPerPx ?? 0,
-                    AlgoritmName = message.AlgorithmName,
+                    AlgorithmName = message.AlgorithmName,
                     ImageWidth = message.ImageWidth ?? 0,
                     ImageHeight = message.ImageHeight ?? 0,
                     RoiFootprint = message.RoiFootprint,

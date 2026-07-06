@@ -160,7 +160,7 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
             .AddProjectionMapperClient(configuration);
 
         services.AddSingleton<ITbMessageValidator, TbMessageValidator>();
-        services.AddSingleton<ITilingConfigMapper, TilingConfigMapper>();
+        services.AddSingleton<ITbPublisherOutputMessageBuilder, TbPublisherOutputMessageBuilder>();
         services.AddSingleton<IRabbitMqMessageHandler, TbPublisherMessageHandler>();
 
         return services.BuildServiceProvider(validateScopes: true);

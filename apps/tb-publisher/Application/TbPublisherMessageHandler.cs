@@ -13,20 +13,20 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
 
     private readonly ITbMessageValidator _validator;
     private readonly IProjectionMapperClient _projectionMapperClient;
-    private readonly ITilingConfigMapper _tilingConfigMapper;
+    private readonly ITbPublisherOutputMessageBuilder _outputMessageBuilder;
     private readonly IRabbitMqPublisher _publisher;
     private readonly ILogger<TbPublisherMessageHandler> _logger;
 
     public TbPublisherMessageHandler(
         ITbMessageValidator validator,
         IProjectionMapperClient projectionMapperClient,
-        ITilingConfigMapper tilingConfigMapper,
+        ITbPublisherOutputMessageBuilder outputMessageBuilder,
         IRabbitMqPublisher publisher,
         ILogger<TbPublisherMessageHandler> logger)
     {
         _validator = validator;
         _projectionMapperClient = projectionMapperClient;
-        _tilingConfigMapper = tilingConfigMapper;
+        _outputMessageBuilder = outputMessageBuilder;
         _publisher = publisher;
         _logger = logger;
     }
@@ -99,10 +99,10 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
         }
 
         var missionId = Guid.NewGuid().ToString();
-        var mapping = _tilingConfigMapper.Map(tbMessage, focusedPxWkt, missionId);
+        var mapping = _outputMessageBuilder.Map(tbMessage, focusedPxWkt, missionId);
         if (!mapping.IsSuccess)
         {
-            TbPublisherDiagnostics.TilingConfigMappingFailures.Add(1);
+            TbPublisherDiagnostics.OutputMappingFailures.Add(1);
             _logger.LogWarning(
                 "TBPublisher message {MessageId} failed tiling-config mapping. Error: {Error}",
                 message.MessageId,
@@ -111,15 +111,28 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
         }
 
         var index = 0;
-        foreach (var ingestMessage in mapping.Messages!)
+        try
         {
-            var outputBody = JsonSerializer.SerializeToUtf8Bytes(ingestMessage, SerializerOptions);
-            var outputEnvelope = new RabbitMqMessageEnvelope($"{message.MessageId}-{index}", outputBody);
-            await _publisher.PublishToOutputAsync(outputEnvelope, cancellationToken);
-            index++;
+            foreach (var ingestMessage in mapping.Messages!)
+            {
+                var outputBody = JsonSerializer.SerializeToUtf8Bytes(ingestMessage, SerializerOptions);
+                var outputEnvelope = new RabbitMqMessageEnvelope($"{message.MessageId}-{index}", outputBody);
+                await _publisher.PublishToOutputAsync(outputEnvelope, cancellationToken);
+                index++;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex,
+                "TBPublisher message {MessageId} failed while publishing output messages: {PublishedCount} of {TotalCount} were already published before the failure and may be duplicated if this message is later replayed from the dead-letter queue.",
+                message.MessageId,
+                index,
+                mapping.Messages!.Count);
+            throw;
         }
 
-        TbPublisherDiagnostics.MessagesPublishedToTilingConfig.Add(mapping.Messages!.Count);
+        TbPublisherDiagnostics.MessagesPublishedToOutput.Add(mapping.Messages!.Count);
         _logger.LogInformation(
             "TBPublisher message {MessageId} processed successfully for tenant {TenantId}, published {Count} tiling-config message(s).",
             message.MessageId,

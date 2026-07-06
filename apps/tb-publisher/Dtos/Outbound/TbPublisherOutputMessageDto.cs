@@ -10,7 +10,7 @@ public sealed class TbPublisherOutputMessageDto
     [JsonPropertyName("modelMetadata")]
     public ModelMetadataDto ModelMetadata { get; set; } = new();
 
-    [JsonPropertyName("FocusedPxWkt")]
+    [JsonPropertyName("focusedPxWkt")]
     public string FocusedPxWkt { get; set; } = string.Empty;
 
     [JsonPropertyName("missionMetadata")]
