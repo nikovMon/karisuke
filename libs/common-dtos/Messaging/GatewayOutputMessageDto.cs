@@ -7,8 +7,8 @@ namespace ImagingPipeline.Common.Dtos.Messaging;
 
 public sealed class GatewayOutputMessageDto : IValidatableObject
 {
-    [JsonPropertyName("id")]
-    public string Id { get; init; } = string.Empty;
+    [JsonPropertyName("taskId")]
+    public string TaskId { get; init; } = string.Empty;
 
     [JsonPropertyName("ruleId")]
     public string RuleId { get; init; } = string.Empty;

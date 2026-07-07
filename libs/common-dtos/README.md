@@ -13,6 +13,6 @@ Rules contracts are grouped by responsibility:
 
 ## Messaging contracts
 
-`Messaging/GatewayOutputMessageDto` describes the message tb-publisher consumes from gateway's output queue. It has an `Id` field for a stable, transport-independent identifier; gateway does not populate it yet, so it is not enforced as required until gateway adopts it. `Messaging/TilingConfigValidator` is the shared tile-size/overlap invariant it enforces on `TilingConfigs`.
+`Messaging/GatewayOutputMessageDto` describes the message tb-publisher consumes from gateway's output queue. It has a `TaskId` field for a stable, transport-independent identifier; gateway does not populate it yet, so it is not enforced as required until gateway adopts it. tb-publisher forwards `TaskId` unchanged into every `TbPublisherOutputMessageDto` it derives from the message. `Messaging/TilingConfigValidator` is the shared tile-size/overlap invariant it enforces on `TilingConfigs`.
 
 `Messaging/TbPublisherOutputMessageDto` (with its nested `FrameMetadataDto`, `ModelMetadataDto`, `MissionMetadataDto`, and `OverlayDto`) describes the message tb-publisher publishes for tb-consumer to consume.

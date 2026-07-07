@@ -4,11 +4,11 @@ using ImagingPipeline.Common.Dtos.Messaging;
 
 namespace ImagingPipeline.TbPublisher.Application;
 
-public sealed class TbMessageValidator : ITbMessageValidator
+public sealed class InputMessageValidator : IInputMessageValidator
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
-    public TbMessageValidationResult Validate(byte[] body)
+    public InputMessageValidationResult Validate(byte[] body)
     {
         GatewayOutputMessageDto? message;
         try
@@ -17,22 +17,22 @@ public sealed class TbMessageValidator : ITbMessageValidator
         }
         catch (JsonException ex)
         {
-            return TbMessageValidationResult.Failure([$"message body is not valid JSON: {ex.Message}"]);
+            return InputMessageValidationResult.Failure([$"message body is not valid JSON: {ex.Message}"]);
         }
 
         if (message is null)
         {
-            return TbMessageValidationResult.Failure(["message body cannot be empty."]);
+            return InputMessageValidationResult.Failure(["message body cannot be empty."]);
         }
 
         var results = new List<ValidationResult>();
         Validator.TryValidateObject(message, new ValidationContext(message), results, validateAllProperties: true);
         if (results.Count > 0)
         {
-            return TbMessageValidationResult.Failure(
+            return InputMessageValidationResult.Failure(
                 results.Select(result => result.ErrorMessage ?? "message is invalid.").ToArray());
         }
 
-        return TbMessageValidationResult.Success(message);
+        return InputMessageValidationResult.Success(message);
     }
 }

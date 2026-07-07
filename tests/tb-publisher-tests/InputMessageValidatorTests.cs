@@ -3,9 +3,9 @@ using ImagingPipeline.TbPublisher.Application;
 
 namespace ImagingPipeline.TbPublisher.Tests;
 
-public sealed class TbMessageValidatorTests
+public sealed class InputMessageValidatorTests
 {
-    private readonly TbMessageValidator _validator = new();
+    private readonly InputMessageValidator _validator = new();
 
     private static readonly string ValidBody = """
     {

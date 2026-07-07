@@ -8,7 +8,7 @@ public sealed class TbPublisherOutputMessageBuilder : ITbPublisherOutputMessageB
 {
     public OutputMessageMappingResult Map(GatewayOutputMessageDto message, string focusedPxWkt)
     {
-        var missionId = DeterministicIdGenerator.CreateMissionId(message.Id);
+        var missionId = DeterministicIdGenerator.CreateMissionId(message.TaskId);
         var outputMessages = message.TilingConfigs
             .Select((tilingConfig, index) => BuildOutput(message, tilingConfig, focusedPxWkt, missionId, index))
             .ToList();
@@ -59,7 +59,7 @@ public sealed class TbPublisherOutputMessageBuilder : ITbPublisherOutputMessageB
                     SensorType = message.SensorType
                 }
             },
-            RequestId = DeterministicIdGenerator.CreateRequestId(message.Id, tilingIndex),
-            TaskId = DeterministicIdGenerator.CreateTaskId(message.Id, tilingIndex)
+            RequestId = DeterministicIdGenerator.CreateRequestId(message.TaskId, tilingIndex),
+            TaskId = message.TaskId
         };
 }

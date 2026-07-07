@@ -12,7 +12,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
 {
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
-    private readonly ITbMessageValidator _validator;
+    private readonly IInputMessageValidator _validator;
     private readonly TbPublisherGeometryConverter _geometryConverter;
     private readonly IProjectionMapperClient _projectionMapperClient;
     private readonly ITbPublisherOutputMessageBuilder _outputMessageBuilder;
@@ -20,7 +20,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
     private readonly ILogger<TbPublisherMessageHandler> _logger;
 
     public TbPublisherMessageHandler(
-        ITbMessageValidator validator,
+        IInputMessageValidator validator,
         TbPublisherGeometryConverter geometryConverter,
         IProjectionMapperClient projectionMapperClient,
         ITbPublisherOutputMessageBuilder outputMessageBuilder,

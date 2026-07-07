@@ -10,9 +10,6 @@ public static class DeterministicIdGenerator
     public static string CreateRequestId(string messageId, int tilingIndex) =>
         CreateId($"{messageId}:{tilingIndex}", "request");
 
-    public static string CreateTaskId(string messageId, int tilingIndex) =>
-        CreateId($"{messageId}:{tilingIndex}", "task");
-
     private static string CreateId(string seed, string purpose) =>
         CreateDeterministicGuid($"{seed}:{purpose}").ToString();
 

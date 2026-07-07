@@ -14,6 +14,7 @@ public sealed class TbPublisherMessageHandlerTests
 {
     private static readonly byte[] ValidBody = Encoding.UTF8.GetBytes("""
     {
+      "taskId": "msg-1",
       "ruleId": "rule-1",
       "algorithmName": "FindAir",
       "tenantId": "tenant-1",
@@ -60,7 +61,8 @@ public sealed class TbPublisherMessageHandlerTests
         Assert.Equal(8, outputs[1].ModelMetadata.OverlapHeight);
 
         Assert.Equal(outputs[0].MissionMetadata.MissionId, outputs[1].MissionMetadata.MissionId);
-        Assert.NotEqual(outputs[0].TaskId, outputs[1].TaskId);
+        Assert.Equal("msg-1", outputs[0].TaskId);
+        Assert.Equal(outputs[0].TaskId, outputs[1].TaskId);
         Assert.StartsWith("POLYGON", outputs[0].FocusedPxWkt);
         Assert.Equal("image-1", projectionClient.LastOverlayId);
     }
@@ -147,7 +149,7 @@ public sealed class TbPublisherMessageHandlerTests
         IProjectionMapperClient projectionMapperClient,
         IRabbitMqPublisher publisher) =>
         new(
-            new TbMessageValidator(),
+            new InputMessageValidator(),
             new TbPublisherGeometryConverter(),
             projectionMapperClient,
             new TbPublisherOutputMessageBuilder(),

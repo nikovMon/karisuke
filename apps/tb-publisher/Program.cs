@@ -16,7 +16,7 @@ public static class Program
         builder.Services.AddRabbitMqConsumer(builder.Configuration);
         builder.Services.AddProjectionMapperClient(builder.Configuration);
 
-        builder.Services.AddSingleton<ITbMessageValidator, TbMessageValidator>();
+        builder.Services.AddSingleton<IInputMessageValidator, InputMessageValidator>();
         builder.Services.AddSingleton<TbPublisherGeometryConverter>();
         builder.Services.AddSingleton<ITbPublisherOutputMessageBuilder, TbPublisherOutputMessageBuilder>();
         builder.Services.AddSingleton<IRabbitMqMessageHandler, TbPublisherMessageHandler>();

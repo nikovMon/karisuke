@@ -23,7 +23,7 @@ public sealed class TbPublisherOutputMessageBuilderTests
         Assert.NotNull(result.Messages);
         Assert.Equal(2, result.Messages!.Count);
 
-        var expectedMissionId = DeterministicIdGenerator.CreateMissionId(message.Id);
+        var expectedMissionId = DeterministicIdGenerator.CreateMissionId(message.TaskId);
 
         foreach (var outputMessage in result.Messages)
         {
@@ -38,7 +38,7 @@ public sealed class TbPublisherOutputMessageBuilderTests
         }
 
         Assert.NotEqual(result.Messages[0].RequestId, result.Messages[1].RequestId);
-        Assert.NotEqual(result.Messages[0].TaskId, result.Messages[1].TaskId);
+        Assert.Equal(result.Messages[0].TaskId, result.Messages[1].TaskId);
 
         Assert.Equal(110, result.Messages[0].ModelMetadata.TbCropSizeX);
         Assert.Equal(110, result.Messages[0].ModelMetadata.TbCropSizeY);
@@ -73,7 +73,7 @@ public sealed class TbPublisherOutputMessageBuilderTests
 
     private static GatewayOutputMessageDto CreateMessage(string id) => new()
     {
-        Id = id,
+        TaskId = id,
         RuleId = "rule-1",
         AlgorithmName = AlgorithmName.FindAir,
         TenantId = "tenant-1",
