@@ -1,11 +1,10 @@
-using ImagingPipeline.TbPublisher.Dtos.Inbound;
-using ImagingPipeline.TbPublisher.Dtos.Outbound;
+using ImagingPipeline.Common.Dtos.Messaging;
 
 namespace ImagingPipeline.TbPublisher.Application;
 
 public interface ITbPublisherOutputMessageBuilder
 {
-    OutputMessageMappingResult Map(TbMessageDto message, string focusedPxWkt, string missionId);
+    OutputMessageMappingResult Map(GatewayOutputMessageDto message, string focusedPxWkt);
 }
 
 public sealed record OutputMessageMappingResult(bool IsSuccess, IReadOnlyList<TbPublisherOutputMessageDto>? Messages, string? Error)

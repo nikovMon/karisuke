@@ -1,32 +1,34 @@
+using ImagingPipeline.Common.Dtos.Messaging;
 using ImagingPipeline.Common.Dtos.Rules.Models;
-using ImagingPipeline.TbPublisher.Dtos.Inbound;
-using ImagingPipeline.TbPublisher.Dtos.Outbound;
+using ImagingPipeline.TbPublisher.Domain;
 
 namespace ImagingPipeline.TbPublisher.Application;
 
 public sealed class TbPublisherOutputMessageBuilder : ITbPublisherOutputMessageBuilder
 {
-    public OutputMessageMappingResult Map(TbMessageDto message, string focusedPxWkt, string missionId)
+    public OutputMessageMappingResult Map(GatewayOutputMessageDto message, string focusedPxWkt)
     {
+        var missionId = DeterministicIdGenerator.CreateMissionId(message.Id);
         var outputMessages = message.TilingConfigs
-            .Select(tilingConfig => BuildOutput(message, tilingConfig, focusedPxWkt, missionId))
+            .Select((tilingConfig, index) => BuildOutput(message, tilingConfig, focusedPxWkt, missionId, index))
             .ToList();
 
         return OutputMessageMappingResult.Success(outputMessages);
     }
 
     private static TbPublisherOutputMessageDto BuildOutput(
-        TbMessageDto message,
+        GatewayOutputMessageDto message,
         TilingConfig tilingConfig,
         string focusedPxWkt,
-        string missionId) =>
+        string missionId,
+        int tilingIndex) =>
         new()
         {
             FrameMetadata = new FrameMetadataDto
             {
                 General = new FrameGeneralDto
                 {
-                    ImageFileUri = message.ImageUrl ?? string.Empty,
+                    ImageFileUri = message.ImageUrl,
                     Id = message.ImageId
                 }
             },
@@ -45,19 +47,19 @@ public sealed class TbPublisherOutputMessageBuilder : ITbPublisherOutputMessageB
                 Overlay = new OverlayDto
                 {
                     ImageId = message.ImageId,
-                    ImageUrl = message.ImageUrl ?? string.Empty,
+                    ImageUrl = message.ImageUrl,
                     RuleId = message.RuleId,
-                    ResolutionMPerPx = message.ResolutionMPerPx ?? 0,
+                    ResolutionMPerPx = message.ResolutionMPerPx,
                     AlgorithmName = message.AlgorithmName,
-                    ImageWidth = message.ImageWidth ?? 0,
-                    ImageHeight = message.ImageHeight ?? 0,
+                    ImageWidth = message.ImageWidth,
+                    ImageHeight = message.ImageHeight,
                     RoiFootprint = message.RoiFootprint,
                     ImageTime = message.PhotoTime,
                     SensorName = message.SensorName,
                     SensorType = message.SensorType
                 }
             },
-            RequestId = Guid.NewGuid().ToString(),
-            TaskId = Guid.NewGuid().ToString()
+            RequestId = DeterministicIdGenerator.CreateRequestId(message.Id, tilingIndex),
+            TaskId = DeterministicIdGenerator.CreateTaskId(message.Id, tilingIndex)
         };
 }

@@ -47,6 +47,21 @@ public sealed class ProjectionMapperClientTests
             () => client.MapAsync("image-1", new ProjectionMapperRequestDto { GroundPoints = [] }));
     }
 
+    [Fact]
+    public async Task MapAsyncPropagatesCancellationInsteadOfWrappingItAsAClientException()
+    {
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(new ProjectionMapperResponseDto { Coordinates = [[1, 2]] })
+        });
+        var client = CreateClient(handler);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => client.MapAsync("image-1", new ProjectionMapperRequestDto { GroundPoints = [[1, 2]] }, cts.Token));
+    }
+
     private static ProjectionMapperClient CreateClient(FakeHttpMessageHandler handler)
     {
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://projection-mapper.test") };

@@ -1,6 +1,6 @@
 using ImagingPipeline.Common.Dtos.Rules.Models;
 
-namespace ImagingPipeline.TbPublisher.Domain;
+namespace ImagingPipeline.Common.Dtos.Messaging;
 
 public static class TilingConfigValidator
 {

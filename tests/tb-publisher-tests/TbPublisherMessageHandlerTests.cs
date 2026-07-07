@@ -1,9 +1,10 @@
 using System.Text;
 using System.Text.Json;
+using ImagingPipeline.Common.Dtos.Messaging;
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbPublisher.Application;
-using ImagingPipeline.TbPublisher.Dtos.Outbound;
+using ImagingPipeline.TbPublisher.Processing;
 using ImagingPipeline.TbPublisher.Tests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -19,8 +20,8 @@ public sealed class TbPublisherMessageHandlerTests
       "imageId": "image-1",
       "roiFootprint": { "type": "Point", "coordinates": [35.98, 34.15] },
       "tilingConfigs": [
-        { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 32, "tileOverlapHeight": 32 },
-        { "tileSizeWidth": 256, "tileSizeHeight": 256, "tileOverlapWidth": 16, "tileOverlapHeight": 16 }
+        { "tileSizeWidth": 512, "tileSizeHeight": 384, "tileOverlapWidth": 32, "tileOverlapHeight": 24 },
+        { "tileSizeWidth": 256, "tileSizeHeight": 128, "tileOverlapWidth": 16, "tileOverlapHeight": 8 }
       ]
     }
     """);
@@ -47,8 +48,17 @@ public sealed class TbPublisherMessageHandlerTests
             .ToList();
         Assert.Equal("tenant-1", outputs[0].MissionMetadata.TenantId);
         Assert.Equal("image-1", outputs[0].MissionMetadata.Overlay.ImageId);
+
         Assert.Equal(512, outputs[0].ModelMetadata.TbCropSizeX);
+        Assert.Equal(384, outputs[0].ModelMetadata.TbCropSizeY);
+        Assert.Equal(32, outputs[0].ModelMetadata.OverlapWidth);
+        Assert.Equal(24, outputs[0].ModelMetadata.OverlapHeight);
+
         Assert.Equal(256, outputs[1].ModelMetadata.TbCropSizeX);
+        Assert.Equal(128, outputs[1].ModelMetadata.TbCropSizeY);
+        Assert.Equal(16, outputs[1].ModelMetadata.OverlapWidth);
+        Assert.Equal(8, outputs[1].ModelMetadata.OverlapHeight);
+
         Assert.Equal(outputs[0].MissionMetadata.MissionId, outputs[1].MissionMetadata.MissionId);
         Assert.NotEqual(outputs[0].TaskId, outputs[1].TaskId);
         Assert.StartsWith("POLYGON", outputs[0].FocusedPxWkt);
@@ -104,11 +114,41 @@ public sealed class TbPublisherMessageHandlerTests
         Assert.NotNull(result.Error);
     }
 
+    [Fact]
+    public async Task HandleAsyncPropagatesCancellationTokenToItsDependencies()
+    {
+        var projectionClient = FakeProjectionMapperClient.ReturningSuccess(Coordinates);
+        var publisher = new FakeRabbitMqPublisher();
+        var handler = CreateHandler(projectionClient, publisher);
+        using var cts = new CancellationTokenSource();
+
+        await handler.HandleAsync(
+            RabbitMqMessageEnvelope.FromUtf8(Encoding.UTF8.GetString(ValidBody), "msg-1"),
+            cts.Token);
+
+        Assert.Equal(cts.Token, projectionClient.LastCancellationToken);
+        Assert.Equal(cts.Token, publisher.LastCancellationToken);
+    }
+
+    [Fact]
+    public async Task HandleAsyncThrowsAndLeavesEarlierTilingConfigsPublishedWhenAPublishFailsPartway()
+    {
+        var projectionClient = FakeProjectionMapperClient.ReturningSuccess(Coordinates);
+        var publisher = FakeRabbitMqPublisher.ThatFailsAfter(successCount: 1);
+        var handler = CreateHandler(projectionClient, publisher);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => handler.HandleAsync(RabbitMqMessageEnvelope.FromUtf8(Encoding.UTF8.GetString(ValidBody), "msg-1")));
+
+        Assert.Single(publisher.PublishedToOutput);
+    }
+
     private static TbPublisherMessageHandler CreateHandler(
         IProjectionMapperClient projectionMapperClient,
         IRabbitMqPublisher publisher) =>
         new(
             new TbMessageValidator(),
+            new TbPublisherGeometryConverter(),
             projectionMapperClient,
             new TbPublisherOutputMessageBuilder(),
             publisher,

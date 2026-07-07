@@ -1,5 +1,5 @@
+using ImagingPipeline.Common.Dtos.Messaging;
 using ImagingPipeline.Common.Dtos.Rules.Models;
-using ImagingPipeline.TbPublisher.Domain;
 
 namespace ImagingPipeline.TbPublisher.Tests;
 

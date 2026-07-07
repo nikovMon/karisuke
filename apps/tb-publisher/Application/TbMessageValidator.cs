@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
-using ImagingPipeline.TbPublisher.Dtos.Inbound;
+using ImagingPipeline.Common.Dtos.Messaging;
 
 namespace ImagingPipeline.TbPublisher.Application;
 
@@ -10,10 +10,10 @@ public sealed class TbMessageValidator : ITbMessageValidator
 
     public TbMessageValidationResult Validate(byte[] body)
     {
-        TbMessageDto? message;
+        GatewayOutputMessageDto? message;
         try
         {
-            message = JsonSerializer.Deserialize<TbMessageDto>(body, SerializerOptions);
+            message = JsonSerializer.Deserialize<GatewayOutputMessageDto>(body, SerializerOptions);
         }
         catch (JsonException ex)
         {

@@ -1,6 +1,7 @@
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbPublisher.Application;
+using ImagingPipeline.TbPublisher.Processing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -16,6 +17,7 @@ public static class Program
         builder.Services.AddProjectionMapperClient(builder.Configuration);
 
         builder.Services.AddSingleton<ITbMessageValidator, TbMessageValidator>();
+        builder.Services.AddSingleton<TbPublisherGeometryConverter>();
         builder.Services.AddSingleton<ITbPublisherOutputMessageBuilder, TbPublisherOutputMessageBuilder>();
         builder.Services.AddSingleton<IRabbitMqMessageHandler, TbPublisherMessageHandler>();
 

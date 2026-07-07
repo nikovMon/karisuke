@@ -1,8 +1,9 @@
 using System.Text.Json;
-using ImagingPipeline.GeometryUtils;
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
+using ImagingPipeline.TbPublisher.Errors;
 using ImagingPipeline.TbPublisher.Observability;
+using ImagingPipeline.TbPublisher.Processing;
 using Microsoft.Extensions.Logging;
 
 namespace ImagingPipeline.TbPublisher.Application;
@@ -12,6 +13,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
     private readonly ITbMessageValidator _validator;
+    private readonly TbPublisherGeometryConverter _geometryConverter;
     private readonly IProjectionMapperClient _projectionMapperClient;
     private readonly ITbPublisherOutputMessageBuilder _outputMessageBuilder;
     private readonly IRabbitMqPublisher _publisher;
@@ -19,12 +21,14 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
 
     public TbPublisherMessageHandler(
         ITbMessageValidator validator,
+        TbPublisherGeometryConverter geometryConverter,
         IProjectionMapperClient projectionMapperClient,
         ITbPublisherOutputMessageBuilder outputMessageBuilder,
         IRabbitMqPublisher publisher,
         ILogger<TbPublisherMessageHandler> logger)
     {
         _validator = validator;
+        _geometryConverter = geometryConverter;
         _projectionMapperClient = projectionMapperClient;
         _outputMessageBuilder = outputMessageBuilder;
         _publisher = publisher;
@@ -56,19 +60,16 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
         IReadOnlyList<IReadOnlyList<double>> groundPoints;
         try
         {
-            var roiGeometry = GeometryUtilities.ReadGeoJson(tbMessage.RoiFootprint);
-            groundPoints = roiGeometry.Coordinates
-                .Select(coordinate => (IReadOnlyList<double>)[coordinate.X, coordinate.Y])
-                .ToList();
+            groundPoints = _geometryConverter.ExtractGroundPoints(tbMessage.RoiFootprint);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (TbPublisherValidationException ex)
         {
             _logger.LogWarning(
                 ex,
                 "TBPublisher message {MessageId} has an invalid roiFootprint for image {ImageId}.",
                 message.MessageId,
                 tbMessage.ImageId);
-            return RabbitMqMessageProcessingResult.Failure($"roiFootprint is invalid: {ex.Message}");
+            return RabbitMqMessageProcessingResult.Failure(ex.Message);
         }
 
         string focusedPxWkt;
@@ -76,8 +77,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
         {
             var request = new ProjectionMapperRequestDto { GroundPoints = groundPoints };
             var coordinates = await _projectionMapperClient.MapAsync(tbMessage.ImageId, request, cancellationToken);
-            var focusedGeometry = GeometryUtilities.CreatePolygonFromCoordinates(coordinates);
-            focusedPxWkt = GeometryUtilities.WriteWkt(focusedGeometry);
+            focusedPxWkt = _geometryConverter.BuildFocusedPxWkt(coordinates);
         }
         catch (ProjectionMapperClientException ex)
         {
@@ -88,18 +88,17 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                 tbMessage.ImageId);
             return RabbitMqMessageProcessingResult.Failure($"projection mapping failed: {ex.Message}");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (TbPublisherValidationException ex)
         {
             _logger.LogError(
                 ex,
                 "TBPublisher message {MessageId} received an invalid pixel geometry from the projection mapper for image {ImageId}.",
                 message.MessageId,
                 tbMessage.ImageId);
-            return RabbitMqMessageProcessingResult.Failure($"projected pixel geometry is invalid: {ex.Message}");
+            return RabbitMqMessageProcessingResult.Failure(ex.Message);
         }
 
-        var missionId = Guid.NewGuid().ToString();
-        var mapping = _outputMessageBuilder.Map(tbMessage, focusedPxWkt, missionId);
+        var mapping = _outputMessageBuilder.Map(tbMessage, focusedPxWkt);
         if (!mapping.IsSuccess)
         {
             TbPublisherDiagnostics.OutputMappingFailures.Add(1);

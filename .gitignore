@@ -37,6 +37,9 @@ npm-debug.log*
 !.vscode/extensions.json
 !.vscode/settings.json
 
+# Claude Code
+.claude/
+
 # JetBrains Rider and ReSharper
 .idea/
 *.sln.DotSettings.user

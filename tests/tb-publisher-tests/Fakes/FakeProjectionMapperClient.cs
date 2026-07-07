@@ -17,6 +17,8 @@ public sealed class FakeProjectionMapperClient : IProjectionMapperClient
 
     public ProjectionMapperRequestDto? LastRequest { get; private set; }
 
+    public CancellationToken LastCancellationToken { get; private set; }
+
     public static FakeProjectionMapperClient ReturningSuccess(IReadOnlyList<IReadOnlyList<double>> result) => new(result, null);
 
     public static FakeProjectionMapperClient ThrowingFailure(Exception exception) => new(null, exception);
@@ -28,6 +30,7 @@ public sealed class FakeProjectionMapperClient : IProjectionMapperClient
     {
         LastOverlayId = overlayId;
         LastRequest = request;
+        LastCancellationToken = cancellationToken;
 
         if (_exception is not null)
         {

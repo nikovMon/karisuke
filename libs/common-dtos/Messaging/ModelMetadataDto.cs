@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace ImagingPipeline.TbPublisher.Dtos.Outbound;
+namespace ImagingPipeline.Common.Dtos.Messaging;
 
 public sealed class ModelMetadataDto
 {

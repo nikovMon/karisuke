@@ -1,9 +1,9 @@
 using System.Text;
 using System.Text.Json;
+using ImagingPipeline.Common.Dtos.Messaging;
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbPublisher.Application;
-using ImagingPipeline.TbPublisher.Dtos.Outbound;
 using ImagingPipeline.TbPublisher.Tests.Fakes;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;

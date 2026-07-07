@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 
-namespace ImagingPipeline.TbPublisher.Dtos.Outbound;
+namespace ImagingPipeline.Common.Dtos.Messaging;
 
 public sealed class MissionMetadataDto
 {

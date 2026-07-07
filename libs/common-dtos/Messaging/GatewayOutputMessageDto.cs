@@ -2,12 +2,14 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ImagingPipeline.Common.Dtos.Rules.Models;
-using ImagingPipeline.TbPublisher.Domain;
 
-namespace ImagingPipeline.TbPublisher.Dtos.Inbound;
+namespace ImagingPipeline.Common.Dtos.Messaging;
 
-public sealed class TbMessageDto : IValidatableObject
+public sealed class GatewayOutputMessageDto : IValidatableObject
 {
+    [JsonPropertyName("id")]
+    public string Id { get; init; } = string.Empty;
+
     [JsonPropertyName("ruleId")]
     public string RuleId { get; init; } = string.Empty;
 
@@ -28,25 +30,25 @@ public sealed class TbMessageDto : IValidatableObject
     public JsonElement RoiFootprint { get; init; }
 
     [JsonPropertyName("photoTime")]
-    public DateTimeOffset? PhotoTime { get; init; }
+    public DateTimeOffset PhotoTime { get; init; }
 
     [JsonPropertyName("sensorType")]
-    public string? SensorType { get; init; }
+    public string SensorType { get; init; } = string.Empty;
 
     [JsonPropertyName("imageUrl")]
-    public string? ImageUrl { get; init; }
+    public string ImageUrl { get; init; } = string.Empty;
 
     [JsonPropertyName("imageWidth")]
-    public int? ImageWidth { get; init; }
+    public int ImageWidth { get; init; }
 
     [JsonPropertyName("imageHeight")]
-    public int? ImageHeight { get; init; }
+    public int ImageHeight { get; init; }
 
     [JsonPropertyName("resolutionMPerPx")]
-    public double? ResolutionMPerPx { get; init; }
+    public double ResolutionMPerPx { get; init; }
 
     [JsonPropertyName("sensorName")]
-    public string? SensorName { get; init; }
+    public string SensorName { get; init; } = string.Empty;
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
