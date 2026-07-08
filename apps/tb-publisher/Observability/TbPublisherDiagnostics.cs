@@ -18,9 +18,6 @@ public static class TbPublisherDiagnostics
     public static readonly Counter<long> ValidationFailures =
         Meter.CreateCounter<long>("imagingpipeline.tbpublisher.messages.validation_failures");
 
-    public static readonly Counter<long> OutputMappingFailures =
-        Meter.CreateCounter<long>("imagingpipeline.tbpublisher.tiling_config.mapping_failures");
-
     public static readonly Counter<long> MessagesPublishedToOutput =
         Meter.CreateCounter<long>("imagingpipeline.tbpublisher.tiling_config.messages_published");
 }

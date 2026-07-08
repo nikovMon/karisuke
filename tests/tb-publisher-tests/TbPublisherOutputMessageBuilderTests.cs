@@ -17,15 +17,13 @@ public sealed class TbPublisherOutputMessageBuilderTests
     {
         var message = CreateMessage("msg-1");
 
-        var result = _builder.Map(message, FocusedPxWkt);
+        var messages = _builder.Map(message, FocusedPxWkt);
 
-        Assert.True(result.IsSuccess);
-        Assert.NotNull(result.Messages);
-        Assert.Equal(2, result.Messages!.Count);
+        Assert.Equal(2, messages.Count);
 
         var expectedMissionId = DeterministicIdGenerator.CreateMissionId(message.TaskId);
 
-        foreach (var outputMessage in result.Messages)
+        foreach (var outputMessage in messages)
         {
             Assert.Equal(FocusedPxWkt, outputMessage.FocusedPxWkt);
             Assert.Equal(expectedMissionId, outputMessage.MissionMetadata.MissionId);
@@ -37,18 +35,18 @@ public sealed class TbPublisherOutputMessageBuilderTests
             Assert.NotEmpty(outputMessage.TaskId);
         }
 
-        Assert.NotEqual(result.Messages[0].RequestId, result.Messages[1].RequestId);
-        Assert.Equal(result.Messages[0].TaskId, result.Messages[1].TaskId);
+        Assert.NotEqual(messages[0].RequestId, messages[1].RequestId);
+        Assert.Equal(messages[0].TaskId, messages[1].TaskId);
 
-        Assert.Equal(110, result.Messages[0].ModelMetadata.TbCropSizeX);
-        Assert.Equal(110, result.Messages[0].ModelMetadata.TbCropSizeY);
-        Assert.Equal(10, result.Messages[0].ModelMetadata.OverlapWidth);
-        Assert.Equal(10, result.Messages[0].ModelMetadata.OverlapHeight);
+        Assert.Equal(110, messages[0].ModelMetadata.TbCropSizeX);
+        Assert.Equal(110, messages[0].ModelMetadata.TbCropSizeY);
+        Assert.Equal(10, messages[0].ModelMetadata.OverlapWidth);
+        Assert.Equal(10, messages[0].ModelMetadata.OverlapHeight);
 
-        Assert.Equal(250, result.Messages[1].ModelMetadata.TbCropSizeX);
-        Assert.Equal(180, result.Messages[1].ModelMetadata.TbCropSizeY);
-        Assert.Equal(20, result.Messages[1].ModelMetadata.OverlapWidth);
-        Assert.Equal(15, result.Messages[1].ModelMetadata.OverlapHeight);
+        Assert.Equal(250, messages[1].ModelMetadata.TbCropSizeX);
+        Assert.Equal(180, messages[1].ModelMetadata.TbCropSizeY);
+        Assert.Equal(20, messages[1].ModelMetadata.OverlapWidth);
+        Assert.Equal(15, messages[1].ModelMetadata.OverlapHeight);
     }
 
     [Fact]
@@ -57,9 +55,9 @@ public sealed class TbPublisherOutputMessageBuilderTests
         var first = _builder.Map(CreateMessage("msg-1"), FocusedPxWkt);
         var second = _builder.Map(CreateMessage("msg-1"), FocusedPxWkt);
 
-        Assert.Equal(first.Messages![0].MissionMetadata.MissionId, second.Messages![0].MissionMetadata.MissionId);
-        Assert.Equal(first.Messages[0].RequestId, second.Messages[0].RequestId);
-        Assert.Equal(first.Messages[0].TaskId, second.Messages[0].TaskId);
+        Assert.Equal(first[0].MissionMetadata.MissionId, second[0].MissionMetadata.MissionId);
+        Assert.Equal(first[0].RequestId, second[0].RequestId);
+        Assert.Equal(first[0].TaskId, second[0].TaskId);
     }
 
     [Fact]
@@ -68,7 +66,7 @@ public sealed class TbPublisherOutputMessageBuilderTests
         var first = _builder.Map(CreateMessage("msg-1"), FocusedPxWkt);
         var second = _builder.Map(CreateMessage("msg-2"), FocusedPxWkt);
 
-        Assert.NotEqual(first.Messages![0].MissionMetadata.MissionId, second.Messages![0].MissionMetadata.MissionId);
+        Assert.NotEqual(first[0].MissionMetadata.MissionId, second[0].MissionMetadata.MissionId);
     }
 
     private static GatewayOutputMessageDto CreateMessage(string id) => new()

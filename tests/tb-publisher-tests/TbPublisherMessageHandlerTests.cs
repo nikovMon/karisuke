@@ -93,7 +93,7 @@ public sealed class TbPublisherMessageHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsyncReturnsFailureWhenTilingConfigMappingFails()
+    public async Task HandleAsyncReturnsFailureWhenTilingConfigIsInvalid()
     {
         var invalidTilingBody = Encoding.UTF8.GetBytes("""
         {

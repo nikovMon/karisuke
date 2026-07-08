@@ -6,14 +6,12 @@ namespace ImagingPipeline.TbPublisher.Application;
 
 public sealed class TbPublisherOutputMessageBuilder : ITbPublisherOutputMessageBuilder
 {
-    public OutputMessageMappingResult Map(GatewayOutputMessageDto message, string focusedPxWkt)
+    public IReadOnlyList<TbPublisherOutputMessageDto> Map(GatewayOutputMessageDto message, string focusedPxWkt)
     {
         var missionId = DeterministicIdGenerator.CreateMissionId(message.TaskId);
-        var outputMessages = message.TilingConfigs
+        return message.TilingConfigs
             .Select((tilingConfig, index) => BuildOutput(message, tilingConfig, focusedPxWkt, missionId, index))
             .ToList();
-
-        return OutputMessageMappingResult.Success(outputMessages);
     }
 
     private static TbPublisherOutputMessageDto BuildOutput(

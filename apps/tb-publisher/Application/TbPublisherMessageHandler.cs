@@ -98,21 +98,12 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
             return RabbitMqMessageProcessingResult.Failure(ex.Message);
         }
 
-        var mapping = _outputMessageBuilder.Map(tbMessage, focusedPxWkt);
-        if (!mapping.IsSuccess)
-        {
-            TbPublisherDiagnostics.OutputMappingFailures.Add(1);
-            _logger.LogWarning(
-                "TBPublisher message {MessageId} failed tiling-config mapping. Error: {Error}",
-                message.MessageId,
-                mapping.Error);
-            return RabbitMqMessageProcessingResult.Failure(mapping.Error ?? "tiling-config mapping failed.");
-        }
+        var outputMessages = _outputMessageBuilder.Map(tbMessage, focusedPxWkt);
 
         var index = 0;
         try
         {
-            foreach (var ingestMessage in mapping.Messages!)
+            foreach (var ingestMessage in outputMessages)
             {
                 var outputBody = JsonSerializer.SerializeToUtf8Bytes(ingestMessage, SerializerOptions);
                 var outputEnvelope = new RabbitMqMessageEnvelope($"{message.MessageId}-{index}", outputBody);
@@ -127,16 +118,16 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                 "TBPublisher message {MessageId} failed while publishing output messages: {PublishedCount} of {TotalCount} were already published before the failure and may be duplicated if this message is later replayed from the dead-letter queue.",
                 message.MessageId,
                 index,
-                mapping.Messages!.Count);
+                outputMessages.Count);
             throw;
         }
 
-        TbPublisherDiagnostics.MessagesPublishedToOutput.Add(mapping.Messages!.Count);
+        TbPublisherDiagnostics.MessagesPublishedToOutput.Add(outputMessages.Count);
         _logger.LogInformation(
             "TBPublisher message {MessageId} processed successfully for tenant {TenantId}, published {Count} tiling-config message(s).",
             message.MessageId,
             tbMessage.TenantId,
-            mapping.Messages!.Count);
+            outputMessages.Count);
         return new RabbitMqMessageProcessingResult(true, null, null);
     }
 }
