@@ -12,7 +12,6 @@ public static class Program
     public static async Task Main(string[] args)
     {
         var builder = Host.CreateApplicationBuilder(args);
-        builder.Logging.ClearProviders();
 
         var shutdownTimeoutSeconds = 30;
         var configuredShutdownTimeout = builder.Configuration["Gateway:ShutdownTimeoutSeconds"];

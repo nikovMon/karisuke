@@ -10,7 +10,6 @@ using ImagingPipeline.RabbitMqClient;
 public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
 {
     private readonly IRabbitMqConsumer _consumer;
-    private readonly IRabbitMqPublisher _publisher;
     private readonly ActiveRuleCache _ruleCache;
     private readonly GatewayInputMessageParser _inputParser;
     private readonly RuleMatcher _ruleMatcher;
@@ -19,7 +18,6 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
 
     public GatewayWorker(
         IRabbitMqConsumer consumer,
-        IRabbitMqPublisher publisher,
         ActiveRuleCache ruleCache,
         GatewayInputMessageParser inputParser,
         RuleMatcher ruleMatcher,
@@ -27,7 +25,6 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
         GatewayHealthState healthState)
     {
         _consumer = consumer;
-        _publisher = publisher;
         _ruleCache = ruleCache;
         _inputParser = inputParser;
         _ruleMatcher = ruleMatcher;
@@ -49,7 +46,7 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
         }
     }
 
-    public async Task<RabbitMqMessageProcessingResult> HandleAsync(
+    public Task<RabbitMqMessageProcessingResult> HandleAsync(
         RabbitMqMessageEnvelope message,
         CancellationToken cancellationToken = default)
     {
@@ -60,29 +57,29 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
             var matches = _ruleMatcher.Match(input, rules);
             var outputs = _outputBuilder.BuildOutputs(input, matches);
             var correlationId = message.CorrelationId ?? message.MessageId;
+            var outputMessages = new RabbitMqMessageEnvelope[outputs.Count];
 
             for (var outputIndex = 0; outputIndex < outputs.Count; outputIndex++)
             {
-                await _publisher.PublishToOutputAsync(
+                outputMessages[outputIndex] =
                     message with
                     {
                         MessageId = CreateOutputMessageId(message.MessageId, outputs[outputIndex], outputIndex),
                         Body = outputs[outputIndex].Body,
                         ContentType = "application/json",
                         CorrelationId = correlationId
-                    },
-                    cancellationToken);
+                    };
             }
 
-            return new RabbitMqMessageProcessingResult(true, null, null);
+            return Task.FromResult(RabbitMqMessageProcessingResult.Success(outputMessages));
         }
         catch (GatewayValidationException ex)
         {
-            return RabbitMqMessageProcessingResult.Failure($"{ex.ErrorCode}: {ex.Message}");
+            return Task.FromResult(RabbitMqMessageProcessingResult.Failure($"{ex.ErrorCode}: {ex.Message}"));
         }
         catch (GatewayProcessingException ex)
         {
-            return RabbitMqMessageProcessingResult.Failure(ex.Message);
+            return Task.FromResult(RabbitMqMessageProcessingResult.Failure(ex.Message));
         }
     }
 

@@ -56,7 +56,7 @@ public sealed class GatewayInputMessageParser
             throw new GatewayValidationException("Input resolution is required and must be a positive number.", "gateway.invalid_resolution");
         }
 
-        var acquisitionTime = ReadAcquisitionTime(root);
+        var photoTime = ReadPhotoTime(root);
         var geometry = ReadGeometry(root);
 
         return new GatewayInputMessage(
@@ -64,27 +64,27 @@ public sealed class GatewayInputMessageParser
             sensorName,
             sensorType,
             resolution,
-            acquisitionTime,
+            photoTime,
             geometry);
     }
 
-    private DateTimeOffset? ReadAcquisitionTime(JsonElement root)
+    private DateTimeOffset? ReadPhotoTime(JsonElement root)
     {
-        if (!_json.TryRead(root, GatewayInputMessageSchema.AcquisitionTime, out var element) ||
+        if (!_json.TryRead(root, GatewayInputMessageSchema.PhotoTime, out var element) ||
             element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
         {
             return null;
         }
 
         if (element.ValueKind != JsonValueKind.String ||
-            !DateTimeOffset.TryParse(element.GetString(), out var acquisitionTime))
+            !DateTimeOffset.TryParse(element.GetString(), out var photoTime))
         {
             throw new GatewayValidationException(
-                "Input acquisition time must be parseable as DateTimeOffset when provided.",
-                "gateway.invalid_acquisition_time");
+                "Input photo time must be parseable as DateTimeOffset when provided.",
+                "gateway.invalid_photo_time");
         }
 
-        return acquisitionTime.ToUniversalTime();
+        return photoTime.ToUniversalTime();
     }
 
     private Geometry ReadGeometry(JsonElement root)

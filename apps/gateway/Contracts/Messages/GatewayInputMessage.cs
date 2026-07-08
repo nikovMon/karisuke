@@ -7,5 +7,6 @@ public sealed record GatewayInputMessage(
     string SensorName,
     string? SensorType,
     double Resolution,
-    DateTimeOffset? AcquisitionTime,
-    Geometry Geometry);
+    DateTimeOffset? PhotoTime,
+    Geometry Geometry
+);

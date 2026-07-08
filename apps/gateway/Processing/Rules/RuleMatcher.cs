@@ -14,8 +14,7 @@ public sealed class RuleMatcher
         foreach (var activeRule in activeRules)
         {
             var rule = activeRule.Rule;
-            if (!rule.IsActive ||
-                !MatchesSensor(input, rule) ||
+            if (!MatchesSensor(input, rule) ||
                 !MatchesResolution(input, rule))
             {
                 continue;

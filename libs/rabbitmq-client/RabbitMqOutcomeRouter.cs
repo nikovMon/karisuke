@@ -30,7 +30,14 @@ internal sealed class RabbitMqOutcomeRouter
         {
             if (result.IsSuccess)
             {
-                if (result.OutputBody is not null)
+                if (result.OutputMessages is not null)
+                {
+                    foreach (var output in result.OutputMessages)
+                    {
+                        await _publisher.PublishToOutputAsync(output, cancellationToken);
+                    }
+                }
+                else if (result.OutputBody is not null)
                 {
                     var output = delivery.Message with { Body = result.OutputBody };
                     await _publisher.PublishToOutputAsync(output, cancellationToken);

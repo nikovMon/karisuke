@@ -12,7 +12,7 @@ namespace ImagingPipeline.Gateway.Tests;
 public sealed class GatewayWorkerTests
 {
     [Fact]
-    public async Task HandleAsyncPublishesOneOutputPerMatchedRuleTenant()
+    public async Task HandleAsyncReturnsOneOutputPerMatchedRuleTenant()
     {
         var rule = MatchingRule();
         rule.TenantsInfo =
@@ -26,10 +26,11 @@ public sealed class GatewayWorkerTests
 
         Assert.True(result.IsSuccess);
         Assert.Null(result.OutputBody);
-        Assert.Equal(2, harness.Publisher.Outputs.Count);
+        var outputs = OutputMessages(result);
+        Assert.Equal(2, outputs.Count);
 
-        using var first = JsonDocument.Parse(harness.Publisher.Outputs[0].Body);
-        using var second = JsonDocument.Parse(harness.Publisher.Outputs[1].Body);
+        using var first = JsonDocument.Parse(outputs[0].Body);
+        using var second = JsonDocument.Parse(outputs[1].Body);
         Assert.Equal("rule-1", first.RootElement.GetProperty("ruleId").GetString());
         Assert.Equal("FindAir", first.RootElement.GetProperty("algorithmName").GetString());
         Assert.Equal("der", first.RootElement.GetProperty("tenantId").GetString());
@@ -52,12 +53,12 @@ public sealed class GatewayWorkerTests
                 "sensorType"
             ],
             first.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
-        Assert.All(harness.Publisher.Outputs, output =>
+        Assert.All(outputs, output =>
         {
             Assert.Equal("message-1", output.CorrelationId);
         });
-        Assert.Equal("message-1:gateway-output:rule-1:der:0", harness.Publisher.Outputs[0].MessageId);
-        Assert.Equal("message-1:gateway-output:rule-1:findair:1", harness.Publisher.Outputs[1].MessageId);
+        Assert.Equal("message-1:gateway-output:rule-1:der:0", outputs[0].MessageId);
+        Assert.Equal("message-1:gateway-output:rule-1:findair:1", outputs[1].MessageId);
     }
 
     [Fact]
@@ -70,7 +71,62 @@ public sealed class GatewayWorkerTests
         var result = await harness.GatewayWorker.HandleAsync(InputMessage());
 
         Assert.True(result.IsSuccess);
-        Assert.Empty(harness.Publisher.Outputs);
+        Assert.Empty(OutputMessages(result));
+    }
+
+    [Fact]
+    public async Task HandleAsyncIgnoresInvalidAndInactiveRulesFromSnapshot()
+    {
+        var validRule = MatchingRule();
+        var invalidRule = MatchingRule();
+        invalidRule.Id = "invalid-rule";
+        invalidRule.TenantsInfo = [];
+        var inactiveRule = MatchingRule();
+        inactiveRule.Id = "inactive-rule";
+        inactiveRule.IsActive = false;
+        await using var harness = await GatewayWorkerHarness.CreateAsync([validRule, invalidRule, inactiveRule]);
+
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage());
+
+        Assert.True(result.IsSuccess);
+        var outputs = OutputMessages(result);
+        Assert.Single(outputs);
+        using var output = JsonDocument.Parse(outputs[0].Body);
+        Assert.Equal("rule-1", output.RootElement.GetProperty("ruleId").GetString());
+    }
+
+    [Fact]
+    public async Task ActiveRuleCacheMarksFailedRefreshAndKeepsLastValidSnapshot()
+    {
+        var health = new GatewayHealthState();
+        var geometry = new GatewayGeometryConverter();
+        var cache = new ActiveRuleCache(
+            new FailingAfterInitialLoadRepository([MatchingRule()]),
+            new RuleValidator(geometry),
+            Options.Create(new GatewaySettings
+            {
+                RuleRefreshIntervalSeconds = 1
+            }),
+            health);
+
+        await cache.StartAsync(CancellationToken.None);
+        try
+        {
+            var refreshFailed = await WaitUntilAsync(
+                () => health.ConsecutiveRulesRefreshFailures > 0,
+                TimeSpan.FromSeconds(3));
+
+            Assert.True(refreshFailed);
+            Assert.True(health.RulesLoaded);
+            Assert.NotNull(health.LastSuccessfulRulesRefreshAt);
+            Assert.NotNull(health.LastFailedRulesRefreshAt);
+            Assert.Single(cache.Current);
+        }
+        finally
+        {
+            await cache.StopAsync(CancellationToken.None);
+            cache.Dispose();
+        }
     }
 
     [Fact]
@@ -83,7 +139,7 @@ public sealed class GatewayWorkerTests
         var result = await harness.GatewayWorker.HandleAsync(InputMessage(sensorType: "radar"));
 
         Assert.True(result.IsSuccess);
-        Assert.Empty(harness.Publisher.Outputs);
+        Assert.Empty(OutputMessages(result));
     }
 
     [Fact]
@@ -96,7 +152,7 @@ public sealed class GatewayWorkerTests
 
         Assert.False(result.IsSuccess);
         Assert.Contains("gateway.missing_image_id", result.Error, StringComparison.Ordinal);
-        Assert.Empty(harness.Publisher.Outputs);
+        Assert.Empty(OutputMessages(result));
     }
 
     private static RabbitMqMessageEnvelope InputMessage(string sensorType = "camera") =>
@@ -161,17 +217,34 @@ public sealed class GatewayWorkerTests
             TileSizeHeight = height
         };
 
+    private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            if (predicate())
+            {
+                return true;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        }
+
+        return predicate();
+    }
+
+    private static IReadOnlyList<RabbitMqMessageEnvelope> OutputMessages(RabbitMqMessageProcessingResult result) =>
+        result.OutputMessages ?? [];
+
     private sealed class GatewayWorkerHarness : IAsyncDisposable
     {
-        private GatewayWorkerHarness(GatewayWorker gatewayWorker, RecordingPublisher publisher, ActiveRuleCache ruleCache)
+        private GatewayWorkerHarness(GatewayWorker gatewayWorker, ActiveRuleCache ruleCache)
         {
             GatewayWorker = gatewayWorker;
-            Publisher = publisher;
             RuleCache = ruleCache;
         }
 
         public GatewayWorker GatewayWorker { get; }
-        public RecordingPublisher Publisher { get; }
         private ActiveRuleCache RuleCache { get; }
 
         public static async Task<GatewayWorkerHarness> CreateAsync(IReadOnlyList<RuleConfigDto> rules)
@@ -193,17 +266,15 @@ public sealed class GatewayWorkerTests
                 health);
             await ruleCache.StartAsync(CancellationToken.None);
 
-            var publisher = new RecordingPublisher();
             var worker = new GatewayWorker(
                 new NoopConsumer(),
-                publisher,
                 ruleCache,
                 inputParser,
                 new RuleMatcher(),
                 outputBuilder,
                 health);
 
-            return new GatewayWorkerHarness(worker, publisher, ruleCache);
+            return new GatewayWorkerHarness(worker, ruleCache);
         }
 
         public async ValueTask DisposeAsync()
@@ -226,34 +297,30 @@ public sealed class GatewayWorkerTests
             Task.FromResult(_rules);
     }
 
+    private sealed class FailingAfterInitialLoadRepository : IRuleRepository
+    {
+        private readonly IReadOnlyList<RuleConfigDto> _initialRules;
+        private int _calls;
+
+        public FailingAfterInitialLoadRepository(IReadOnlyList<RuleConfigDto> initialRules)
+        {
+            _initialRules = initialRules;
+        }
+
+        public Task<IReadOnlyList<RuleConfigDto>> GetActiveRulesAsync(CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _calls) == 1)
+            {
+                return Task.FromResult(_initialRules);
+            }
+
+            throw new InvalidOperationException("Refresh failed.");
+        }
+    }
+
     private sealed class NoopConsumer : IRabbitMqConsumer
     {
         public Task ConsumeAsync(IRabbitMqMessageHandler handler, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
-    }
-
-    private sealed class RecordingPublisher : IRabbitMqPublisher
-    {
-        public List<RabbitMqMessageEnvelope> Outputs { get; } = [];
-
-        public Task PublishAsync(
-            string exchange,
-            string routingKey,
-            RabbitMqMessageEnvelope message,
-            CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
-
-        public Task PublishToInputAsync(
-            RabbitMqMessageEnvelope message,
-            CancellationToken cancellationToken = default) =>
-            Task.CompletedTask;
-
-        public Task PublishToOutputAsync(
-            RabbitMqMessageEnvelope message,
-            CancellationToken cancellationToken = default)
-        {
-            Outputs.Add(message);
-            return Task.CompletedTask;
-        }
     }
 }

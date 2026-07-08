@@ -57,7 +57,7 @@ public sealed class GatewayOutputMessageBuilder
             TilingConfigs = tenant.TilingConfigs,
             ImageId = input.ImageId,
             RoiFootprint = _geometry.WriteGeoJson(match.IntersectionGeometry),
-            PhotoTime = input.AcquisitionTime,
+            PhotoTime = input.PhotoTime,
             SensorType = input.SensorType
         };
 

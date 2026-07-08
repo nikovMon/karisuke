@@ -75,6 +75,7 @@ public sealed class RabbitMqMessageEnvelopeTests
         Assert.True(result.IsSuccess);
         Assert.Equal(body, result.OutputBody);
         Assert.Null(result.Error);
+        Assert.Null(result.OutputMessages);
     }
 
     [Fact]
@@ -87,6 +88,24 @@ public sealed class RabbitMqMessageEnvelopeTests
         Assert.True(result.IsSuccess);
         Assert.Same(body, result.OutputBody);
         Assert.Null(result.Error);
+        Assert.Null(result.OutputMessages);
+    }
+
+    [Fact]
+    public void ProcessingResultSuccessCarriesOutputMessages()
+    {
+        var outputs = new[]
+        {
+            RabbitMqMessageEnvelope.FromUtf8("first", "output-1"),
+            RabbitMqMessageEnvelope.FromUtf8("second", "output-2")
+        };
+
+        var result = RabbitMqMessageProcessingResult.Success(outputs);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.OutputBody);
+        Assert.Null(result.Error);
+        Assert.Same(outputs, result.OutputMessages);
     }
 
     [Fact]
@@ -96,6 +115,7 @@ public sealed class RabbitMqMessageEnvelopeTests
 
         Assert.False(result.IsSuccess);
         Assert.Null(result.OutputBody);
+        Assert.Null(result.OutputMessages);
         Assert.Equal("bad", result.Error);
     }
 }

@@ -35,7 +35,7 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
         var initialRules = _validator.BuildSnapshot(
             await _repository.GetActiveRulesAsync(cancellationToken));
         Volatile.Write(ref _current, initialRules);
-        _healthState.MarkRulesLoaded();
+        _healthState.MarkRulesRefreshSucceeded();
 
         _refreshCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _refreshTask = Task.Run(() => RefreshLoopAsync(_refreshCancellation.Token), CancellationToken.None);
@@ -75,6 +75,7 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
             var rules = _validator.BuildSnapshot(
                 await _repository.GetActiveRulesAsync(cancellationToken));
             Volatile.Write(ref _current, rules);
+            _healthState.MarkRulesRefreshSucceeded();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -83,6 +84,7 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
         catch
         {
             // Keep the last valid snapshot when a refresh fails.
+            _healthState.MarkRulesRefreshFailed();
         }
     }
 

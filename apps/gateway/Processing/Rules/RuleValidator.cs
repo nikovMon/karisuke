@@ -15,13 +15,18 @@ public sealed class RuleValidator
 
     public IReadOnlyList<ActiveRule> BuildSnapshot(IReadOnlyList<RuleConfigDto> activeRules)
     {
-        var errors = new List<string>();
         var snapshot = new List<ActiveRule>(activeRules.Count);
 
         foreach (var rule in activeRules)
         {
+            if (!rule.IsActive)
+            {
+                continue;
+            }
+
             Normalize(rule);
 
+            var errors = new List<string>();
             var validationResults = new List<ValidationResult>();
             var context = new ValidationContext(rule);
             if (!Validator.TryValidateObject(rule, context, validationResults, validateAllProperties: true))
@@ -31,16 +36,10 @@ public sealed class RuleValidator
 
             ValidateTenantConfig(rule, errors);
             var geometry = ReadRuleGeometry(rule, errors);
-            if (geometry is not null)
+            if (errors.Count == 0 && geometry is not null)
             {
                 snapshot.Add(new ActiveRule(rule, geometry));
             }
-        }
-
-        if (errors.Count > 0)
-        {
-            throw new InvalidOperationException(
-                "Invalid active rule snapshot: " + string.Join("; ", errors.Take(20)));
         }
 
         return snapshot.ToArray();

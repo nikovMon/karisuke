@@ -49,6 +49,30 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
     }
 
     [RabbitMqBrokerFact]
+    public async Task SuccessfulHandlerOutputMessagesArePublishedToOutputQueue()
+    {
+        var topology = CreateTopology();
+        await using var provider = BuildProvider(topology);
+        var publisher = provider.GetRequiredService<IRabbitMqPublisher>();
+        var consumer = provider.GetRequiredService<IRabbitMqConsumer>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var consumerTask = consumer.ConsumeAsync(new MultiOutputHandler(), cts.Token);
+        await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8("ok", "input-1"), cts.Token);
+
+        var outputs = new[]
+        {
+            await WaitForMessageAsync(topology.OutputQueue, cts.Token),
+            await WaitForMessageAsync(topology.OutputQueue, cts.Token)
+        };
+        await StopConsumerAsync(consumerTask, cts);
+
+        Assert.Contains("OK-1", outputs);
+        Assert.Contains("OK-2", outputs);
+        Assert.Null(await BasicGetAsync(topology.DeadLetterQueue, CancellationToken.None));
+    }
+
+    [RabbitMqBrokerFact]
     public async Task FailedHandlerIsDeadLetteredByBroker()
     {
         var topology = CreateTopology();
@@ -376,6 +400,32 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
             CancellationToken cancellationToken = default)
         {
             return Task.FromResult(new RabbitMqMessageProcessingResult(true, null, null));
+        }
+    }
+
+    private sealed class MultiOutputHandler : IRabbitMqMessageHandler
+    {
+        public Task<RabbitMqMessageProcessingResult> HandleAsync(
+            RabbitMqMessageEnvelope message,
+            CancellationToken cancellationToken = default)
+        {
+            var outputs = new[]
+            {
+                message with
+                {
+                    MessageId = $"{message.MessageId}:output:1",
+                    Body = Encoding.UTF8.GetBytes("OK-1"),
+                    CorrelationId = message.MessageId
+                },
+                message with
+                {
+                    MessageId = $"{message.MessageId}:output:2",
+                    Body = Encoding.UTF8.GetBytes("OK-2"),
+                    CorrelationId = message.MessageId
+                }
+            };
+
+            return Task.FromResult(RabbitMqMessageProcessingResult.Success(outputs));
         }
     }
 
