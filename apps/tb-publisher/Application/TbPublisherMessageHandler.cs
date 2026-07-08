@@ -55,12 +55,12 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
         }
 
         TbPublisherDiagnostics.MessagesValidated.Add(1);
-        var tbMessage = validation.Message!;
+        var inputMessage = validation.Message!;
 
         IReadOnlyList<IReadOnlyList<double>> groundPoints;
         try
         {
-            groundPoints = _geometryConverter.ExtractGroundPoints(tbMessage.RoiFootprint);
+            groundPoints = _geometryConverter.ExtractGroundPoints(inputMessage.RoiFootprint);
         }
         catch (TbPublisherValidationException ex)
         {
@@ -68,7 +68,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                 ex,
                 "TBPublisher message {MessageId} has an invalid roiFootprint for image {ImageId}.",
                 message.MessageId,
-                tbMessage.ImageId);
+                inputMessage.ImageId);
             return RabbitMqMessageProcessingResult.Failure(ex.Message);
         }
 
@@ -76,7 +76,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
         try
         {
             var request = new ProjectionMapperRequestDto { GroundPoints = groundPoints };
-            var coordinates = await _projectionMapperClient.MapAsync(tbMessage.ImageId, request, cancellationToken);
+            var coordinates = await _projectionMapperClient.MapAsync(inputMessage.ImageId, request, cancellationToken);
             focusedPxWkt = _geometryConverter.BuildFocusedPxWkt(coordinates);
         }
         catch (ProjectionMapperClientException ex)
@@ -85,7 +85,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                 ex,
                 "TBPublisher message {MessageId} failed projection mapping for image {ImageId}.",
                 message.MessageId,
-                tbMessage.ImageId);
+                inputMessage.ImageId);
             return RabbitMqMessageProcessingResult.Failure($"projection mapping failed: {ex.Message}");
         }
         catch (TbPublisherValidationException ex)
@@ -94,11 +94,11 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                 ex,
                 "TBPublisher message {MessageId} received an invalid pixel geometry from the projection mapper for image {ImageId}.",
                 message.MessageId,
-                tbMessage.ImageId);
+                inputMessage.ImageId);
             return RabbitMqMessageProcessingResult.Failure(ex.Message);
         }
 
-        var outputMessages = _outputMessageBuilder.Map(tbMessage, focusedPxWkt);
+        var outputMessages = _outputMessageBuilder.Map(inputMessage, focusedPxWkt);
 
         var index = 0;
         try
@@ -126,7 +126,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
         _logger.LogInformation(
             "TBPublisher message {MessageId} processed successfully for tenant {TenantId}, published {Count} tiling-config message(s).",
             message.MessageId,
-            tbMessage.TenantId,
+            inputMessage.TenantId,
             outputMessages.Count);
         return new RabbitMqMessageProcessingResult(true, null, null);
     }
