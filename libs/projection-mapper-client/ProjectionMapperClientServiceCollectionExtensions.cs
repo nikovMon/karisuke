@@ -17,7 +17,6 @@ public static class ProjectionMapperClientServiceCollectionExtensions
             .ValidateOnStart();
 
         services.AddHttpClient<IProjectionMapperClient, ProjectionMapperClient>(ConfigureHttpClient);
-        services.AddHttpClient<IProjectionMapperHealthProbe, ProjectionMapperHealthProbe>(ConfigureHttpClient);
 
         return services;
     }
