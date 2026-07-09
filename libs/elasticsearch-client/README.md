@@ -11,7 +11,7 @@ It exposes two clients through DI:
 
 ## Source Layout
 
-- `ElasticsearchClient.cs`: client interface, implementation, and client exception.
+- `ElasticsearchDocumentClient.cs`: client interface, implementation, and client exception.
 - `ElasticsearchQueries.cs`: search requests, filters, results, and query JSON builder.
 - `ElasticsearchOptions.cs`: configuration options and JSON serialization.
 - `ElasticsearchExtensions.cs`: dependency injection registration.

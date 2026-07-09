@@ -7,11 +7,14 @@ namespace ImagingPipeline.ElasticsearchClient;
 
 public interface IElasticsearchDocumentClient
 {
-    Task<IReadOnlyList<TDocument>> SearchAsync<TDocument>(ElasticsearchSearchRequest request);
+    Task<IReadOnlyList<TDocument>> SearchAsync<TDocument>(ElasticsearchSearchRequest request)
+        where TDocument : class;
 
-    Task<IReadOnlyList<TDocument>> SearchBySensorAsync<TDocument>(ElasticsearchSensorSearchRequest request);
+    Task<IReadOnlyList<TDocument>> SearchBySensorAsync<TDocument>(ElasticsearchSensorSearchRequest request)
+        where TDocument : class;
 
-    Task<IReadOnlyList<TDocument>> SearchByGeoShapeAsync<TDocument>(ElasticsearchGeoShapeSearchRequest request);
+    Task<IReadOnlyList<TDocument>> SearchByGeoShapeAsync<TDocument>(ElasticsearchGeoShapeSearchRequest request)
+        where TDocument : class;
 
     Task<TDocument?> GetAsync<TDocument>(
         string indexName,
@@ -21,6 +24,11 @@ public interface IElasticsearchDocumentClient
     Task<ElasticsearchDocument<TDocument>?> GetDocumentAsync<TDocument>(
         string indexName,
         string id,
+        CancellationToken cancellationToken = default)
+        where TDocument : class;
+
+    Task<IReadOnlyList<ElasticsearchDocument<TDocument>>> SearchDocumentsAsync<TDocument>(
+        ElasticsearchSearchRequest request,
         CancellationToken cancellationToken = default)
         where TDocument : class;
 
@@ -60,19 +68,14 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
     }
 
     public async Task<IReadOnlyList<TDocument>> SearchAsync<TDocument>(ElasticsearchSearchRequest request)
-    {
-        var body = ElasticsearchQueryJsonBuilder.BuildSearchBody(request);
-        var response = await _client.LowLevel.SearchAsync<StringResponse>(
-            request.IndexName,
-            PostData.String(body),
-            new SearchRequestParameters());
-
-        EnsureValid(response, $"search index '{request.IndexName}'");
-        return DeserializeSearchResponse<TDocument>(response.Body);
-    }
+        where TDocument : class =>
+        (await SearchDocumentsAsync<TDocument>(request))
+            .Select(document => document.Source)
+            .ToArray();
 
     public Task<IReadOnlyList<TDocument>> SearchBySensorAsync<TDocument>(
-        ElasticsearchSensorSearchRequest request) =>
+        ElasticsearchSensorSearchRequest request)
+        where TDocument : class =>
         SearchAsync<TDocument>(
             new ElasticsearchSearchRequest
             {
@@ -92,7 +95,8 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
             });
 
     public Task<IReadOnlyList<TDocument>> SearchByGeoShapeAsync<TDocument>(
-        ElasticsearchGeoShapeSearchRequest request) =>
+        ElasticsearchGeoShapeSearchRequest request)
+        where TDocument : class =>
         SearchAsync<TDocument>(
             new ElasticsearchSearchRequest
             {
@@ -139,6 +143,22 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
 
         EnsureValid(response, $"get document '{id}' from index '{indexName}'");
         return response.Source is null ? null : new ElasticsearchDocument<TDocument>(response.Id, response.Source);
+    }
+
+    public async Task<IReadOnlyList<ElasticsearchDocument<TDocument>>> SearchDocumentsAsync<TDocument>(
+        ElasticsearchSearchRequest request,
+        CancellationToken cancellationToken = default)
+        where TDocument : class
+    {
+        var body = ElasticsearchQueryJsonBuilder.BuildSearchBody(request);
+        var response = await _client.LowLevel.SearchAsync<StringResponse>(
+            request.IndexName,
+            PostData.String(body),
+            new SearchRequestParameters(),
+            cancellationToken);
+
+        EnsureValid(response, $"search index '{request.IndexName}'");
+        return DeserializeDocumentSearchResponse<TDocument>(response.Body);
     }
 
     public async Task<IReadOnlyList<ElasticsearchDocument<TDocument>>> SearchDocumentsAsync<TDocument>(
@@ -222,6 +242,15 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
     }
 
     private static IReadOnlyList<TDocument> DeserializeSearchResponse<TDocument>(string body)
+        where TDocument : class
+    {
+        return DeserializeDocumentSearchResponse<TDocument>(body)
+            .Select(document => document.Source)
+            .ToArray();
+    }
+
+    private static IReadOnlyList<ElasticsearchDocument<TDocument>> DeserializeDocumentSearchResponse<TDocument>(string body)
+        where TDocument : class
     {
         if (string.IsNullOrWhiteSpace(body))
         {
@@ -230,9 +259,8 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
 
         var response = JsonSerializer.Deserialize<ElasticsearchSearchResponse<TDocument>>(body, JsonOptions);
         return response?.Hits?.Items
-            .Select(hit => hit.Source)
-            .Where(source => source is not null)
-            .Cast<TDocument>()
+            .Where(hit => hit.Source is not null)
+            .Select(hit => new ElasticsearchDocument<TDocument>(hit.Id, hit.Source!))
             .ToArray() ?? [];
     }
 

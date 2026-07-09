@@ -1,14 +1,11 @@
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Common.Dtos.Rules.Requests;
 using ImagingPipeline.Common.Dtos.Rules.Responses;
-using ImagingPipeline.Rules.Api.Repositories;
 
 namespace ImagingPipeline.Rules.Api.Services;
 
 internal interface IRuleService
 {
-    IRuleRepository Repository { get; }
-
     Task<IReadOnlyList<RuleDto>> GetRulesAsync(
         bool? isActive,
         int from,

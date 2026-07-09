@@ -1,45 +1,94 @@
 using ImagingPipeline.Common.Dtos.Rules.Models;
-using ImagingPipeline.Rules.Api.Repositories;
 using ImagingPipeline.Common.Dtos.Rules.Requests;
 using ImagingPipeline.Common.Dtos.Rules.Responses;
+using ImagingPipeline.ElasticsearchClient;
+using ImagingPipeline.Rules.Api.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using System.Text.Json.Serialization;
 
 namespace ImagingPipeline.Rules.Api.Services;
 
 public sealed class RuleService : IRuleService
 {
-    private readonly IRuleRepository _repository;
+    private const string RuleNameKeywordField = "ruleName.keyword";
+    private const string IsActiveField = "isActive";
+    private const string RuleNameField = "ruleName";
+
+    private readonly IElasticsearchDocumentClient _client;
+    private readonly string _indexName;
     private readonly ILogger<RuleService> _logger;
 
-    public RuleService(IRuleRepository repository, ILogger<RuleService> logger)
+    public RuleService(
+        IElasticsearchDocumentClient client,
+        IOptions<RulesElasticsearchOptions> options,
+        ILogger<RuleService> logger)
     {
-        _repository = repository;
+        _client = client;
+        _indexName = options.Value.IndexName;
         _logger = logger;
     }
 
-    public IRuleRepository Repository => _repository;
-
-    public Task<IReadOnlyList<RuleDto>> GetRulesAsync(
+    public async Task<IReadOnlyList<RuleDto>> GetRulesAsync(
         bool? isActive,
         int from,
         int size,
         CancellationToken cancellationToken = default)
     {
-        return _repository.GetAllAsync(isActive, from, size, cancellationToken);
+        var documents = await SearchRulesAsync(
+            BuildRulesSearchRequest(isActive, from, size),
+            cancellationToken);
+
+        return documents
+            .Select(HydrateId)
+            .ToArray();
     }
 
-    public Task<IReadOnlyList<string>> GetRuleNamesAsync(
+    public async Task<IReadOnlyList<string>> GetRuleNamesAsync(
         bool? isActive,
         int from,
         int size,
-        CancellationToken cancellationToken = default) =>
-        _repository.GetNamesAsync(isActive, from, size, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        var request = BuildRulesSearchRequest(isActive, from, size);
+        request.SourceIncludes.Add(RuleNameField);
 
-    public Task<RuleDto?> GetByIdAsync(string id, CancellationToken cancellationToken = default) =>
-        _repository.GetByIdAsync(id, cancellationToken);
+        var documents = await SearchRulesAsync<RuleNameProjection>(request, cancellationToken);
+        return documents
+            .Select(document => document.Source.RuleName)
+            .ToArray();
+    }
 
-    public Task<RuleDto?> GetByNameAsync(string ruleName, CancellationToken cancellationToken = default) =>
-        _repository.GetByNameAsync(ruleName, cancellationToken);
+    public async Task<RuleDto?> GetByIdAsync(string id, CancellationToken cancellationToken = default)
+    {
+        var document = await ExecuteElasticAsync(
+            () => _client.GetDocumentAsync<RuleDto>(_indexName, id, cancellationToken),
+            $"get rule '{id}'");
+
+        return document is null ? null : HydrateId(document);
+    }
+
+    public async Task<RuleDto?> GetByNameAsync(string ruleName, CancellationToken cancellationToken = default)
+    {
+        var documents = await SearchRulesAsync(
+            new ElasticsearchSearchRequest
+            {
+                IndexName = _indexName,
+                Size = 1,
+                TermFilters =
+                [
+                    new ElasticsearchTermFilter
+                    {
+                        Field = RuleNameKeywordField,
+                        Value = ruleName
+                    }
+                ]
+            },
+            cancellationToken);
+
+        var document = documents.FirstOrDefault();
+        return document is null ? null : HydrateId(document);
+    }
 
     public async Task<RuleOperationResult<RuleDto>> CreateAsync(
         CreateRuleRequest request,
@@ -60,7 +109,7 @@ public sealed class RuleService : IRuleService
             return RuleOperationResult<RuleDto>.ValidationFailed(string.Join(" | ", errors));
         }
 
-        if (await _repository.ExistsByNameAsync(rule.RuleName, cancellationToken: cancellationToken))
+        if (await ExistsByNameAsync(rule.RuleName, cancellationToken: cancellationToken))
         {
             _logger.LogWarning(
                 "Rule operation {Operation} failed because ruleName {RuleName} already exists. RuleId: {RuleId}",
@@ -75,7 +124,7 @@ public sealed class RuleService : IRuleService
         rule.UpdateTime = now;
         NormalizeRuleCollections(rule);
 
-        await _repository.SaveAsync(rule, cancellationToken);
+        await SaveAsync(rule, cancellationToken);
         _logger.LogInformation(
             "Rule operation {Operation} succeeded. RuleId: {RuleId}; RuleName: {RuleName}",
             "create",
@@ -109,7 +158,7 @@ public sealed class RuleService : IRuleService
             return RuleOperationResult<RuleDto>.ValidationFailed(string.Join(" | ", validationErrors));
         }
 
-        var rule = await _repository.GetByIdAsync(id, cancellationToken);
+        var rule = await GetByIdAsync(id, cancellationToken);
         if (rule is null)
         {
             _logger.LogWarning(
@@ -121,7 +170,7 @@ public sealed class RuleService : IRuleService
 
         if (request.HasField("ruleName") &&
             !string.Equals(rule.RuleName, request.RuleName, StringComparison.Ordinal) &&
-            await _repository.ExistsByNameAsync(request.RuleName!, id, cancellationToken))
+            await ExistsByNameAsync(request.RuleName!, id, cancellationToken))
         {
             _logger.LogWarning(
                 "Rule operation {Operation} failed because ruleName {RuleName} already exists. RuleId: {RuleId}",
@@ -139,7 +188,7 @@ public sealed class RuleService : IRuleService
             return RuleOperationResult<RuleDto>.ValidationFailed(string.Join(" | ", ruleErrors));
         }
 
-        await _repository.SaveAsync(rule, cancellationToken);
+        await SaveAsync(rule, cancellationToken);
         _logger.LogInformation(
             "Rule operation {Operation} succeeded. RuleId: {RuleId}; UpdatedFieldCount: {UpdatedFieldCount}",
             operation,
@@ -198,7 +247,7 @@ public sealed class RuleService : IRuleService
             "delete",
             id);
 
-        var deleted = await _repository.DeleteAsync(id, cancellationToken);
+        var deleted = await DeleteRuleAsync(id, cancellationToken);
         if (deleted)
         {
             _logger.LogInformation(
@@ -277,7 +326,7 @@ public sealed class RuleService : IRuleService
         var result = new BulkOperationResult();
         foreach (var id in ids)
         {
-            var rule = await _repository.GetByIdAsync(id, cancellationToken);
+            var rule = await GetByIdAsync(id, cancellationToken);
             if (rule is null)
             {
                 _logger.LogWarning(
@@ -300,12 +349,116 @@ public sealed class RuleService : IRuleService
 
             rule.UpdateTime = DateTimeOffset.UtcNow;
             NormalizeRuleCollections(rule);
-            await _repository.SaveAsync(rule, cancellationToken);
+            await SaveAsync(rule, cancellationToken);
             result.SuccessIds.Add(id);
         }
 
         LogBulkOutcome(operation, ids.Count, result, request.SensorName);
         return BuildBulkOperationResult(result);
+    }
+
+    private async Task<bool> ExistsByNameAsync(
+        string ruleName,
+        string? excludingId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var request = new ElasticsearchSearchRequest
+        {
+            IndexName = _indexName,
+            Size = 1,
+            TermFilters =
+            [
+                new ElasticsearchTermFilter
+                {
+                    Field = RuleNameKeywordField,
+                    Value = ruleName
+                }
+            ]
+        };
+
+        if (!string.IsNullOrWhiteSpace(excludingId))
+        {
+            request.ExcludedIds.Add(excludingId);
+        }
+
+        var documents = await SearchRulesAsync(request, cancellationToken);
+        return documents.Count > 0;
+    }
+
+    private async Task SaveAsync(RuleDto rule, CancellationToken cancellationToken)
+    {
+        rule.Id = await ExecuteElasticAsync(
+            () => _client.IndexAsync(
+                _indexName,
+                rule.Id,
+                rule,
+                waitForRefresh: false,
+                allowGeneratedId: true,
+                cancellationToken),
+            $"save rule '{rule.Id}'");
+    }
+
+    private Task<bool> DeleteRuleAsync(string id, CancellationToken cancellationToken) =>
+        ExecuteElasticAsync(
+            () => _client.DeleteAsync<RuleDto>(
+                _indexName,
+                id,
+                waitForRefresh: false,
+                cancellationToken),
+            $"delete rule '{id}'");
+
+    private Task<IReadOnlyList<ElasticsearchDocument<RuleDto>>> SearchRulesAsync(
+        ElasticsearchSearchRequest request,
+        CancellationToken cancellationToken) =>
+        SearchRulesAsync<RuleDto>(request, cancellationToken);
+
+    private Task<IReadOnlyList<ElasticsearchDocument<TDocument>>> SearchRulesAsync<TDocument>(
+        ElasticsearchSearchRequest request,
+        CancellationToken cancellationToken)
+        where TDocument : class =>
+        ExecuteElasticAsync(
+            () => _client.SearchDocumentsAsync<TDocument>(request, cancellationToken),
+            "search rules");
+
+    private ElasticsearchSearchRequest BuildRulesSearchRequest(bool? isActive, int from, int size)
+    {
+        var request = new ElasticsearchSearchRequest
+        {
+            IndexName = _indexName,
+            From = from,
+            Size = size
+        };
+
+        if (isActive.HasValue)
+        {
+            request.TermFilters.Add(new ElasticsearchTermFilter
+            {
+                Field = IsActiveField,
+                Value = isActive.Value
+            });
+        }
+
+        return request;
+    }
+
+    private static async Task<TResult> ExecuteElasticAsync<TResult>(
+        Func<Task<TResult>> operation,
+        string description)
+    {
+        try
+        {
+            return await operation();
+        }
+        catch (ElasticsearchClientException exception)
+        {
+            throw new RulePersistenceException($"Elasticsearch failed to {description}: {exception.Message}");
+        }
+    }
+
+    private static RuleDto HydrateId(ElasticsearchDocument<RuleDto> document)
+    {
+        document.Source.Id = document.Id;
+        return document.Source;
     }
 
     private static RuleOperationResult<BulkOperationResult> BuildBulkOperationResult(
@@ -440,5 +593,11 @@ public sealed class RuleService : IRuleService
             result.SuccessIds.Count,
             result.FailedIds.Count,
             sensorName);
+    }
+
+    private sealed class RuleNameProjection
+    {
+        [JsonPropertyName("ruleName")]
+        public string RuleName { get; set; } = string.Empty;
     }
 }

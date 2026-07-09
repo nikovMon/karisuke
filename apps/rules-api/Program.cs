@@ -3,7 +3,6 @@ using ImagingPipeline.ElasticsearchClient;
 using ImagingPipeline.Rules.Api.Configuration;
 using ImagingPipeline.Rules.Api.Health;
 using ImagingPipeline.Rules.Api.Observability;
-using ImagingPipeline.Rules.Api.Repositories;
 using ImagingPipeline.Rules.Api.Services;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
@@ -77,7 +76,6 @@ public sealed partial class Program
             .Bind(builder.Configuration.GetSection(RulesElasticsearchOptions.SectionName))
             .Validate(options => options.IsValid(out _), "Rules Elasticsearch settings are invalid.")
             .ValidateOnStart();
-        builder.Services.AddSingleton<IRuleRepository, ElasticsearchRuleRepository>();
         builder.Services.AddSingleton<RuleService>();
         builder.Services.AddSingleton<IElasticsearchHealthProbe, ElasticsearchHealthProbe>();
 
@@ -89,11 +87,11 @@ public sealed partial class Program
             exceptionApp.Run(async context =>
             {
                 var exception = context.Features.Get<IExceptionHandlerPathFeature>()?.Error;
-                if (exception is RuleRepositoryException repositoryException)
+                if (exception is RulePersistenceException persistenceException)
                 {
                     app.Logger.LogError(
-                        repositoryException,
-                        "Elasticsearch repository operation failed for {RequestMethod} {RequestPath}. TraceId: {TraceId}",
+                        persistenceException,
+                        "Elasticsearch persistence operation failed for {RequestMethod} {RequestPath}. TraceId: {TraceId}",
                         context.Request.Method,
                         context.Request.Path.Value,
                         context.TraceIdentifier);

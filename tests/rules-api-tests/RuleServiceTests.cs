@@ -1,10 +1,12 @@
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Common.Dtos.Rules.Requests;
 using ImagingPipeline.Common.Dtos.Rules.Responses;
+using ImagingPipeline.Rules.Api.Configuration;
 using ImagingPipeline.Rules.Api.Services;
 using ImagingPipeline.Rules.Api.Tests.Fakes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace ImagingPipeline.Rules.Api.Tests;
 
@@ -358,7 +360,10 @@ public sealed class RuleServiceTests
     public async Task ValidationFailureWritesStructuredWarningMetadata()
     {
         var logger = new RecordingLogger<RuleService>();
-        var service = new RuleService(new InMemoryRuleRepository(), logger);
+        var service = new RuleService(
+            new InMemoryRuleRepository(),
+            Options.Create(new RulesElasticsearchOptions { IndexName = "rules" }),
+            logger);
         var request = new UpdateRuleRequest();
 
         var result = await service.UpdateAsync("rule-1", request);
@@ -376,7 +381,10 @@ public sealed class RuleServiceTests
     }
 
     private static RuleService CreateService(InMemoryRuleRepository repository) =>
-        new(repository, NullLogger<RuleService>.Instance);
+        new(
+            repository,
+            Options.Create(new RulesElasticsearchOptions { IndexName = "rules" }),
+            NullLogger<RuleService>.Instance);
 
     private static CreateRuleRequest ValidCreateRequest(string ruleName) =>
         new()
