@@ -13,11 +13,11 @@ namespace ImagingPipeline.Rules.Api.Controllers;
 [Produces("application/json")]
 public sealed class RulesController : ControllerBase
 {
-    private readonly IRuleService _service;
+    private readonly RuleService _service;
     private readonly RulesElasticsearchOptions _options;
 
     public RulesController(
-        IRuleService service,
+        RuleService service,
         IOptions<RulesElasticsearchOptions> options)
     {
         _service = service;
@@ -86,7 +86,7 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _service.CreateAsync(request, cancellationToken);
-        return ToActionResult(result, createdAtId: result.Value?.Id);
+        return ToResultWithBody(result, createdAtId: result.Value?.Id);
     }
 
     // Update routes
@@ -101,7 +101,7 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _service.UpdateAsync(id, request, cancellationToken);
-        return ToActionResult(result);
+        return ToResultWithBody(result);
     }
 
     [HttpPatch("bulk")]
@@ -116,11 +116,12 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _service.UpdateBulkAsync(ParseIds(ids), request, cancellationToken);
-        return ToActionResult(result);
+        return ToResultWithBody(result);
     }
 
     [HttpPatch("{id}/activity")]
     [ProducesResponseType(typeof(RuleDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ChangeActivity(
         [FromRoute] string id,
@@ -128,7 +129,7 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _service.ChangeActivityAsync(id, request, cancellationToken);
-        return ToActionResult(result);
+        return ToResultWithBody(result);
     }
 
     // Sensor routes
@@ -143,7 +144,7 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _service.AddSensorsAsync(ParseIds(ids), request, cancellationToken);
-        return ToActionResult(result);
+        return ToResultWithBody(result);
     }
 
     [HttpPatch("sensors/remove")]
@@ -157,7 +158,7 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _service.RemoveSensorsAsync(ParseIds(ids), request, cancellationToken);
-        return ToActionResult(result);
+        return ToResultWithBody(result);
     }
 
     // Delete route
@@ -169,10 +170,10 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _service.DeleteAsync(id, cancellationToken);
-        return result.Status == RuleOperationStatus.Success ? NoContent() : ToActionResult(result);
+        return result.Status == RuleOperationStatus.Success ? NoContent() : ToResultWithoutBody(result);
     }
 
-    private IActionResult ToActionResult<T>(RuleOperationResult<T> result, string? createdAtId = null)
+    private IActionResult ToResultWithBody<T>(RuleOperationResult<T> result, string? createdAtId = null)
     {
         return result.Status switch
         {
@@ -189,7 +190,7 @@ public sealed class RulesController : ControllerBase
         };
     }
 
-    private IActionResult ToActionResult(RuleOperationResult result)
+    private IActionResult ToResultWithoutBody(RuleOperationResult result)
     {
         return result.Status switch
         {

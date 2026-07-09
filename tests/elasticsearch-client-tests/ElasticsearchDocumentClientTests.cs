@@ -128,6 +128,52 @@ public sealed class ElasticsearchDocumentClientTests
     }
 
     [Fact]
+    public async Task GetDocumentAsyncReturnsElasticsearchIdWithSource()
+    {
+        var client = CreateDocumentClient("""
+            {
+              "_id": "elastic-id",
+              "found": true,
+              "_source": {
+                "ruleName": "one"
+              }
+            }
+            """);
+
+        var result = await client.GetDocumentAsync<TestRuleDocument>("rules", "elastic-id");
+
+        Assert.NotNull(result);
+        Assert.Equal("elastic-id", result.Id);
+        Assert.Equal("one", result.Source.RuleName);
+    }
+
+    [Fact]
+    public async Task SearchDocumentsAsyncReturnsElasticsearchIdsWithSources()
+    {
+        var client = CreateDocumentClient("""
+            {
+              "hits": {
+                "hits": [
+                  {
+                    "_id": "elastic-id",
+                    "_source": {
+                      "ruleName": "one"
+                    }
+                  }
+                ]
+              }
+            }
+            """);
+
+        var results = await client.SearchDocumentsAsync<TestRuleDocument>(
+            descriptor => descriptor.Index("rules").Size(1).Query(query => query.MatchAll()));
+
+        var result = Assert.Single(results);
+        Assert.Equal("elastic-id", result.Id);
+        Assert.Equal("one", result.Source.RuleName);
+    }
+
+    [Fact]
     public async Task GetAsyncThrowsClientExceptionWhenElasticsearchFails()
     {
         var client = CreateDocumentClient("""
@@ -169,6 +215,25 @@ public sealed class ElasticsearchDocumentClientTests
 
         await Assert.ThrowsAsync<ArgumentNullException>(() =>
             client.IndexAsync<TestRuleDocument>("rules", "rule-1", null!));
+    }
+
+    [Fact]
+    public async Task IndexAsyncCanReturnGeneratedElasticsearchId()
+    {
+        var client = CreateDocumentClient("""
+            {
+              "_id": "generated-id",
+              "result": "created"
+            }
+            """, statusCode: 201);
+
+        var id = await client.IndexAsync(
+            "rules",
+            id: null,
+            new TestRuleDocument { RuleName = "one" },
+            allowGeneratedId: true);
+
+        Assert.Equal("generated-id", id);
     }
 
     [Fact]

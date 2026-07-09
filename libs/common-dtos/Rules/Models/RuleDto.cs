@@ -163,33 +163,3 @@ public sealed class RuleDto : IValidatableObject
         }
     }
 }
-
-public enum AlgorithmName
-{
-    FindAir,
-    Rpn
-}
-
-public sealed class TenantInfo
-{
-    [JsonPropertyName("tenantId")]
-    public string TenantId { get; set; } = string.Empty;
-
-    [JsonPropertyName("tilingConfigs")]
-    public List<TilingConfig> TilingConfigs { get; set; } = [];
-}
-
-public sealed class TilingConfig
-{
-    [JsonPropertyName("tileSizeWidth")]
-    public int TileSizeWidth { get; set; }
-
-    [JsonPropertyName("tileSizeHeight")]
-    public int TileSizeHeight { get; set; }
-
-    [JsonPropertyName("tileOverlapWidth")]
-    public int TileOverlapWidth { get; set; }
-
-    [JsonPropertyName("tileOverlapHeight")]
-    public int TileOverlapHeight { get; set; }
-}

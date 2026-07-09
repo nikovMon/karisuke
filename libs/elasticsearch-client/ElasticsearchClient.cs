@@ -18,19 +18,36 @@ public interface IElasticsearchDocumentClient
         string id)
         where TDocument : class;
 
-    Task IndexAsync<TDocument>(
+    Task<ElasticsearchDocument<TDocument>?> GetDocumentAsync<TDocument>(
         string indexName,
         string id,
+        CancellationToken cancellationToken = default)
+        where TDocument : class;
+
+    Task<IReadOnlyList<ElasticsearchDocument<TDocument>>> SearchDocumentsAsync<TDocument>(
+        Func<SearchDescriptor<TDocument>, ISearchRequest> configure,
+        CancellationToken cancellationToken = default)
+        where TDocument : class;
+
+    Task<string> IndexAsync<TDocument>(
+        string indexName,
+        string? id,
         TDocument document,
-        bool waitForRefresh = true)
+        bool waitForRefresh = true,
+        bool allowGeneratedId = false,
+        CancellationToken cancellationToken = default)
         where TDocument : class;
 
     Task<bool> DeleteAsync<TDocument>(
         string indexName,
         string id,
-        bool waitForRefresh = true)
+        bool waitForRefresh = true,
+        CancellationToken cancellationToken = default)
         where TDocument : class;
 }
+
+public sealed record ElasticsearchDocument<TDocument>(string Id, TDocument Source)
+    where TDocument : class;
 
 public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
 {
@@ -98,11 +115,22 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
         string id)
         where TDocument : class
     {
+        var document = await GetDocumentAsync<TDocument>(indexName, id);
+        return document?.Source;
+    }
+
+    public async Task<ElasticsearchDocument<TDocument>?> GetDocumentAsync<TDocument>(
+        string indexName,
+        string id,
+        CancellationToken cancellationToken = default)
+        where TDocument : class
+    {
         ValidateIndexAndId(indexName, id);
 
         var response = await _client.GetAsync<TDocument>(
             id,
-            descriptor => descriptor.Index(indexName));
+            descriptor => descriptor.Index(indexName),
+            cancellationToken);
 
         if (!response.Found && response.ApiCall?.HttpStatusCode == (int)HttpStatusCode.NotFound)
         {
@@ -110,34 +138,67 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
         }
 
         EnsureValid(response, $"get document '{id}' from index '{indexName}'");
-        return response.Source;
+        return response.Source is null ? null : new ElasticsearchDocument<TDocument>(response.Id, response.Source);
     }
 
-    public async Task IndexAsync<TDocument>(
-        string indexName,
-        string id,
-        TDocument document,
-        bool waitForRefresh = true)
+    public async Task<IReadOnlyList<ElasticsearchDocument<TDocument>>> SearchDocumentsAsync<TDocument>(
+        Func<SearchDescriptor<TDocument>, ISearchRequest> configure,
+        CancellationToken cancellationToken = default)
         where TDocument : class
     {
-        ValidateIndexAndId(indexName, id);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var response = await _client.SearchAsync<TDocument>(
+            descriptor => configure(descriptor),
+            cancellationToken);
+
+        EnsureValid(response, "search documents");
+        return response.Hits
+            .Where(hit => hit.Source is not null)
+            .Select(hit => new ElasticsearchDocument<TDocument>(hit.Id, hit.Source))
+            .ToArray();
+    }
+
+    public async Task<string> IndexAsync<TDocument>(
+        string indexName,
+        string? id,
+        TDocument document,
+        bool waitForRefresh = true,
+        bool allowGeneratedId = false,
+        CancellationToken cancellationToken = default)
+        where TDocument : class
+    {
+        ValidateIndex(indexName);
+        if (!allowGeneratedId)
+        {
+            ValidateId(id);
+        }
+
         ArgumentNullException.ThrowIfNull(document);
 
         var response = await _client.IndexAsync(
             document,
             descriptor =>
             {
-                descriptor = descriptor.Index(indexName).Id(id);
+                descriptor = descriptor.Index(indexName);
+                if (!string.IsNullOrWhiteSpace(id))
+                {
+                    descriptor = descriptor.Id(id);
+                }
+
                 return waitForRefresh ? descriptor.Refresh(Refresh.WaitFor) : descriptor;
-            });
+            },
+            cancellationToken);
 
         EnsureValid(response, $"index document '{id}' into index '{indexName}'");
+        return response.Id;
     }
 
     public async Task<bool> DeleteAsync<TDocument>(
         string indexName,
         string id,
-        bool waitForRefresh = true)
+        bool waitForRefresh = true,
+        CancellationToken cancellationToken = default)
         where TDocument : class
     {
         ValidateIndexAndId(indexName, id);
@@ -148,7 +209,8 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
             {
                 descriptor = descriptor.Index(indexName);
                 return waitForRefresh ? descriptor.Refresh(Refresh.WaitFor) : descriptor;
-            });
+            },
+            cancellationToken);
 
         if (response.Result == Result.NotFound)
         {
@@ -176,11 +238,20 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
 
     private static void ValidateIndexAndId(string indexName, string id)
     {
+        ValidateIndex(indexName);
+        ValidateId(id);
+    }
+
+    private static void ValidateIndex(string indexName)
+    {
         if (string.IsNullOrWhiteSpace(indexName))
         {
             throw new ArgumentException("Index name must not be empty.", nameof(indexName));
         }
+    }
 
+    private static void ValidateId(string? id)
+    {
         if (string.IsNullOrWhiteSpace(id))
         {
             throw new ArgumentException("Document id must not be empty.", nameof(id));

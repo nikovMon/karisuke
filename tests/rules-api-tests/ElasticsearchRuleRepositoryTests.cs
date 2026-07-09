@@ -273,7 +273,7 @@ public sealed class ElasticsearchRuleRepositoryTests
         }
 
         return new ElasticsearchRuleRepository(
-            new ElasticClient(settings),
+            new ElasticsearchDocumentClient(new ElasticClient(settings)),
             Options.Create(new RulesElasticsearchOptions { IndexName = "rules" }));
     }
 

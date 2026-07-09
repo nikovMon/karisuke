@@ -17,6 +17,8 @@ public sealed class RuleService : IRuleService
         _logger = logger;
     }
 
+    public IRuleRepository Repository => _repository;
+
     public Task<IReadOnlyList<RuleDto>> GetRulesAsync(
         bool? isActive,
         int from,
@@ -71,7 +73,7 @@ public sealed class RuleService : IRuleService
         var now = DateTimeOffset.UtcNow;
         rule.CreationTime = now;
         rule.UpdateTime = now;
-        NormalizeCollections(rule);
+        NormalizeRuleCollections(rule);
 
         await _repository.SaveAsync(rule, cancellationToken);
         _logger.LogInformation(
@@ -86,9 +88,9 @@ public sealed class RuleService : IRuleService
         string id,
         UpdateRuleRequest request,
         CancellationToken cancellationToken = default) =>
-        UpdateCoreAsync(id, request, "update", cancellationToken);
+        UpdateExistingRuleAsync(id, request, "update", cancellationToken);
 
-    private async Task<RuleOperationResult<RuleDto>> UpdateCoreAsync(
+    private async Task<RuleOperationResult<RuleDto>> UpdateExistingRuleAsync(
         string id,
         UpdateRuleRequest request,
         string operation,
@@ -179,7 +181,7 @@ public sealed class RuleService : IRuleService
         var result = new BulkOperationResult();
         foreach (var id in ids)
         {
-            var updated = await UpdateCoreAsync(id, request, "bulk_update_item", cancellationToken);
+            var updated = await UpdateExistingRuleAsync(id, request, "bulk_update_item", cancellationToken);
             AddBulkResult(result, id, updated.Status, updated.Error);
         }
 
@@ -229,7 +231,7 @@ public sealed class RuleService : IRuleService
             IsActive = request.IsActive!.Value
         };
         update.ProvidedFields.Add("isActive");
-        return await UpdateCoreAsync(id, update, "change_activity", cancellationToken);
+        return await UpdateExistingRuleAsync(id, update, "change_activity", cancellationToken);
     }
 
     public Task<RuleOperationResult<BulkOperationResult>> AddSensorsAsync(
@@ -297,7 +299,7 @@ public sealed class RuleService : IRuleService
             }
 
             rule.UpdateTime = DateTimeOffset.UtcNow;
-            NormalizeCollections(rule);
+            NormalizeRuleCollections(rule);
             await _repository.SaveAsync(rule, cancellationToken);
             result.SuccessIds.Add(id);
         }
@@ -321,68 +323,32 @@ public sealed class RuleService : IRuleService
 
     private static void ApplyUpdate(RuleDto rule, UpdateRuleRequest request)
     {
-        if (request.HasField("ruleName"))
+        var updates = new Dictionary<string, Action>(StringComparer.Ordinal)
         {
-            rule.RuleName = request.RuleName ?? string.Empty;
-        }
+            ["ruleName"] = () => rule.RuleName = request.RuleName ?? string.Empty,
+            ["description"] = () => rule.Description = request.Description,
+            ["algorithmName"] = () => rule.AlgorithmName = request.AlgorithmName!.Value,
+            ["sensors"] = () => rule.Sensors = request.Sensors ?? new Dictionary<string, List<string>>(StringComparer.Ordinal),
+            ["isActive"] = () => rule.IsActive = request.IsActive.GetValueOrDefault(),
+            ["tenantsInfo"] = () => rule.TenantsInfo = request.TenantsInfo ?? [],
+            ["minimumResolution"] = () => rule.MinimumResolution = request.MinimumResolution.GetValueOrDefault(),
+            ["maximumResolution"] = () => rule.MaximumResolution = request.MaximumResolution!.Value,
+            ["area"] = () => rule.Area = request.Area ?? string.Empty,
+            ["locationWkt"] = () => rule.LocationWkt = request.LocationWkt,
+            ["locationGeoJson"] = () => rule.LocationGeoJson = request.LocationGeoJson,
+            ["isPhotoOld"] = () => rule.IsPhotoOld = request.IsPhotoOld
+        };
 
-        if (request.HasField("description"))
+        foreach (var field in request.ProvidedFields)
         {
-            rule.Description = request.Description;
-        }
-
-        if (request.HasField("algorithmName"))
-        {
-            rule.AlgorithmName = request.AlgorithmName!.Value;
-        }
-
-        if (request.HasField("sensors"))
-        {
-            rule.Sensors = request.Sensors ?? new Dictionary<string, List<string>>(StringComparer.Ordinal);
-        }
-
-        if (request.HasField("isActive"))
-        {
-            rule.IsActive = request.IsActive.GetValueOrDefault();
-        }
-
-        if (request.HasField("tenantsInfo"))
-        {
-            rule.TenantsInfo = request.TenantsInfo ?? [];
-        }
-
-        if (request.HasField("minimumResolution"))
-        {
-            rule.MinimumResolution = request.MinimumResolution.GetValueOrDefault();
-        }
-
-        if (request.HasField("maximumResolution"))
-        {
-            rule.MaximumResolution = request.MaximumResolution!.Value;
-        }
-
-        if (request.HasField("area"))
-        {
-            rule.Area = request.Area ?? string.Empty;
-        }
-
-        if (request.HasField("locationWkt"))
-        {
-            rule.LocationWkt = request.LocationWkt;
-        }
-
-        if (request.HasField("locationGeoJson"))
-        {
-            rule.LocationGeoJson = request.LocationGeoJson;
-        }
-
-        if (request.HasField("isPhotoOld"))
-        {
-            rule.IsPhotoOld = request.IsPhotoOld;
+            if (updates.TryGetValue(field, out var update))
+            {
+                update();
+            }
         }
 
         rule.UpdateTime = DateTimeOffset.UtcNow;
-        NormalizeCollections(rule);
+        NormalizeRuleCollections(rule);
     }
 
     private static void AddSensorValues(RuleDto rule, RuleSensorUpdateRequest request)
@@ -416,7 +382,7 @@ public sealed class RuleService : IRuleService
         }
     }
 
-    private static void NormalizeCollections(RuleDto rule)
+    private static void NormalizeRuleCollections(RuleDto rule)
     {
         rule.Sensors = new Dictionary<string, List<string>>(
             (rule.Sensors ?? new Dictionary<string, List<string>>(StringComparer.Ordinal))

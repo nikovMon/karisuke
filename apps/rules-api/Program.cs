@@ -75,10 +75,10 @@ public sealed partial class Program
         builder.Services.AddElasticsearchClient(builder.Configuration);
         builder.Services.AddOptions<RulesElasticsearchOptions>()
             .Bind(builder.Configuration.GetSection(RulesElasticsearchOptions.SectionName))
-            .Validate(options => options.IsValid(out _), "Fail to build Rules ElasticSearch")
+            .Validate(options => options.IsValid(out _), "Rules Elasticsearch settings are invalid.")
             .ValidateOnStart();
         builder.Services.AddSingleton<IRuleRepository, ElasticsearchRuleRepository>();
-        builder.Services.AddSingleton<IRuleService, RuleService>();
+        builder.Services.AddSingleton<RuleService>();
         builder.Services.AddSingleton<IElasticsearchHealthProbe, ElasticsearchHealthProbe>();
 
         var app = builder.Build();
