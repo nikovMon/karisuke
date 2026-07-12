@@ -32,6 +32,7 @@ public sealed class RabbitMqClientOptions
     public Dictionary<string, object?> OutputBindingArguments { get; set; } = new(StringComparer.Ordinal);
     public Dictionary<string, object?> DeadLetterBindingArguments { get; set; } = new(StringComparer.Ordinal);
     public ushort PrefetchCount { get; set; } = 1;
+    public ushort ConsumerConcurrency { get; set; } = 1;
     public int PublisherChannelPoolSize { get; set; } = 4;
     public int ReconnectDelaySeconds { get; set; } = 5;
 
@@ -88,9 +89,9 @@ public sealed class RabbitMqClientOptions
             return false;
         }
 
-        if (PrefetchCount == 0)
+        if (PrefetchCount == 0 || ConsumerConcurrency == 0)
         {
-            error = "RabbitMq PrefetchCount must be greater than zero for consumers.";
+            error = "RabbitMq PrefetchCount and ConsumerConcurrency must be greater than zero for consumers.";
             return false;
         }
 

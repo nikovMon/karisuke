@@ -17,6 +17,7 @@ public sealed class RabbitMqClientOptionsTests
         Assert.Equal("int.algo.gateway_rules.dlq", options.DeadLetterQueue);
         Assert.Equal(string.Empty, options.DeadLetterExchange);
         Assert.Equal((ushort)1, options.PrefetchCount);
+        Assert.Equal((ushort)1, options.ConsumerConcurrency);
     }
 
     [Fact]
@@ -237,7 +238,19 @@ public sealed class RabbitMqClientOptionsTests
         };
 
         Assert.False(options.IsConsumerValid(out var error));
-        Assert.Equal("RabbitMq PrefetchCount must be greater than zero for consumers.", error);
+        Assert.Equal("RabbitMq PrefetchCount and ConsumerConcurrency must be greater than zero for consumers.", error);
+    }
+
+    [Fact]
+    public void ConsumerValidationRejectsZeroConsumerConcurrency()
+    {
+        var options = new RabbitMqClientOptions
+        {
+            ConsumerConcurrency = 0
+        };
+
+        Assert.False(options.IsConsumerValid(out var error));
+        Assert.Equal("RabbitMq PrefetchCount and ConsumerConcurrency must be greater than zero for consumers.", error);
     }
 
     [Fact]

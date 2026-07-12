@@ -1,6 +1,7 @@
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Gateway.Configuration;
 using ImagingPipeline.Gateway.Health;
+using ImagingPipeline.Gateway.Processing.Messages;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
@@ -9,7 +10,7 @@ namespace ImagingPipeline.Gateway.Processing.Rules;
 public sealed class ActiveRuleCache : IHostedService, IDisposable
 {
     private readonly IRuleRepository _repository;
-    private readonly RuleValidator _validator;
+    private readonly GatewayGeometryConverter _geometry;
     private readonly GatewayHealthState _healthState;
     private readonly TimeSpan _refreshInterval;
     private CancellationTokenSource? _refreshCancellation;
@@ -18,12 +19,12 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
 
     public ActiveRuleCache(
         IRuleRepository repository,
-        RuleValidator validator,
+        GatewayGeometryConverter geometry,
         IOptions<GatewaySettings> settings,
         GatewayHealthState healthState)
     {
         _repository = repository;
-        _validator = validator;
+        _geometry = geometry;
         _healthState = healthState;
         _refreshInterval = TimeSpan.FromSeconds(settings.Value.RuleRefreshIntervalSeconds);
     }
@@ -32,8 +33,7 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var initialRules = _validator.BuildSnapshot(
-            await _repository.GetActiveRulesAsync(cancellationToken));
+        var initialRules = BuildSnapshot(await _repository.GetActiveRulesAsync(cancellationToken));
         Volatile.Write(ref _current, initialRules);
         _healthState.MarkRulesRefreshSucceeded();
 
@@ -72,8 +72,7 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
     {
         try
         {
-            var rules = _validator.BuildSnapshot(
-                await _repository.GetActiveRulesAsync(cancellationToken));
+            var rules = BuildSnapshot(await _repository.GetActiveRulesAsync(cancellationToken));
             Volatile.Write(ref _current, rules);
             _healthState.MarkRulesRefreshSucceeded();
         }
@@ -87,6 +86,11 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
             _healthState.MarkRulesRefreshFailed();
         }
     }
+
+    private ActiveRule[] BuildSnapshot(IReadOnlyList<RuleConfigDto> rules) =>
+        rules
+            .Select(rule => new ActiveRule(rule, _geometry.ReadRuleGeometry(rule)))
+            .ToArray();
 
     public void Dispose()
     {

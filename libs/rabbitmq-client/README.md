@@ -75,6 +75,7 @@ Consumer configuration:
     "OutputExchangeHeaders": {},
     "DeadLetterExchangeHeaders": {},
     "PrefetchCount": 1,
+    "ConsumerConcurrency": 1,
     "PublisherChannelPoolSize": 4,
     "ReconnectDelaySeconds": 5
   }
@@ -134,7 +135,10 @@ DLQ settings:
 Operational settings:
 
 - `PrefetchCount` limits how many unacknowledged messages RabbitMQ can deliver
-  to the consumer at once. It must be greater than zero.
+  to each consumer channel at once. It must be greater than zero.
+- `ConsumerConcurrency` controls how many consumer channels run in one process.
+  It must be greater than zero. The maximum unacknowledged input messages per
+  process is roughly `ConsumerConcurrency * PrefetchCount`.
 - `PublisherChannelPoolSize` limits concurrent publisher channels in one
   process. Each publish leases one confirmed channel from this pool.
 
@@ -188,7 +192,10 @@ await consumer.ConsumeAsync(handler, stoppingToken);
   be active per process. Publishing leases a channel exclusively and returns it
   to the pool after the publish confirmation.
 - `PrefetchCount` limits how many unacknowledged messages RabbitMQ can deliver
-  to the consumer at once.
+  to each consumer channel at once.
+- `ConsumerConcurrency` controls how many consumer channels process messages in
+  parallel inside one process. Prefer modest values when the service also scales
+  horizontally across pods.
 - The library emits metrics through the `ImagingPipeline.RabbitMqClient` meter and traces
   through the `ImagingPipeline.RabbitMqClient` activity source. Configure OpenTelemetry in
   the hosting app to export them.

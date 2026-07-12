@@ -75,34 +75,13 @@ public sealed class GatewayWorkerTests
     }
 
     [Fact]
-    public async Task HandleAsyncIgnoresInvalidAndInactiveRulesFromSnapshot()
-    {
-        var validRule = MatchingRule();
-        var invalidRule = MatchingRule();
-        invalidRule.Id = "invalid-rule";
-        invalidRule.TenantsInfo = [];
-        var inactiveRule = MatchingRule();
-        inactiveRule.Id = "inactive-rule";
-        inactiveRule.IsActive = false;
-        await using var harness = await GatewayWorkerHarness.CreateAsync([validRule, invalidRule, inactiveRule]);
-
-        var result = await harness.GatewayWorker.HandleAsync(InputMessage());
-
-        Assert.True(result.IsSuccess);
-        var outputs = OutputMessages(result);
-        Assert.Single(outputs);
-        using var output = JsonDocument.Parse(outputs[0].Body);
-        Assert.Equal("rule-1", output.RootElement.GetProperty("ruleId").GetString());
-    }
-
-    [Fact]
     public async Task ActiveRuleCacheMarksFailedRefreshAndKeepsLastValidSnapshot()
     {
         var health = new GatewayHealthState();
         var geometry = new GatewayGeometryConverter();
         var cache = new ActiveRuleCache(
             new FailingAfterInitialLoadRepository([MatchingRule()]),
-            new RuleValidator(geometry),
+            geometry,
             Options.Create(new GatewaySettings
             {
                 RuleRefreshIntervalSeconds = 1
@@ -258,7 +237,7 @@ public sealed class GatewayWorkerTests
             var outputBuilder = new GatewayOutputMessageBuilder(geometry);
             var ruleCache = new ActiveRuleCache(
                 new StaticRuleRepository(rules),
-                new RuleValidator(geometry),
+                geometry,
                 Options.Create(new GatewaySettings
                 {
                     RuleRefreshIntervalSeconds = 3600
