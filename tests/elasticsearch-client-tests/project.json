@@ -1,0 +1,13 @@
+{
+  "name": "elasticsearch-client-tests",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "tests/elasticsearch-client-tests",
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "dotnet test tests/elasticsearch-client-tests/ImagingPipeline.ElasticsearchClient.Tests.csproj"
+      }
+    }
+  }
+}
