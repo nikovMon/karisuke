@@ -32,10 +32,7 @@ internal sealed class RabbitMqOutcomeRouter
             {
                 if (result.OutputMessages is not null)
                 {
-                    foreach (var output in result.OutputMessages)
-                    {
-                        await _publisher.PublishToOutputAsync(output, cancellationToken);
-                    }
+                    await PublishOutputMessagesAsync(result.OutputMessages, cancellationToken);
                 }
                 else if (result.OutputBody is not null)
                 {
@@ -47,7 +44,7 @@ internal sealed class RabbitMqOutcomeRouter
                 RabbitMqClientDiagnostics.AckedMessages.Add(1,
                     RabbitMqClientDiagnostics.Tag("queue", _options.InputQueue),
                     RabbitMqClientDiagnostics.Tag("outcome", "success"));
-                _logger.LogInformation("Processed RabbitMQ message {MessageId}", delivery.Message.MessageId);
+                _logger.LogDebug("Processed RabbitMQ message {MessageId}", delivery.Message.MessageId);
                 return;
             }
 
@@ -74,5 +71,37 @@ internal sealed class RabbitMqOutcomeRouter
                 RabbitMqClientDiagnostics.Tag("queue", _options.InputQueue),
                 RabbitMqClientDiagnostics.Tag("requeue", true));
         }
+    }
+
+    private async Task PublishOutputMessagesAsync(
+        IReadOnlyList<RabbitMqMessageEnvelope> outputMessages,
+        CancellationToken cancellationToken)
+    {
+        if (outputMessages.Count == 0)
+        {
+            return;
+        }
+
+        if (outputMessages.Count == 1 || _options.OutputPublishConcurrency == 1)
+        {
+            foreach (var output in outputMessages)
+            {
+                await _publisher.PublishToOutputAsync(output, cancellationToken);
+            }
+
+            return;
+        }
+
+        await Parallel.ForEachAsync(
+            outputMessages,
+            new ParallelOptions
+            {
+                CancellationToken = cancellationToken,
+                MaxDegreeOfParallelism = Math.Min(_options.OutputPublishConcurrency, outputMessages.Count)
+            },
+            async (output, token) =>
+            {
+                await _publisher.PublishToOutputAsync(output, token);
+            });
     }
 }

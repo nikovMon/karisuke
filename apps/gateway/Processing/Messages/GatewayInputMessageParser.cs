@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ImagingPipeline.Common.Dtos.Gateway.Messages;
 using ImagingPipeline.Gateway.Contracts.Messages;
 using ImagingPipeline.Gateway.Errors;
 using NetTopologySuite.Geometries;

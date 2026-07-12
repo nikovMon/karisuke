@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 
-namespace ImagingPipeline.Gateway.Contracts.Messages;
+namespace ImagingPipeline.Common.Dtos.Gateway.Messages;
 
 public sealed class GatewayOutputPayload
 {

@@ -1,4 +1,7 @@
+using System.Security.Cryptography;
 using System.Text;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
 
 namespace ImagingPipeline.RabbitMqClient.Tests;
 
@@ -21,6 +24,25 @@ public sealed class RabbitMqMessageEnvelopeTests
 
         Assert.Equal("message-1", message.MessageId);
         Assert.Equal(Encoding.UTF8.GetBytes("hello"), message.Body);
+    }
+
+    [Fact]
+    public void DeliveryFactoryDerivesStableMessageIdFromBodyWhenMissing()
+    {
+        var body = Encoding.UTF8.GetBytes("hello");
+        var args = new BasicDeliverEventArgs(
+            "consumer",
+            1,
+            redelivered: false,
+            exchange: string.Empty,
+            routingKey: "input",
+            properties: new BasicProperties(),
+            body: body,
+            cancellationToken: CancellationToken.None);
+
+        var delivery = RabbitMqDeliveryFactory.Create(args);
+
+        Assert.Equal($"body-sha256:{Convert.ToHexString(SHA256.HashData(body))}", delivery.Message.MessageId);
     }
 
     [Fact]

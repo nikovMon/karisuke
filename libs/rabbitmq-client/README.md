@@ -39,6 +39,7 @@ Publisher-only configuration:
       "x-dead-letter-routing-key": "int.algo.gateway_rules.dlq"
     },
     "PublisherChannelPoolSize": 4,
+    "OutputPublishConcurrency": 4,
     "ReconnectDelaySeconds": 5
   }
 }
@@ -77,6 +78,7 @@ Consumer configuration:
     "PrefetchCount": 1,
     "ConsumerConcurrency": 1,
     "PublisherChannelPoolSize": 4,
+    "OutputPublishConcurrency": 4,
     "ReconnectDelaySeconds": 5
   }
 }
@@ -141,6 +143,8 @@ Operational settings:
   process is roughly `ConsumerConcurrency * PrefetchCount`.
 - `PublisherChannelPoolSize` limits concurrent publisher channels in one
   process. Each publish leases one confirmed channel from this pool.
+- `OutputPublishConcurrency` limits how many output messages from one handler
+  result can be published in parallel before the input message is acknowledged.
 
 Important RabbitMQ behavior:
 
@@ -148,9 +152,9 @@ Important RabbitMQ behavior:
   entity has the same durable/auto-delete/argument settings. Changing arguments
   on an already-created queue can cause RabbitMQ to reject the declaration with
   a precondition failure.
-- The publisher and consumer both declare the configured topology. This makes
-  startup convenient, but publisher-only apps also declare the output and DLQ
-  topology.
+- Consumer channels declare the configured topology when consumption starts.
+  Publisher channels declare the topology once when they are created, then reuse
+  that channel for later publishes.
 
 ## Publish
 
@@ -165,9 +169,8 @@ public sealed class Sender(IRabbitMqPublisher publisher)
 
 Use `PublishAsync(exchange, routingKey, message, cancellationToken)` for an
 explicit exchange/routing-key pair. The publisher leases a channel from a
-bounded publish-channel pool, declares configured topology, marks the message
-persistent, enables publisher confirmations, and awaits the confirmation before
-returning.
+bounded publish-channel pool, marks the message persistent, enables publisher
+confirmations, and awaits the confirmation before returning.
 
 ## Consume one message at a time
 
@@ -191,6 +194,10 @@ await consumer.ConsumeAsync(handler, stoppingToken);
 - `PublisherChannelPoolSize` controls how many concurrent publish channels can
   be active per process. Publishing leases a channel exclusively and returns it
   to the pool after the publish confirmation.
+- `OutputPublishConcurrency` controls bounded fan-out when a handler returns
+  multiple output messages. Higher values can reduce latency for large fan-out
+  results, but may publish a partial subset before a later failure causes the
+  input message to be requeued.
 - `PrefetchCount` limits how many unacknowledged messages RabbitMQ can deliver
   to each consumer channel at once.
 - `ConsumerConcurrency` controls how many consumer channels process messages in
@@ -207,6 +214,9 @@ await consumer.ConsumeAsync(handler, stoppingToken);
 
 - Success with an output body publishes to `OutputQueue`; only after that
   confirmed publish does the client acknowledge the input message.
+- Success with multiple output messages publishes them with bounded parallelism
+  controlled by `OutputPublishConcurrency`; only after all confirmed publishes
+  complete does the client acknowledge the input message.
 - Failures are negatively acknowledged with `requeue: false`. RabbitMQ routes
   them from `InputQueue` through the configured `DeadLetterExchange` into
   `DeadLetterQueue`.
@@ -216,7 +226,8 @@ await consumer.ConsumeAsync(handler, stoppingToken);
 This provides **at-least-once delivery**, not exactly-once delivery. A process
 failure between publishing output and acknowledging input can create a duplicate.
 Handlers and downstream consumers should therefore be idempotent, usually using
-`MessageId` as the deduplication key.
+`MessageId` as the deduplication key. When a delivered message has no broker
+message id, the client derives a stable `body-sha256:...` id from the body.
 
 ## Connection recovery
 

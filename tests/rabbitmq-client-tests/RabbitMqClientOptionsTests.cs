@@ -18,6 +18,7 @@ public sealed class RabbitMqClientOptionsTests
         Assert.Equal(string.Empty, options.DeadLetterExchange);
         Assert.Equal((ushort)1, options.PrefetchCount);
         Assert.Equal((ushort)1, options.ConsumerConcurrency);
+        Assert.Equal(4, options.OutputPublishConcurrency);
     }
 
     [Fact]
@@ -176,20 +177,23 @@ public sealed class RabbitMqClientOptionsTests
     }
 
     [Theory]
-    [InlineData(0, 1)]
-    [InlineData(1, 0)]
+    [InlineData(0, 1, 1)]
+    [InlineData(1, 0, 1)]
+    [InlineData(1, 1, 0)]
     public void PublisherValidationRejectsInvalidPoolOrReconnectSettings(
         int publisherChannelPoolSize,
+        int outputPublishConcurrency,
         int reconnectDelaySeconds)
     {
         var options = new RabbitMqClientOptions
         {
             PublisherChannelPoolSize = publisherChannelPoolSize,
+            OutputPublishConcurrency = outputPublishConcurrency,
             ReconnectDelaySeconds = reconnectDelaySeconds
         };
 
         Assert.False(options.IsPublisherValid(out var error));
-        Assert.Equal("RabbitMq publisher channel pool and reconnect settings are outside their valid ranges.", error);
+        Assert.Equal("RabbitMq publisher channel pool, output publish concurrency, and reconnect settings are outside their valid ranges.", error);
     }
 
     [Fact]

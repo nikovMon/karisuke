@@ -13,6 +13,7 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
     private readonly GatewayGeometryConverter _geometry;
     private readonly GatewayHealthState _healthState;
     private readonly TimeSpan _refreshInterval;
+    private readonly TimeSpan _refreshJitter;
     private CancellationTokenSource? _refreshCancellation;
     private Task? _refreshTask;
     private IReadOnlyList<ActiveRule> _current = [];
@@ -27,6 +28,7 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
         _geometry = geometry;
         _healthState = healthState;
         _refreshInterval = TimeSpan.FromSeconds(settings.Value.RuleRefreshIntervalSeconds);
+        _refreshJitter = TimeSpan.FromSeconds(settings.Value.RuleRefreshJitterSeconds);
     }
 
     public IReadOnlyList<ActiveRule> Current => Volatile.Read(ref _current);
@@ -61,9 +63,9 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
 
     private async Task RefreshLoopAsync(CancellationToken cancellationToken)
     {
-        using var timer = new PeriodicTimer(_refreshInterval);
-        while (await timer.WaitForNextTickAsync(cancellationToken))
+        while (!cancellationToken.IsCancellationRequested)
         {
+            await Task.Delay(NextRefreshDelay(), cancellationToken);
             await RefreshAsync(cancellationToken);
         }
     }
@@ -87,10 +89,78 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
         }
     }
 
-    private ActiveRule[] BuildSnapshot(IReadOnlyList<RuleConfigDto> rules) =>
-        rules
-            .Select(rule => new ActiveRule(rule, _geometry.ReadRuleGeometry(rule)))
-            .ToArray();
+    private TimeSpan NextRefreshDelay()
+    {
+        if (_refreshJitter <= TimeSpan.Zero)
+        {
+            return _refreshInterval;
+        }
+
+        var jitter = TimeSpan.FromMilliseconds(Random.Shared.NextDouble() * _refreshJitter.TotalMilliseconds);
+        return _refreshInterval + jitter;
+    }
+
+    private ActiveRule[] BuildSnapshot(IReadOnlyList<RuleConfigDto> rules)
+    {
+        var snapshot = new ActiveRule[rules.Count];
+        for (var ruleIndex = 0; ruleIndex < rules.Count; ruleIndex++)
+        {
+            snapshot[ruleIndex] = BuildSnapshot(rules[ruleIndex]);
+        }
+
+        return snapshot;
+    }
+
+    private ActiveRule BuildSnapshot(RuleConfigDto rule) =>
+        new(
+            rule.Id,
+            rule.AlgorithmName!.Value,
+            BuildSensorSnapshot(rule.Sensors),
+            BuildTenantSnapshot(rule.TenantsInfo),
+            rule.MinimumResolution,
+            rule.MaximumResolution,
+            _geometry.ReadRuleGeometry(rule));
+
+    private static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildSensorSnapshot(
+        IReadOnlyDictionary<string, List<string>>? sensors)
+    {
+        if (sensors is null || sensors.Count == 0)
+        {
+            return new Dictionary<string, IReadOnlySet<string>>(0, StringComparer.Ordinal);
+        }
+
+        var snapshot = new Dictionary<string, IReadOnlySet<string>>(sensors.Count, StringComparer.Ordinal);
+        foreach (var sensor in sensors)
+        {
+            snapshot[sensor.Key] = sensor.Value.ToHashSet(StringComparer.Ordinal);
+        }
+
+        return snapshot;
+    }
+
+    private static TenantInfo[] BuildTenantSnapshot(IReadOnlyList<TenantInfo> tenants)
+    {
+        var snapshot = new TenantInfo[tenants.Count];
+        for (var tenantIndex = 0; tenantIndex < tenants.Count; tenantIndex++)
+        {
+            var tenant = tenants[tenantIndex];
+            snapshot[tenantIndex] = new TenantInfo
+            {
+                TenantId = tenant.TenantId,
+                TilingConfigs = tenant.TilingConfigs
+                    .Select(tiling => new TilingConfig
+                    {
+                        TileSizeWidth = tiling.TileSizeWidth,
+                        TileSizeHeight = tiling.TileSizeHeight,
+                        TileOverlapWidth = tiling.TileOverlapWidth,
+                        TileOverlapHeight = tiling.TileOverlapHeight
+                    })
+                    .ToList()
+            };
+        }
+
+        return snapshot;
+    }
 
     public void Dispose()
     {

@@ -34,6 +34,7 @@ public sealed class RabbitMqClientOptions
     public ushort PrefetchCount { get; set; } = 1;
     public ushort ConsumerConcurrency { get; set; } = 1;
     public int PublisherChannelPoolSize { get; set; } = 4;
+    public int OutputPublishConcurrency { get; set; } = 4;
     public int ReconnectDelaySeconds { get; set; } = 5;
 
     internal string EffectiveInputExchange => InputExchange;
@@ -66,9 +67,9 @@ public sealed class RabbitMqClientOptions
             return false;
         }
 
-        if (PublisherChannelPoolSize < 1 || ReconnectDelaySeconds < 1)
+        if (PublisherChannelPoolSize < 1 || OutputPublishConcurrency < 1 || ReconnectDelaySeconds < 1)
         {
-            error = "RabbitMq publisher channel pool and reconnect settings are outside their valid ranges.";
+            error = "RabbitMq publisher channel pool, output publish concurrency, and reconnect settings are outside their valid ranges.";
             return false;
         }
 
