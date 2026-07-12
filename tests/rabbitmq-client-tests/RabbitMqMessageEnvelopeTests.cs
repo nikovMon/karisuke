@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
@@ -139,5 +140,75 @@ public sealed class RabbitMqMessageEnvelopeTests
         Assert.Null(result.OutputBody);
         Assert.Null(result.OutputMessages);
         Assert.Equal("bad", result.Error);
+        Assert.Equal(RabbitMqMessageFailureAction.DeadLetter, result.FailureAction);
+    }
+
+    [Fact]
+    public void ProcessingResultRetryableFailureCarriesRetryAction()
+    {
+        var result = RabbitMqMessageProcessingResult.RetryableFailure("temporary");
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("temporary", result.Error);
+        Assert.Equal(RabbitMqMessageFailureAction.Retry, result.FailureAction);
+    }
+
+    [Fact]
+    public void RetryMessageBuilderAddsRetryCountWhenMissing()
+    {
+        var message = RabbitMqMessageEnvelope.FromUtf8("""{"payload":{"id":"image-1"}}""", "message-1");
+
+        var result = RabbitMqRetryMessageBuilder.Build(message, "retry.count", maxRetryAttempts: 3);
+
+        Assert.Equal(RabbitMqRetryBuildStatus.Retry, result.Status);
+        Assert.Equal(0, result.CurrentRetryCount);
+        Assert.Equal(1, result.NextRetryCount);
+        Assert.NotNull(result.Message);
+
+        using var document = JsonDocument.Parse(result.Message!.Body);
+        Assert.Equal("image-1", document.RootElement.GetProperty("payload").GetProperty("id").GetString());
+        Assert.Equal(1, document.RootElement.GetProperty("retry").GetProperty("count").GetInt32());
+    }
+
+    [Fact]
+    public void RetryMessageBuilderIncrementsExistingRetryCount()
+    {
+        var message = RabbitMqMessageEnvelope.FromUtf8("""{"retry":{"count":2},"payload":{}}""", "message-1");
+
+        var result = RabbitMqRetryMessageBuilder.Build(message, "retry.count", maxRetryAttempts: 3);
+
+        Assert.Equal(RabbitMqRetryBuildStatus.Retry, result.Status);
+        Assert.Equal(2, result.CurrentRetryCount);
+        Assert.Equal(3, result.NextRetryCount);
+
+        using var document = JsonDocument.Parse(result.Message!.Body);
+        Assert.Equal(3, document.RootElement.GetProperty("retry").GetProperty("count").GetInt32());
+    }
+
+    [Fact]
+    public void RetryMessageBuilderStopsAtMaxAttempts()
+    {
+        var message = RabbitMqMessageEnvelope.FromUtf8("""{"retry":{"count":3},"payload":{}}""", "message-1");
+
+        var result = RabbitMqRetryMessageBuilder.Build(message, "retry.count", maxRetryAttempts: 3);
+
+        Assert.Equal(RabbitMqRetryBuildStatus.AttemptsExhausted, result.Status);
+        Assert.Null(result.Message);
+        Assert.Equal(3, result.CurrentRetryCount);
+    }
+
+    [Theory]
+    [InlineData("not-json")]
+    [InlineData("[]")]
+    [InlineData("""{"retry":{"count":"bad"}}""")]
+    public void RetryMessageBuilderRejectsBodyItCannotUpdate(string body)
+    {
+        var message = RabbitMqMessageEnvelope.FromUtf8(body, "message-1");
+
+        var result = RabbitMqRetryMessageBuilder.Build(message, "retry.count", maxRetryAttempts: 3);
+
+        Assert.Equal(RabbitMqRetryBuildStatus.InvalidMessage, result.Status);
+        Assert.Null(result.Message);
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
     }
 }

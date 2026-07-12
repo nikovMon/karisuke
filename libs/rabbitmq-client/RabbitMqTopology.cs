@@ -15,10 +15,13 @@ internal static class RabbitMqTopology
             options.OutputExchangeHeaders, cancellationToken);
         await DeclareExchangeAsync(channel, options.EffectiveDeadLetterExchange, options.DeadLetterExchangeType,
             options.DeadLetterExchangeHeaders, cancellationToken);
+        await DeclareExchangeAsync(channel, options.RetryExchange, options.RetryExchangeType,
+            options.RetryExchangeHeaders, cancellationToken);
 
         await DeclareQueueAsync(channel, options.InputQueue, BuildInputQueueArguments(options), cancellationToken);
         await DeclareQueueAsync(channel, options.OutputQueue, options.OutputQueueHeaders, cancellationToken);
         await DeclareQueueAsync(channel, options.EffectiveDeadLetterQueue, options.DeadLetterQueueHeaders, cancellationToken);
+        await DeclareQueueAsync(channel, options.RetryQueue, BuildRetryQueueArguments(options), cancellationToken);
 
         await BindQueueAsync(channel, options.InputQueue, options.EffectiveInputExchange, options.EffectiveInputRoutingKey,
             options.InputBindingArguments, cancellationToken);
@@ -26,6 +29,8 @@ internal static class RabbitMqTopology
             options.OutputBindingArguments, cancellationToken);
         await BindQueueAsync(channel, options.EffectiveDeadLetterQueue, options.EffectiveDeadLetterExchange,
             options.EffectiveDeadLetterRoutingKey, options.DeadLetterBindingArguments, cancellationToken);
+        await BindQueueAsync(channel, options.RetryQueue, options.RetryExchange,
+            options.EffectiveRetryRoutingKey, options.RetryBindingArguments, cancellationToken);
     }
 
     private static Dictionary<string, object?> BuildInputQueueArguments(RabbitMqClientOptions options)
@@ -33,6 +38,15 @@ internal static class RabbitMqTopology
         var headers = new Dictionary<string, object?>(options.HeadersArguments, StringComparer.Ordinal);
         headers.TryAdd("x-dead-letter-exchange", options.EffectiveDeadLetterExchange);
         headers.TryAdd("x-dead-letter-routing-key", options.EffectiveDeadLetterRoutingKey);
+        return headers;
+    }
+
+    private static Dictionary<string, object?> BuildRetryQueueArguments(RabbitMqClientOptions options)
+    {
+        var headers = new Dictionary<string, object?>(options.RetryQueueHeaders, StringComparer.Ordinal);
+        headers.TryAdd("x-message-ttl", options.RetryDelayMilliseconds);
+        headers.TryAdd("x-dead-letter-exchange", options.EffectiveInputExchange);
+        headers.TryAdd("x-dead-letter-routing-key", options.EffectiveInputRoutingKey);
         return headers;
     }
 

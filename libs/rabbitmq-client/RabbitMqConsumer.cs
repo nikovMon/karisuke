@@ -78,7 +78,7 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
                 RabbitMqClientDiagnostics.HandlerFailures.Add(1, RabbitMqClientDiagnostics.Tag("queue", _options.InputQueue));
                 activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
                 _logger.LogError(ex, "Handler failed for RabbitMQ message {MessageId}", delivery.Message.MessageId);
-                result = RabbitMqMessageProcessingResult.Failure(ex.Message);
+                result = RabbitMqMessageProcessingResult.RetryableFailure(ex.Message);
             }
             finally
             {

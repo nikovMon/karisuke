@@ -57,28 +57,37 @@ Consumer configuration:
     "VirtualHost": "/",
     "InputQueue": "int.algo.gateway_rules",
     "OutputQueue": "int.algo.gateway_rules.output",
+    "RetryQueue": "int.algo.gateway_rules.retry",
     "DeadLetterQueue": "int.algo.gateway_rules.dlq",
     "InputExchange": "",
     "OutputExchange": "",
+    "RetryExchange": "",
     "DeadLetterExchange": "",
     "InputExchangeType": "direct",
     "OutputExchangeType": "direct",
+    "RetryExchangeType": "direct",
     "DeadLetterExchangeType": "direct",
     "InputRoutingKey": "int.algo.gateway_rules",
     "OutputRoutingKey": "int.algo.gateway_rules.output",
+    "RetryRoutingKey": "int.algo.gateway_rules.retry",
     "DeadLetterRoutingKey": "int.algo.gateway_rules.dlq",
     "HeadersArguments": {
       "x-message-ttl": 60000
     },
     "OutputQueueHeaders": {},
+    "RetryQueueHeaders": {},
     "DeadLetterQueueHeaders": {},
     "InputExchangeHeaders": {},
     "OutputExchangeHeaders": {},
+    "RetryExchangeHeaders": {},
     "DeadLetterExchangeHeaders": {},
     "PrefetchCount": 1,
     "ConsumerConcurrency": 1,
     "PublisherChannelPoolSize": 4,
     "OutputPublishConcurrency": 4,
+    "RetryDelayMilliseconds": 10000,
+    "MaxRetryAttempts": 3,
+    "RetryCountPath": "retry.count",
     "ReconnectDelaySeconds": 5
   }
 }
@@ -103,21 +112,24 @@ Queue settings:
   target for `PublishToInputAsync`.
 - `OutputQueue` receives successful handler output when
   `RabbitMqMessageProcessingResult.Success(outputBody)` is returned.
+- `RetryQueue` receives retryable failures after the client increments the
+  configured retry count inside the JSON message body.
 - `DeadLetterQueue` is declared as the DLQ and is bound to the configured DLX.
 - Queues are always declared as durable, non-exclusive, and non-auto-delete.
 - `HeadersArguments` is passed as declaration arguments for `InputQueue`.
-- `OutputQueueHeaders` and `DeadLetterQueueHeaders` are declaration arguments
-  for `OutputQueue` and `DeadLetterQueue`.
+- `OutputQueueHeaders`, `RetryQueueHeaders`, and `DeadLetterQueueHeaders` are
+  declaration arguments for `OutputQueue`, `RetryQueue`, and `DeadLetterQueue`.
 
 Exchange and routing settings:
 
-- `InputExchange`, `OutputExchange`, and `DeadLetterExchange` are declared when
-  their names are not empty.
-- `InputExchangeType`, `OutputExchangeType`, and `DeadLetterExchangeType`
-  default to `direct`. Use `topic` when using wildcard routing keys like `#`.
-- `InputRoutingKey`, `OutputRoutingKey`, and `DeadLetterRoutingKey` bind queues
-  to their exchanges. If a routing key is omitted, the matching queue name is
-  used.
+- `InputExchange`, `OutputExchange`, `RetryExchange`, and
+  `DeadLetterExchange` are declared when their names are not empty.
+- `InputExchangeType`, `OutputExchangeType`, `RetryExchangeType`, and
+  `DeadLetterExchangeType` default to `direct`. Use `topic` when using
+  wildcard routing keys like `#`.
+- `InputRoutingKey`, `OutputRoutingKey`, `RetryRoutingKey`, and
+  `DeadLetterRoutingKey` bind queues to their exchanges. If a routing key is
+  omitted, the matching queue name is used.
 - If an exchange name is empty, the client skips declaring that exchange and
   skips binding the queue to it. Publishing with an empty exchange uses
   RabbitMQ's default exchange.
@@ -131,8 +143,23 @@ DLQ settings:
 - If `HeadersArguments` contains `x-dead-letter-exchange` or
   `x-dead-letter-routing-key`, those values are used as the effective DLX and
   DLQ routing key.
-- On handler failure, the client does not republish the message. It sends
-  `BasicNack(requeue: false)`, and RabbitMQ performs the dead-letter routing.
+- On non-retryable handler failure, the client does not republish the message.
+  It sends `BasicNack(requeue: false)`, and RabbitMQ performs the dead-letter
+  routing.
+
+Retry settings:
+
+- Retryable failures are republished to `RetryQueue` with the JSON body retry
+  count incremented at `RetryCountPath`. The original input message is
+  acknowledged only after the retry publish succeeds.
+- `RetryDelayMilliseconds` is applied as the retry queue `x-message-ttl`.
+  When the retry message expires, RabbitMQ dead-letters it back to
+  `InputExchange` / `InputRoutingKey`.
+- `MaxRetryAttempts` caps body-level retry attempts. After the cap is reached,
+  the input is negatively acknowledged with `requeue: false` and routed to the
+  DLQ. Set it to `0` to disable retry.
+- If the message body is not a JSON object or the retry count path cannot be
+  updated, the message goes directly to the DLQ.
 
 Operational settings:
 
@@ -145,6 +172,8 @@ Operational settings:
   process. Each publish leases one confirmed channel from this pool.
 - `OutputPublishConcurrency` limits how many output messages from one handler
   result can be published in parallel before the input message is acknowledged.
+- `RetryDelayMilliseconds`, `MaxRetryAttempts`, and `RetryCountPath` control
+  retry queue delay, retry cap, and the body field used for retry count.
 
 Important RabbitMQ behavior:
 
@@ -189,6 +218,11 @@ public sealed class Handler : IRabbitMqMessageHandler
 await consumer.ConsumeAsync(handler, stoppingToken);
 ```
 
+Use `RabbitMqMessageProcessingResult.RetryableFailure(error)` for transient
+failures. Use `Failure(error)` or `NonRetryableFailure(error)` for validation
+and other permanent failures that should go straight to the DLQ. Exceptions
+thrown by handlers are treated as retryable failures.
+
 ## Scale and observability
 
 - `PublisherChannelPoolSize` controls how many concurrent publish channels can
@@ -207,7 +241,7 @@ await consumer.ConsumeAsync(handler, stoppingToken);
   through the `ImagingPipeline.RabbitMqClient` activity source. Configure OpenTelemetry in
   the hosting app to export them.
 - Metrics include publish counts/failures/duration, consumed counts, handler
-  failures, processing duration, ack/nack counts, DLQ routing,
+  failures, processing duration, ack/nack counts, retry/DLQ routing,
   publisher channel count, and connection failures/recoveries.
 
 ## Success, failure, and delivery behavior
@@ -217,9 +251,12 @@ await consumer.ConsumeAsync(handler, stoppingToken);
 - Success with multiple output messages publishes them with bounded parallelism
   controlled by `OutputPublishConcurrency`; only after all confirmed publishes
   complete does the client acknowledge the input message.
-- Failures are negatively acknowledged with `requeue: false`. RabbitMQ routes
-  them from `InputQueue` through the configured `DeadLetterExchange` into
-  `DeadLetterQueue`.
+- Non-retryable failures are negatively acknowledged with `requeue: false`.
+  RabbitMQ routes them from `InputQueue` through the configured
+  `DeadLetterExchange` into `DeadLetterQueue`.
+- Retryable failures are published to `RetryQueue` with an incremented
+  body-level retry count. If retry is disabled, exhausted, or the body cannot be
+  updated, they are routed to the DLQ instead.
 - If output publishing or acknowledgement fails, the input is negatively
   acknowledged with requeue enabled to avoid silently losing it.
 

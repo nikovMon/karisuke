@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using System.Text;
+using System.Text.Json;
 
 namespace ImagingPipeline.RabbitMqClient.Tests;
 
@@ -108,6 +109,29 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
 
         Assert.Equal("boom", deadLetter);
         Assert.Null(await BasicGetAsync(topology.OutputQueue, CancellationToken.None));
+    }
+
+    [RabbitMqBrokerFact]
+    public async Task HandlerExceptionWithJsonBodyIsPublishedToRetryQueue()
+    {
+        var topology = CreateTopology();
+        await using var provider = BuildProvider(topology);
+        var publisher = provider.GetRequiredService<IRabbitMqPublisher>();
+        var consumer = provider.GetRequiredService<IRabbitMqConsumer>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var consumerTask = consumer.ConsumeAsync(new ThrowingHandler(), cts.Token);
+        await publisher.PublishToInputAsync(
+            RabbitMqMessageEnvelope.FromUtf8("""{"payload":{"id":"image-1"}}""", "retry-input"),
+            cts.Token);
+
+        var retry = await WaitForMessageAsync(topology.RetryQueue, cts.Token);
+        await StopConsumerAsync(consumerTask, cts);
+
+        using var document = JsonDocument.Parse(retry);
+        Assert.Equal("image-1", document.RootElement.GetProperty("payload").GetProperty("id").GetString());
+        Assert.Equal(1, document.RootElement.GetProperty("retry").GetProperty("count").GetInt32());
+        Assert.Null(await BasicGetAsync(topology.DeadLetterQueue, CancellationToken.None));
     }
 
     [RabbitMqBrokerFact]
@@ -254,16 +278,20 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
         var topology = new TestTopology(
             _broker.CreateName("input"),
             _broker.CreateName("output"),
+            _broker.CreateName("retry"),
             _broker.CreateName("dlq"),
             useExchanges ? _broker.CreateName("input.exchange") : string.Empty,
             useExchanges ? _broker.CreateName("output.exchange") : string.Empty,
+            useExchanges ? _broker.CreateName("retry.exchange") : string.Empty,
             useExchanges ? _broker.CreateName("dlx") : string.Empty);
 
         _broker.TrackQueue(topology.InputQueue);
         _broker.TrackQueue(topology.OutputQueue);
+        _broker.TrackQueue(topology.RetryQueue);
         _broker.TrackQueue(topology.DeadLetterQueue);
         _broker.TrackExchange(topology.InputExchange);
         _broker.TrackExchange(topology.OutputExchange);
+        _broker.TrackExchange(topology.RetryExchange);
         _broker.TrackExchange(topology.DeadLetterExchange);
         return topology;
     }
@@ -291,19 +319,26 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
             ["RabbitMq:VirtualHost"] = "/",
             ["RabbitMq:InputQueue"] = topology.InputQueue,
             ["RabbitMq:OutputQueue"] = topology.OutputQueue,
+            ["RabbitMq:RetryQueue"] = topology.RetryQueue,
             ["RabbitMq:DeadLetterQueue"] = topology.DeadLetterQueue,
             ["RabbitMq:InputExchange"] = topology.InputExchange,
             ["RabbitMq:OutputExchange"] = topology.OutputExchange,
+            ["RabbitMq:RetryExchange"] = topology.RetryExchange,
             ["RabbitMq:DeadLetterExchange"] = topology.DeadLetterExchange,
             ["RabbitMq:InputExchangeType"] = "direct",
             ["RabbitMq:OutputExchangeType"] = "direct",
+            ["RabbitMq:RetryExchangeType"] = "direct",
             ["RabbitMq:DeadLetterExchangeType"] = "direct",
             ["RabbitMq:InputRoutingKey"] = topology.InputQueue,
             ["RabbitMq:OutputRoutingKey"] = topology.OutputQueue,
+            ["RabbitMq:RetryRoutingKey"] = topology.RetryQueue,
             ["RabbitMq:DeadLetterRoutingKey"] = topology.DeadLetterQueue,
             ["RabbitMq:PrefetchCount"] = "1",
             ["RabbitMq:ConsumerConcurrency"] = "1",
             ["RabbitMq:PublisherChannelPoolSize"] = "2",
+            ["RabbitMq:RetryDelayMilliseconds"] = "60000",
+            ["RabbitMq:MaxRetryAttempts"] = "3",
+            ["RabbitMq:RetryCountPath"] = "retry.count",
             ["RabbitMq:ReconnectDelaySeconds"] = "1"
         };
 
@@ -405,9 +440,11 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
     private sealed record TestTopology(
         string InputQueue,
         string OutputQueue,
+        string RetryQueue,
         string DeadLetterQueue,
         string InputExchange,
         string OutputExchange,
+        string RetryExchange,
         string DeadLetterExchange);
 
     private sealed class SuccessHandler : IRabbitMqMessageHandler

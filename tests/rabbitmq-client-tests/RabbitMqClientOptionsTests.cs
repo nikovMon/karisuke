@@ -15,10 +15,14 @@ public sealed class RabbitMqClientOptionsTests
         Assert.Equal("int.algo.gateway_rules", options.InputQueue);
         Assert.Equal("int.algo.gateway_rules.output", options.OutputQueue);
         Assert.Equal("int.algo.gateway_rules.dlq", options.DeadLetterQueue);
+        Assert.Equal("int.algo.gateway_rules.retry", options.RetryQueue);
         Assert.Equal(string.Empty, options.DeadLetterExchange);
         Assert.Equal((ushort)1, options.PrefetchCount);
         Assert.Equal((ushort)1, options.ConsumerConcurrency);
         Assert.Equal(4, options.OutputPublishConcurrency);
+        Assert.Equal(10000, options.RetryDelayMilliseconds);
+        Assert.Equal(3, options.MaxRetryAttempts);
+        Assert.Equal("retry.count", options.RetryCountPath);
     }
 
     [Fact]
@@ -28,11 +32,13 @@ public sealed class RabbitMqClientOptionsTests
         {
             InputQueue = "input",
             OutputQueue = "output",
-            DeadLetterQueue = "dlq"
+            DeadLetterQueue = "dlq",
+            RetryQueue = "retry"
         };
 
         Assert.Equal("input", options.EffectiveInputRoutingKey);
         Assert.Equal("output", options.EffectiveOutputRoutingKey);
+        Assert.Equal("retry", options.EffectiveRetryRoutingKey);
         Assert.Equal("dlq", options.EffectiveDeadLetterRoutingKey);
     }
 
@@ -46,11 +52,13 @@ public sealed class RabbitMqClientOptionsTests
             DeadLetterQueue = "dlq",
             InputRoutingKey = "input.key",
             OutputRoutingKey = "output.key",
+            RetryRoutingKey = "retry.key",
             DeadLetterRoutingKey = "dlq.key"
         };
 
         Assert.Equal("input.key", options.EffectiveInputRoutingKey);
         Assert.Equal("output.key", options.EffectiveOutputRoutingKey);
+        Assert.Equal("retry.key", options.EffectiveRetryRoutingKey);
         Assert.Equal("dlq.key", options.EffectiveDeadLetterRoutingKey);
     }
 
@@ -64,11 +72,13 @@ public sealed class RabbitMqClientOptionsTests
             DeadLetterQueue = "dlq",
             InputRoutingKey = " ",
             OutputRoutingKey = "\t",
+            RetryRoutingKey = " ",
             DeadLetterRoutingKey = "\r\n"
         };
 
         Assert.Equal("input", options.EffectiveInputRoutingKey);
         Assert.Equal("output", options.EffectiveOutputRoutingKey);
+        Assert.Equal("int.algo.gateway_rules.retry", options.EffectiveRetryRoutingKey);
         Assert.Equal("dlq", options.EffectiveDeadLetterRoutingKey);
     }
 
@@ -214,7 +224,7 @@ public sealed class RabbitMqClientOptionsTests
         };
 
         Assert.False(options.IsConsumerValid(out var error));
-        Assert.Equal("RabbitMq OutputQueue and DeadLetterQueue must not be empty for consumers.", error);
+        Assert.Equal("RabbitMq OutputQueue, DeadLetterQueue, and RetryQueue must not be empty for consumers.", error);
     }
 
     [Fact]
@@ -230,7 +240,19 @@ public sealed class RabbitMqClientOptionsTests
         };
 
         Assert.False(options.IsConsumerValid(out var error));
-        Assert.Equal("RabbitMq OutputQueue and DeadLetterQueue must not be empty for consumers.", error);
+        Assert.Equal("RabbitMq OutputQueue, DeadLetterQueue, and RetryQueue must not be empty for consumers.", error);
+    }
+
+    [Fact]
+    public void ConsumerValidationRejectsEmptyRetryQueue()
+    {
+        var options = new RabbitMqClientOptions
+        {
+            RetryQueue = ""
+        };
+
+        Assert.False(options.IsConsumerValid(out var error));
+        Assert.Equal("RabbitMq OutputQueue, DeadLetterQueue, and RetryQueue must not be empty for consumers.", error);
     }
 
     [Fact]
@@ -255,6 +277,26 @@ public sealed class RabbitMqClientOptionsTests
 
         Assert.False(options.IsConsumerValid(out var error));
         Assert.Equal("RabbitMq PrefetchCount and ConsumerConcurrency must be greater than zero for consumers.", error);
+    }
+
+    [Theory]
+    [InlineData(0, 3, "retry.count")]
+    [InlineData(1000, -1, "retry.count")]
+    [InlineData(1000, 3, " ")]
+    public void ConsumerValidationRejectsInvalidRetryPolicy(
+        int retryDelayMilliseconds,
+        int maxRetryAttempts,
+        string retryCountPath)
+    {
+        var options = new RabbitMqClientOptions
+        {
+            RetryDelayMilliseconds = retryDelayMilliseconds,
+            MaxRetryAttempts = maxRetryAttempts,
+            RetryCountPath = retryCountPath
+        };
+
+        Assert.False(options.IsConsumerValid(out var error));
+        Assert.Equal("RabbitMq retry delay, retry attempts, and retry count path are outside their valid ranges.", error);
     }
 
     [Fact]

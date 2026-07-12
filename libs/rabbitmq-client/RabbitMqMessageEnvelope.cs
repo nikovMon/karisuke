@@ -17,12 +17,22 @@ public sealed record RabbitMqMessageProcessingResult(
     bool IsSuccess,
     byte[]? OutputBody,
     string? Error,
-    IReadOnlyList<RabbitMqMessageEnvelope>? OutputMessages = null)
+    IReadOnlyList<RabbitMqMessageEnvelope>? OutputMessages = null,
+    RabbitMqMessageFailureAction FailureAction = RabbitMqMessageFailureAction.DeadLetter)
 {
     public static RabbitMqMessageProcessingResult Success(byte[] outputBody) => new(true, outputBody, null);
     public static RabbitMqMessageProcessingResult Success(IReadOnlyList<RabbitMqMessageEnvelope> outputMessages) =>
         new(true, null, null, outputMessages);
 
     public static RabbitMqMessageProcessingResult Failure(string error) => new(false, null, error);
+    public static RabbitMqMessageProcessingResult NonRetryableFailure(string error) => Failure(error);
+    public static RabbitMqMessageProcessingResult RetryableFailure(string error) =>
+        new(false, null, error, null, RabbitMqMessageFailureAction.Retry);
+}
+
+public enum RabbitMqMessageFailureAction
+{
+    DeadLetter,
+    Retry
 }
 

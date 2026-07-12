@@ -58,7 +58,10 @@ public sealed class RabbitMqServiceCollectionTests
                 ["RabbitMq:Port"] = "5673",
                 ["RabbitMq:InputQueue"] = "input",
                 ["RabbitMq:ConsumerConcurrency"] = "3",
-                ["RabbitMq:OutputPublishConcurrency"] = "7"
+                ["RabbitMq:OutputPublishConcurrency"] = "7",
+                ["RabbitMq:RetryDelayMilliseconds"] = "2500",
+                ["RabbitMq:MaxRetryAttempts"] = "5",
+                ["RabbitMq:RetryCountPath"] = "metadata.retryCount"
             }))
             .AddLogging()
             .AddRabbitMqPublisher(Configuration(new Dictionary<string, string?>
@@ -67,7 +70,10 @@ public sealed class RabbitMqServiceCollectionTests
                 ["RabbitMq:Port"] = "5673",
                 ["RabbitMq:InputQueue"] = "input",
                 ["RabbitMq:ConsumerConcurrency"] = "3",
-                ["RabbitMq:OutputPublishConcurrency"] = "7"
+                ["RabbitMq:OutputPublishConcurrency"] = "7",
+                ["RabbitMq:RetryDelayMilliseconds"] = "2500",
+                ["RabbitMq:MaxRetryAttempts"] = "5",
+                ["RabbitMq:RetryCountPath"] = "metadata.retryCount"
             }))
             .BuildServiceProvider(validateScopes: true);
 
@@ -78,6 +84,9 @@ public sealed class RabbitMqServiceCollectionTests
         Assert.Equal("input", options.InputQueue);
         Assert.Equal((ushort)3, options.ConsumerConcurrency);
         Assert.Equal(7, options.OutputPublishConcurrency);
+        Assert.Equal(2500, options.RetryDelayMilliseconds);
+        Assert.Equal(5, options.MaxRetryAttempts);
+        Assert.Equal("metadata.retryCount", options.RetryCountPath);
     }
 
     [Fact]
