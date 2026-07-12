@@ -1,7 +1,6 @@
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Gateway.Contracts.Messages;
-using ImagingPipeline.Gateway.Errors;
 using ImagingPipeline.Gateway.Processing.Rules;
 
 namespace ImagingPipeline.Gateway.Processing.Messages;
@@ -42,17 +41,10 @@ public sealed class GatewayOutputMessageBuilder
         RuleMatchResult match,
         TenantInfo tenant)
     {
-        if (match.Rule.AlgorithmName is null)
-        {
-            throw new GatewayValidationException(
-                $"Rule '{match.Rule.Id}' cannot build output without algorithmName.",
-                "gateway.rule_missing_algorithm");
-        }
-
         var payload = new GatewayOutputPayload
         {
             RuleId = match.Rule.Id,
-            AlgorithmName = match.Rule.AlgorithmName.Value,
+            AlgorithmName = match.Rule.AlgorithmName,
             TenantId = tenant.TenantId,
             TilingConfigs = tenant.TilingConfigs,
             ImageId = input.ImageId,

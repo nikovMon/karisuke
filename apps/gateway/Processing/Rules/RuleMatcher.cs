@@ -38,7 +38,7 @@ public sealed class RuleMatcher
         return matches;
     }
 
-    private static bool MatchesSensor(GatewayInputMessage input, RuleConfigDto rule)
+    private static bool MatchesSensor(GatewayInputMessage input, RuleDto rule)
     {
         if (rule.Sensors is null || rule.Sensors.Count == 0)
         {
@@ -59,6 +59,6 @@ public sealed class RuleMatcher
         return rule.Sensors.Values.Any(values => values.Contains(input.SensorName, StringComparer.Ordinal));
     }
 
-    private static bool MatchesResolution(GatewayInputMessage input, RuleConfigDto rule) =>
+    private static bool MatchesResolution(GatewayInputMessage input, RuleDto rule) =>
         input.Resolution >= rule.MinimumResolution && input.Resolution <= rule.MaximumResolution;
 }

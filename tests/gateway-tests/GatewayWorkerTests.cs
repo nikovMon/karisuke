@@ -126,7 +126,7 @@ public sealed class GatewayWorkerTests
             """,
             "message-1");
 
-    private static RuleConfigDto MatchingRule() =>
+    private static RuleDto MatchingRule() =>
         new()
         {
             Id = "rule-1",
@@ -174,7 +174,7 @@ public sealed class GatewayWorkerTests
         public RecordingPublisher Publisher { get; }
         private ActiveRuleCache RuleCache { get; }
 
-        public static async Task<GatewayWorkerHarness> CreateAsync(IReadOnlyList<RuleConfigDto> rules)
+        public static async Task<GatewayWorkerHarness> CreateAsync(IReadOnlyList<RuleDto> rules)
         {
             var health = new GatewayHealthState();
             var geometry = new GatewayGeometryConverter();
@@ -215,14 +215,14 @@ public sealed class GatewayWorkerTests
 
     private sealed class StaticRuleRepository : IRuleRepository
     {
-        private readonly IReadOnlyList<RuleConfigDto> _rules;
+        private readonly IReadOnlyList<RuleDto> _rules;
 
-        public StaticRuleRepository(IReadOnlyList<RuleConfigDto> rules)
+        public StaticRuleRepository(IReadOnlyList<RuleDto> rules)
         {
             _rules = rules;
         }
 
-        public Task<IReadOnlyList<RuleConfigDto>> GetActiveRulesAsync(CancellationToken cancellationToken) =>
+        public Task<IReadOnlyList<RuleDto>> GetActiveRulesAsync(CancellationToken cancellationToken) =>
             Task.FromResult(_rules);
     }
 

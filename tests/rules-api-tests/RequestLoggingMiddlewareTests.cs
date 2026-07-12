@@ -35,10 +35,12 @@ public sealed class RequestLoggingMiddlewareTests
 
         var started = Assert.Single(logger.Entries, entry => entry.EventId.Name == "HttpRequestStarted");
         Assert.Equal(LogLevel.Debug, started.Level);
+        Assert.Equal(0, started.EventId.Id);
         Assert.Equal("trace-123", started.Properties["TraceId"]);
 
         var entry = Assert.Single(logger.Entries, item => item.EventId.Name == "HttpRequestCompleted");
         Assert.Equal(expectedLevel, entry.Level);
+        Assert.Equal(0, entry.EventId.Id);
         Assert.Equal("HttpRequestCompleted", entry.EventId.Name);
         Assert.Equal(statusCode, entry.Properties["StatusCode"]);
         Assert.Equal("rule-1", entry.Properties["RouteId"]);

@@ -103,6 +103,34 @@ public sealed class ElasticsearchQueryJsonBuilderTests
     }
 
     [Fact]
+    public void BuildSearchBodySupportsSourceIncludesAndExcludedIds()
+    {
+        var json = ElasticsearchQueryJsonBuilder.BuildSearchBody(new ElasticsearchSearchRequest
+        {
+            IndexName = "rules",
+            SourceIncludes = ["ruleName"],
+            ExcludedIds = ["rule-1"],
+            TermFilters =
+            [
+                new ElasticsearchTermFilter { Field = "ruleName.keyword", Value = "one" }
+            ]
+        });
+
+        using var document = JsonDocument.Parse(json);
+
+        var sourceField = Assert.Single(document.RootElement.GetProperty("_source").EnumerateArray());
+        Assert.Equal("ruleName", sourceField.GetString());
+        var boolean = document.RootElement.GetProperty("query").GetProperty("bool");
+        Assert.Equal("one", boolean.GetProperty("filter")[0].GetProperty("term").GetProperty("ruleName.keyword").GetString());
+        var excludedId = boolean
+            .GetProperty("must_not")[0]
+            .GetProperty("ids")
+            .GetProperty("values")[0]
+            .GetString();
+        Assert.Equal("rule-1", excludedId);
+    }
+
+    [Fact]
     public void BuildSearchBodyRejectsInvalidPagingAndEmptyIndex()
     {
         Assert.Throws<ArgumentException>(() => ElasticsearchQueryJsonBuilder.BuildSearchBody(new ElasticsearchSearchRequest

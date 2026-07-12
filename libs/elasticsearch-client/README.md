@@ -11,7 +11,7 @@ It exposes two clients through DI:
 
 ## Source Layout
 
-- `ElasticsearchClient.cs`: client interface, implementation, and client exception.
+- `ElasticsearchDocumentClient.cs`: client interface, implementation, and client exception.
 - `ElasticsearchQueries.cs`: search requests, filters, results, and query JSON builder.
 - `ElasticsearchOptions.cs`: configuration options and JSON serialization.
 - `ElasticsearchExtensions.cs`: dependency injection registration.
@@ -186,12 +186,43 @@ var rule = await client.GetAsync<MyDocument>("rules", "rule-001");
 
 Returns `null` when the document is missing.
 
+Use `GetDocumentAsync` when callers also need the Elasticsearch metadata id:
+
+```csharp
+var document = await client.GetDocumentAsync<MyDocument>("rules", "rule-001");
+var id = document?.Id;
+var source = document?.Source;
+```
+
+### SearchDocumentsAsync
+
+Runs a NEST search and returns each hit with its Elasticsearch metadata id.
+
+```csharp
+var documents = await client.SearchDocumentsAsync<MyDocument>(
+    descriptor => descriptor
+        .Index("rules")
+        .Size(10)
+        .Query(query => query.Term("isActive", true)));
+```
+
 ### IndexAsync
 
 Creates or replaces a document.
 
 ```csharp
 await client.IndexAsync("rules", "rule-001", document);
+```
+
+The returned value is the Elasticsearch document id. Pass `allowGeneratedId: true` with a blank id when Elasticsearch should generate the id:
+
+```csharp
+var generatedId = await client.IndexAsync(
+    "rules",
+    id: null,
+    document,
+    waitForRefresh: false,
+    allowGeneratedId: true);
 ```
 
 By default this waits for Elasticsearch refresh:

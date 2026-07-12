@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 
 namespace ImagingPipeline.Common.Dtos.Rules.Models;
 
-public sealed class RuleConfigDto : IValidatableObject
+public sealed class RuleDto : IValidatableObject
 {
     [JsonPropertyName("_id")]
     [DataMember(Name = "_id")]
@@ -20,7 +20,7 @@ public sealed class RuleConfigDto : IValidatableObject
 
     [JsonPropertyName("algorithmName")]
     [JsonConverter(typeof(JsonStringEnumConverter))]
-    public AlgorithmName? AlgorithmName { get; set; }
+    public required AlgorithmName AlgorithmName { get; set; }
 
     [JsonPropertyName("sensors")]
     public Dictionary<string, List<string>> Sensors { get; set; } = new(StringComparer.Ordinal);
@@ -35,7 +35,7 @@ public sealed class RuleConfigDto : IValidatableObject
     public double MinimumResolution { get; set; }
 
     [JsonPropertyName("maximumResolution")]
-    public double MaximumResolution { get; set; } = 999;
+    public double MaximumResolution { get; set; }
 
     [JsonPropertyName("area")]
     public string Area { get; set; } = string.Empty;
@@ -63,11 +63,6 @@ public sealed class RuleConfigDto : IValidatableObject
         if (string.IsNullOrWhiteSpace(RuleName))
         {
             yield return new ValidationResult("ruleName cannot be empty", [nameof(RuleName)]);
-        }
-
-        if (AlgorithmName is null)
-        {
-            yield return new ValidationResult("algorithmName is required", [nameof(AlgorithmName)]);
         }
 
         if (MinimumResolution <= 0)
@@ -167,34 +162,4 @@ public sealed class RuleConfigDto : IValidatableObject
             }
         }
     }
-}
-
-public enum AlgorithmName
-{
-    FindAir,
-    Rpn
-}
-
-public sealed class TenantInfo
-{
-    [JsonPropertyName("tenantId")]
-    public string TenantId { get; set; } = string.Empty;
-
-    [JsonPropertyName("tilingConfigs")]
-    public List<TilingConfig> TilingConfigs { get; set; } = [];
-}
-
-public sealed class TilingConfig
-{
-    [JsonPropertyName("tileSizeWidth")]
-    public int TileSizeWidth { get; set; }
-
-    [JsonPropertyName("tileSizeHeight")]
-    public int TileSizeHeight { get; set; }
-
-    [JsonPropertyName("tileOverlapWidth")]
-    public int TileOverlapWidth { get; set; }
-
-    [JsonPropertyName("tileOverlapHeight")]
-    public int TileOverlapHeight { get; set; }
 }

@@ -3,4 +3,4 @@ using NetTopologySuite.Geometries;
 
 namespace ImagingPipeline.Gateway.Processing.Rules;
 
-public sealed record RuleMatchResult(RuleConfigDto Rule, Geometry IntersectionGeometry);
+public sealed record RuleMatchResult(RuleDto Rule, Geometry IntersectionGeometry);

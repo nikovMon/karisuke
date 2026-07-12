@@ -49,8 +49,30 @@ public sealed class RulesApiRouteTests
         using var context = CreateContext();
 
         var response = await context.Client.GetAsync("/swagger/v1/swagger.json");
+        using var swagger = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var createSchemaReference = swagger.RootElement
+            .GetProperty("paths")
+            .GetProperty("/rules")
+            .GetProperty("post")
+            .GetProperty("requestBody")
+            .GetProperty("content")
+            .GetProperty("application/json")
+            .GetProperty("schema")
+            .GetProperty("$ref")
+            .GetString();
+        Assert.EndsWith("/CreateRuleRequest", createSchemaReference, StringComparison.Ordinal);
+
+        var createProperties = swagger.RootElement
+            .GetProperty("components")
+            .GetProperty("schemas")
+            .GetProperty("CreateRuleRequest")
+            .GetProperty("properties");
+        Assert.False(createProperties.TryGetProperty("_id", out _));
+        Assert.False(createProperties.TryGetProperty("creationTime", out _));
+        Assert.False(createProperties.TryGetProperty("updateTime", out _));
     }
 
     [Fact]
@@ -60,7 +82,7 @@ public sealed class RulesApiRouteTests
         var inactive = ValidRule("rule-2", "inactive", isActive: false);
         using var context = CreateContext(active, inactive);
 
-        var rules = await context.Client.GetFromJsonAsync<List<RuleConfigDto>>(
+        var rules = await context.Client.GetFromJsonAsync<List<RuleDto>>(
             "/rules?isActive=true",
             JsonOptions);
 
@@ -73,7 +95,7 @@ public sealed class RulesApiRouteTests
     {
         using var context = CreateContext();
 
-        var rules = await context.Client.GetFromJsonAsync<List<RuleConfigDto>>("/rules", JsonOptions);
+        var rules = await context.Client.GetFromJsonAsync<List<RuleDto>>("/rules", JsonOptions);
 
         Assert.Empty(rules ?? []);
     }
@@ -100,7 +122,7 @@ public sealed class RulesApiRouteTests
             ValidRule("rule-2", "two"),
             ValidRule("rule-3", "three"));
 
-        var rules = await context.Client.GetFromJsonAsync<List<RuleConfigDto>>(
+        var rules = await context.Client.GetFromJsonAsync<List<RuleDto>>(
             "/rules?from=1&size=1",
             JsonOptions);
         var names = await context.Client.GetFromJsonAsync<List<string>>(
@@ -178,18 +200,19 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
-    public async Task CreateReturnsCreatedAndStoresRule()
+    public async Task CreateIgnoresServerOwnedFieldsAndStoresRule()
     {
         using var context = CreateContext();
         var request = ValidRule("client-controlled-id", "one");
-        request.Id = string.Empty;
 
         var response = await context.Client.PostAsJsonAsync("/rules", request, JsonOptions);
-        var created = await response.Content.ReadFromJsonAsync<RuleConfigDto>(JsonOptions);
+        var created = await response.Content.ReadFromJsonAsync<RuleDto>(JsonOptions);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         Assert.False(string.IsNullOrWhiteSpace(created?.Id));
         Assert.NotEqual("client-controlled-id", created.Id);
+        Assert.True(created.CreationTime > request.CreationTime);
+        Assert.True(created.UpdateTime > request.UpdateTime);
         Assert.EndsWith($"/rules/{created.Id}", response.Headers.Location?.ToString(), StringComparison.Ordinal);
         Assert.NotNull(await context.Repository.GetByIdAsync(created.Id));
     }
@@ -203,7 +226,7 @@ public sealed class RulesApiRouteTests
         rule.LocationGeoJson = JsonDocument.Parse("{\"type\":\"Point\",\"coordinates\":[1,1]}").RootElement.Clone();
 
         var response = await context.Client.PostAsJsonAsync("/rules", rule, JsonOptions);
-        var created = await response.Content.ReadFromJsonAsync<RuleConfigDto>(JsonOptions);
+        var created = await response.Content.ReadFromJsonAsync<RuleDto>(JsonOptions);
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var stored = await context.Repository.GetByIdAsync(created!.Id);
@@ -226,7 +249,7 @@ public sealed class RulesApiRouteTests
     {
         using var context = CreateContext();
 
-        var response = await context.Client.PostAsJsonAsync("/rules", new RuleConfigDto(), JsonOptions);
+        var response = await context.Client.PostAsJsonAsync("/rules", new { }, JsonOptions);
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -280,7 +303,7 @@ public sealed class RulesApiRouteTests
         var body = Json("{\"description\":null,\"isActive\":false,\"minimumResolution\":0.8}");
 
         var response = await context.Client.PatchAsync("/rules/rule-1", body);
-        var updated = await response.Content.ReadFromJsonAsync<RuleConfigDto>(JsonOptions);
+        var updated = await response.Content.ReadFromJsonAsync<RuleDto>(JsonOptions);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Null(updated?.Description);
@@ -320,7 +343,7 @@ public sealed class RulesApiRouteTests
                   ]
                 }
                 """));
-        var updated = await response.Content.ReadFromJsonAsync<RuleConfigDto>(JsonOptions);
+        var updated = await response.Content.ReadFromJsonAsync<RuleDto>(JsonOptions);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.False(updated?.Sensors.ContainsKey("camera"));
@@ -342,7 +365,7 @@ public sealed class RulesApiRouteTests
         var response = await context.Client.PatchAsync(
             "/rules/rule-1",
             Json("{\"isPhotoOld\":null,\"locationWkt\":null}"));
-        var updated = await response.Content.ReadFromJsonAsync<RuleConfigDto>(JsonOptions);
+        var updated = await response.Content.ReadFromJsonAsync<RuleDto>(JsonOptions);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Null(updated?.IsPhotoOld);
@@ -402,7 +425,7 @@ public sealed class RulesApiRouteTests
             Json("{\"isActive\":false,\"isPhotoOld\":true}"));
         var result = await response.Content.ReadFromJsonAsync<BulkOperationResult>(JsonOptions);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.MultiStatus, response.StatusCode);
         Assert.Equal(["rule-1", "rule-2"], result?.SuccessIds);
         var failure = Assert.Single(result?.FailedIds ?? []);
         Assert.Equal("missing", failure.Id);
@@ -423,6 +446,21 @@ public sealed class RulesApiRouteTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(["rule-1"], result?.SuccessIds);
         Assert.Equal("renamed", (await context.Repository.GetByIdAsync("rule-1"))?.RuleName);
+    }
+
+    [Fact]
+    public async Task PatchBulkReturnsUnprocessableEntityWhenEveryItemFails()
+    {
+        using var context = CreateContext();
+
+        var response = await context.Client.PatchAsync(
+            "/rules/bulk?ids=missing-1,missing-2",
+            Json("{\"isActive\":false}"));
+        var result = await response.Content.ReadFromJsonAsync<BulkOperationResult>(JsonOptions);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        Assert.Empty(result?.SuccessIds ?? []);
+        Assert.Equal(2, result?.FailedIds.Count);
     }
 
     [Fact]
@@ -476,7 +514,7 @@ public sealed class RulesApiRouteTests
             "/rules/rule-1/activity",
             new { isActive = true },
             JsonOptions);
-        var updated = await response.Content.ReadFromJsonAsync<RuleConfigDto>(JsonOptions);
+        var updated = await response.Content.ReadFromJsonAsync<RuleDto>(JsonOptions);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.True(updated?.IsActive);
@@ -554,10 +592,29 @@ public sealed class RulesApiRouteTests
             JsonOptions);
         var result = await response.Content.ReadFromJsonAsync<BulkOperationResult>(JsonOptions);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(HttpStatusCode.MultiStatus, response.StatusCode);
         Assert.Equal(["rule-1"], result?.SuccessIds);
         Assert.Equal(["cam-1", "cam-2"], (await context.Repository.GetByIdAsync("rule-1"))?.Sensors["camera"]);
         Assert.Single(result?.FailedIds ?? []);
+    }
+
+    [Fact]
+    public async Task SensorRoutesReturnUnprocessableEntityWhenEveryItemFails()
+    {
+        using var context = CreateContext();
+        var request = new { sensorName = "camera", values = new[] { "cam-1" } };
+
+        var add = await context.Client.PatchAsJsonAsync(
+            "/rules/sensors/add?ids=missing-1,missing-2",
+            request,
+            JsonOptions);
+        var remove = await context.Client.PatchAsJsonAsync(
+            "/rules/sensors/remove?ids=missing-1,missing-2",
+            request,
+            JsonOptions);
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, add.StatusCode);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, remove.StatusCode);
     }
 
     [Fact]
@@ -695,7 +752,7 @@ public sealed class RulesApiRouteTests
         Assert.Equal(HttpStatusCode.ServiceUnavailable, delete.StatusCode);
     }
 
-    private static TestContext CreateContext(params RuleConfigDto[] rules)
+    private static TestContext CreateContext(params RuleDto[] rules)
     {
         var repository = new InMemoryRuleRepository();
         foreach (var rule in rules)
@@ -710,7 +767,7 @@ public sealed class RulesApiRouteTests
     private static StringContent Json(string json) =>
         new(json, Encoding.UTF8, "application/json");
 
-    private static RuleConfigDto ValidRule(string id, string ruleName, bool isActive = true) =>
+    private static RuleDto ValidRule(string id, string ruleName, bool isActive = true) =>
         new()
         {
             Id = id,

@@ -4,8 +4,8 @@ namespace ImagingPipeline.Rules.Api.Observability;
 
 public sealed class RequestLoggingMiddleware
 {
-    private static readonly EventId RequestStartedEvent = new(999, "HttpRequestStarted");
-    private static readonly EventId RequestCompletedEvent = new(1000, "HttpRequestCompleted");
+    private static readonly EventId RequestStartedEvent = new(0, "HttpRequestStarted");
+    private static readonly EventId RequestCompletedEvent = new(0, "HttpRequestCompleted");
     private readonly RequestDelegate _next;
     private readonly ILogger<RequestLoggingMiddleware> _logger;
 

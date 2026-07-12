@@ -3,7 +3,6 @@ using ImagingPipeline.ElasticsearchClient;
 using ImagingPipeline.Rules.Api.Configuration;
 using ImagingPipeline.Rules.Api.Health;
 using ImagingPipeline.Rules.Api.Observability;
-using ImagingPipeline.Rules.Api.Repositories;
 using ImagingPipeline.Rules.Api.Services;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
@@ -27,19 +26,29 @@ public sealed partial class Program
             {
                 var logger = context.HttpContext.RequestServices
                     .GetRequiredService<ILogger<Program>>();
-                var fields = context.ModelState
+
+                var invalidFields = context.ModelState
                     .Where(item => item.Value?.Errors.Count > 0)
                     .Select(item => item.Key)
-                    .Take(20)
                     .ToArray();
-                var errorCount = context.ModelState.Values.Sum(value => value.Errors.Count);
+
+                var fieldsToLog = invalidFields
+                    .Take(100)
+                    .ToArray();
+
+                var totalInvalidFieldsCount = invalidFields.Length;
+
+                var totalErrorsCount = context.ModelState.Values
+                    .Sum(value => value.Errors.Count);
 
                 logger.LogWarning(
-                    "Request model validation failed for {RequestMethod} {RequestPath}. ErrorCount: {ErrorCount}; Fields: {ValidationFields}; TraceId: {TraceId}",
+                    "Request model validation failed for {RequestMethod} {RequestPath}. Total invalid fields: {TotalInvalidFieldsCount}. Total errors: {TotalErrorsCount}. Showing first {ShownFieldsCount} fields: {Fields}. TraceId: {TraceId}",
                     context.HttpContext.Request.Method,
                     context.HttpContext.Request.Path.Value,
-                    errorCount,
-                    string.Join(", ", fields),
+                    totalInvalidFieldsCount,
+                    totalErrorsCount,
+                    fieldsToLog.Length,
+                    string.Join(", ", fieldsToLog),
                     context.HttpContext.TraceIdentifier);
 
                 var problemDetailsFactory = context.HttpContext.RequestServices
@@ -65,10 +74,9 @@ public sealed partial class Program
         builder.Services.AddElasticsearchClient(builder.Configuration);
         builder.Services.AddOptions<RulesElasticsearchOptions>()
             .Bind(builder.Configuration.GetSection(RulesElasticsearchOptions.SectionName))
-            .Validate(options => options.IsValid(out _), "Rules Elasticsearch configuration is invalid.")
+            .Validate(options => options.IsValid(out _), "Rules Elasticsearch settings are invalid.")
             .ValidateOnStart();
-        builder.Services.AddScoped<IRuleRepository, ElasticsearchRuleRepository>();
-        builder.Services.AddScoped<IRuleService, RuleService>();
+        builder.Services.AddSingleton<RuleService>();
         builder.Services.AddSingleton<IElasticsearchHealthProbe, ElasticsearchHealthProbe>();
 
         var app = builder.Build();
@@ -79,11 +87,11 @@ public sealed partial class Program
             exceptionApp.Run(async context =>
             {
                 var exception = context.Features.Get<IExceptionHandlerPathFeature>()?.Error;
-                if (exception is RuleRepositoryException repositoryException)
+                if (exception is RulePersistenceException persistenceException)
                 {
                     app.Logger.LogError(
-                        repositoryException,
-                        "Elasticsearch repository operation failed for {RequestMethod} {RequestPath}. TraceId: {TraceId}",
+                        persistenceException,
+                        "Elasticsearch persistence operation failed for {RequestMethod} {RequestPath}. TraceId: {TraceId}",
                         context.Request.Method,
                         context.Request.Path.Value,
                         context.TraceIdentifier);

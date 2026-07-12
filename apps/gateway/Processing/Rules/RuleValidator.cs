@@ -13,7 +13,7 @@ public sealed class RuleValidator
         _geometry = geometry;
     }
 
-    public IReadOnlyList<ActiveRule> BuildSnapshot(IReadOnlyList<RuleConfigDto> activeRules)
+    public IReadOnlyList<ActiveRule> BuildSnapshot(IReadOnlyList<RuleDto> activeRules)
     {
         var errors = new List<string>();
         var snapshot = new List<ActiveRule>(activeRules.Count);
@@ -46,7 +46,7 @@ public sealed class RuleValidator
         return snapshot.ToArray();
     }
 
-    private static void Normalize(RuleConfigDto rule)
+    private static void Normalize(RuleDto rule)
     {
         rule.Sensors ??= new Dictionary<string, List<string>>(StringComparer.Ordinal);
         rule.TenantsInfo ??= [];
@@ -65,7 +65,7 @@ public sealed class RuleValidator
         }
     }
 
-    private static void ValidateTenantConfig(RuleConfigDto rule, List<string> errors)
+    private static void ValidateTenantConfig(RuleDto rule, List<string> errors)
     {
         foreach (var tenant in rule.TenantsInfo)
         {
@@ -107,7 +107,7 @@ public sealed class RuleValidator
         }
     }
 
-    private NetTopologySuite.Geometries.Geometry? ReadRuleGeometry(RuleConfigDto rule, List<string> errors)
+    private NetTopologySuite.Geometries.Geometry? ReadRuleGeometry(RuleDto rule, List<string> errors)
     {
         try
         {
@@ -120,6 +120,6 @@ public sealed class RuleValidator
         }
     }
 
-    private static string RuleLabel(RuleConfigDto rule) =>
+    private static string RuleLabel(RuleDto rule) =>
         string.IsNullOrWhiteSpace(rule.Id) ? rule.RuleName : rule.Id;
 }
