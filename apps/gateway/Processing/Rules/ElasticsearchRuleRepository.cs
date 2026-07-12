@@ -20,19 +20,19 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
         _indexName = settings.Value.Index;
     }
 
-    public async Task<IReadOnlyList<RuleConfigDto>> GetActiveRulesAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<RuleDto>> GetActiveRulesAsync(CancellationToken cancellationToken)
     {
-        var rules = new List<RuleConfigDto>();
+        var rules = new List<RuleDto>();
         var from = 0;
 
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            IReadOnlyList<RuleConfigDto> page;
+            IReadOnlyList<RuleDto> page;
             try
             {
-                page = await _client.SearchAsync<RuleConfigDto>(
+                page = await _client.SearchAsync<RuleDto>(
                     new ElasticsearchSearchRequest
                     {
                         IndexName = _indexName,

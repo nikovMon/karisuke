@@ -14,19 +14,19 @@ public sealed class RulesElasticsearchOptions
     {
         if (string.IsNullOrWhiteSpace(IndexName))
         {
-            error = "Rules IndexName must not be empty.";
+            error = "Rules Elasticsearch IndexName must not be empty.";
             return false;
         }
 
         if (DefaultSearchSize <= 0)
         {
-            error = "Rules DefaultSearchSize must be greater than 0.";
+            error = "Rules Elasticsearch DefaultSearchSize must be greater than 0.";
             return false;
         }
 
         if (MaxSearchSize < DefaultSearchSize)
         {
-            error = "Rules MaxSearchSize must be greater than or equal to DefaultSearchSize.";
+            error = "Rules Elasticsearch MaxSearchSize must be greater than or equal to DefaultSearchSize.";
             return false;
         }
 

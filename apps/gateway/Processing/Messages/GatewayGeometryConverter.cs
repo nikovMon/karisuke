@@ -32,7 +32,7 @@ public sealed class GatewayGeometryConverter
         }
     }
 
-    public Geometry ReadRuleGeometry(RuleConfigDto rule)
+    public Geometry ReadRuleGeometry(RuleDto rule)
     {
         if (!string.IsNullOrWhiteSpace(rule.LocationWkt))
         {
@@ -54,6 +54,6 @@ public sealed class GatewayGeometryConverter
 
     public JsonElement WriteGeoJson(Geometry geometry) => GeometryUtilities.WriteGeoJson(geometry);
 
-    private static string RuleLabel(RuleConfigDto rule) =>
+    private static string RuleLabel(RuleDto rule) =>
         string.IsNullOrWhiteSpace(rule.Id) ? rule.RuleName : rule.Id;
 }

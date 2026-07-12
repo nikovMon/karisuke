@@ -4,5 +4,5 @@ namespace ImagingPipeline.Gateway.Processing.Rules;
 
 public interface IRuleRepository
 {
-    Task<IReadOnlyList<RuleConfigDto>> GetActiveRulesAsync(CancellationToken cancellationToken);
+    Task<IReadOnlyList<RuleDto>> GetActiveRulesAsync(CancellationToken cancellationToken);
 }

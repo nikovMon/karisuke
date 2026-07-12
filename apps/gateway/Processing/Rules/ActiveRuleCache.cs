@@ -100,7 +100,7 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
         return _refreshInterval + jitter;
     }
 
-    private ActiveRule[] BuildSnapshot(IReadOnlyList<RuleConfigDto> rules)
+    private ActiveRule[] BuildSnapshot(IReadOnlyList<RuleDto> rules)
     {
         var snapshot = new ActiveRule[rules.Count];
         for (var ruleIndex = 0; ruleIndex < rules.Count; ruleIndex++)
@@ -111,10 +111,10 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
         return snapshot;
     }
 
-    private ActiveRule BuildSnapshot(RuleConfigDto rule) =>
+    private ActiveRule BuildSnapshot(RuleDto rule) =>
         new(
             rule.Id,
-            rule.AlgorithmName!.Value,
+            rule.AlgorithmName,
             BuildSensorSnapshot(rule.Sensors),
             BuildTenantSnapshot(rule.TenantsInfo),
             rule.MinimumResolution,

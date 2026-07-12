@@ -1,80 +1,159 @@
 using ImagingPipeline.Common.Dtos.Rules.Models;
-using ImagingPipeline.Rules.Api.Repositories;
+using ImagingPipeline.ElasticsearchClient;
+using Nest;
 
 namespace ImagingPipeline.Rules.Api.Tests.Fakes;
 
-internal sealed class InMemoryRuleRepository : IRuleRepository
+internal sealed class InMemoryRuleRepository : IElasticsearchDocumentClient
 {
-    private readonly Dictionary<string, RuleConfigDto> _rules = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, RuleDto> _rules = new(StringComparer.Ordinal);
 
-    public IReadOnlyCollection<RuleConfigDto> SavedRules => _rules.Values;
+    public IReadOnlyCollection<RuleDto> SavedRules => _rules.Values;
 
     public void Clear() => _rules.Clear();
 
-    public void Add(RuleConfigDto rule) => _rules[rule.Id] = Clone(rule);
+    public void Add(RuleDto rule) => _rules[rule.Id] = Clone(rule);
 
-    public Task<IReadOnlyList<RuleConfigDto>> GetAllAsync(
-        bool? isActive,
-        int from,
-        int size,
-        CancellationToken cancellationToken = default)
-    {
-        IReadOnlyList<RuleConfigDto> rules = _rules.Values
-            .Where(rule => !isActive.HasValue || rule.IsActive == isActive.Value)
-            .Skip(from)
-            .Take(size)
-            .Select(Clone)
-            .ToArray();
-
-        return Task.FromResult(rules);
-    }
-
-    public Task<RuleConfigDto?> GetByIdAsync(
-        string id,
-        CancellationToken cancellationToken = default)
+    public Task<RuleDto?> GetByIdAsync(string id)
     {
         return Task.FromResult(_rules.TryGetValue(id, out var rule) ? Clone(rule) : null);
     }
 
-    public Task<RuleConfigDto?> GetByNameAsync(
-        string ruleName,
-        CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<TDocument>> SearchAsync<TDocument>(ElasticsearchSearchRequest request)
+        where TDocument : class
     {
-        var rule = _rules.Values.FirstOrDefault(item =>
-            string.Equals(item.RuleName, ruleName, StringComparison.Ordinal));
+        IReadOnlyList<TDocument> documents = SearchDocuments<TDocument>(request)
+            .Select(document => document.Source)
+            .ToArray();
 
-        return Task.FromResult(rule is null ? null : Clone(rule));
+        return Task.FromResult(documents);
     }
 
-    public Task<bool> ExistsByNameAsync(
-        string ruleName,
-        string? excludingId = null,
-        CancellationToken cancellationToken = default)
-    {
-        var exists = _rules.Values.Any(rule =>
-            string.Equals(rule.RuleName, ruleName, StringComparison.Ordinal) &&
-            !string.Equals(rule.Id, excludingId, StringComparison.Ordinal));
+    public Task<IReadOnlyList<TDocument>> SearchBySensorAsync<TDocument>(ElasticsearchSensorSearchRequest request)
+        where TDocument : class =>
+        throw new NotSupportedException();
 
-        return Task.FromResult(exists);
+    public Task<IReadOnlyList<TDocument>> SearchByGeoShapeAsync<TDocument>(ElasticsearchGeoShapeSearchRequest request)
+        where TDocument : class =>
+        throw new NotSupportedException();
+
+    public async Task<TDocument?> GetAsync<TDocument>(string indexName, string id)
+        where TDocument : class
+    {
+        var document = await GetDocumentAsync<TDocument>(indexName, id);
+        return document?.Source;
     }
 
-    public Task SaveAsync(RuleConfigDto rule, CancellationToken cancellationToken = default)
+    public Task<ElasticsearchDocument<TDocument>?> GetDocumentAsync<TDocument>(
+        string indexName,
+        string id,
+        CancellationToken cancellationToken = default)
+        where TDocument : class
     {
-        if (string.IsNullOrWhiteSpace(rule.Id))
+        if (!_rules.TryGetValue(id, out var rule))
         {
-            rule.Id = Guid.NewGuid().ToString();
+            return Task.FromResult<ElasticsearchDocument<TDocument>?>(null);
         }
 
-        _rules[rule.Id] = Clone(rule);
-        return Task.CompletedTask;
+        var source = ConvertRule<TDocument>(rule);
+        return Task.FromResult<ElasticsearchDocument<TDocument>?>(new ElasticsearchDocument<TDocument>(id, source));
     }
 
-    public Task<bool> DeleteAsync(string id, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<ElasticsearchDocument<TDocument>>> SearchDocumentsAsync<TDocument>(
+        ElasticsearchSearchRequest request,
+        CancellationToken cancellationToken = default)
+        where TDocument : class =>
+        Task.FromResult(SearchDocuments<TDocument>(request));
+
+    public Task<IReadOnlyList<ElasticsearchDocument<TDocument>>> SearchDocumentsAsync<TDocument>(
+        Func<SearchDescriptor<TDocument>, ISearchRequest> configure,
+        CancellationToken cancellationToken = default)
+        where TDocument : class =>
+        throw new NotSupportedException();
+
+    public Task<string> IndexAsync<TDocument>(
+        string indexName,
+        string? id,
+        TDocument document,
+        bool waitForRefresh = true,
+        bool allowGeneratedId = false,
+        CancellationToken cancellationToken = default)
+        where TDocument : class
     {
-        return Task.FromResult(_rules.Remove(id));
+        if (document is not RuleDto rule)
+        {
+            throw new NotSupportedException();
+        }
+
+        var documentId = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString() : id;
+        var stored = Clone(rule);
+        stored.Id = documentId;
+        _rules[documentId] = stored;
+        return Task.FromResult(documentId);
     }
 
-    private static RuleConfigDto Clone(RuleConfigDto rule) =>
+    public Task<bool> DeleteAsync<TDocument>(
+        string indexName,
+        string id,
+        bool waitForRefresh = true,
+        CancellationToken cancellationToken = default)
+        where TDocument : class =>
+        Task.FromResult(_rules.Remove(id));
+
+    private IReadOnlyList<ElasticsearchDocument<TDocument>> SearchDocuments<TDocument>(
+        ElasticsearchSearchRequest request)
+        where TDocument : class
+    {
+        var rules = _rules.Values
+            .Where(rule => Matches(rule, request))
+            .Skip(request.From)
+            .Take(request.Size)
+            .Select(rule => new ElasticsearchDocument<TDocument>(rule.Id, ConvertRule<TDocument>(rule)))
+            .ToArray();
+
+        return rules;
+    }
+
+    private static bool Matches(RuleDto rule, ElasticsearchSearchRequest request)
+    {
+        if (request.ExcludedIds.Contains(rule.Id, StringComparer.Ordinal))
+        {
+            return false;
+        }
+
+        foreach (var filter in request.TermFilters)
+        {
+            if (filter.Field == "isActive" &&
+                filter.Value is bool isActive &&
+                rule.IsActive != isActive)
+            {
+                return false;
+            }
+
+            if (filter.Field == "ruleName.keyword" &&
+                !string.Equals(rule.RuleName, filter.Value?.ToString(), StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static TDocument ConvertRule<TDocument>(RuleDto rule)
+        where TDocument : class
+    {
+        if (typeof(TDocument) == typeof(RuleDto))
+        {
+            return (TDocument)(object)Clone(rule);
+        }
+
+        var document = Activator.CreateInstance<TDocument>();
+        typeof(TDocument).GetProperty("RuleName")?.SetValue(document, rule.RuleName);
+        return document;
+    }
+
+    private static RuleDto Clone(RuleDto rule) =>
         new()
         {
             Id = rule.Id,
