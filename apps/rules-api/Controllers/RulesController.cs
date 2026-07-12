@@ -13,11 +13,11 @@ namespace ImagingPipeline.Rules.Api.Controllers;
 [Produces("application/json")]
 public sealed class RulesController : ControllerBase
 {
-    private readonly IRuleService _service;
+    private readonly RuleService _service;
     private readonly RulesElasticsearchOptions _options;
 
     public RulesController(
-        IRuleService service,
+        RuleService service,
         IOptions<RulesElasticsearchOptions> options)
     {
         _service = service;
@@ -26,7 +26,7 @@ public sealed class RulesController : ControllerBase
 
     // Read routes
     [HttpGet]
-    [ProducesResponseType(typeof(IReadOnlyList<RuleConfigDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(IReadOnlyList<RuleDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(IReadOnlyList<string>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAll(
         [FromQuery] bool getNameOnly = false,
@@ -50,12 +50,12 @@ public sealed class RulesController : ControllerBase
             return Ok(names);
         }
 
-        var rules = await _service.GetRulesAsync(getNameOnly, isActive, from, searchSize, cancellationToken);
+        var rules = await _service.GetRulesAsync(isActive, from, searchSize, cancellationToken);
         return Ok(rules);
     }
 
     [HttpGet("{id}")]
-    [ProducesResponseType(typeof(RuleConfigDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RuleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetById(
         [FromRoute] string id,
@@ -66,7 +66,7 @@ public sealed class RulesController : ControllerBase
     }
 
     [HttpGet("name/{ruleName}")]
-    [ProducesResponseType(typeof(RuleConfigDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RuleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetByName(
         [FromRoute] string ruleName,
@@ -78,20 +78,20 @@ public sealed class RulesController : ControllerBase
 
     // Create route
     [HttpPost]
-    [ProducesResponseType(typeof(RuleConfigDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(typeof(RuleDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Create(
-        [FromBody] RuleConfigDto rule,
+        [FromBody] CreateRuleRequest request,
         CancellationToken cancellationToken = default)
     {
-        var result = await _service.CreateAsync(rule, cancellationToken);
-        return ToActionResult(result, createdAtId: result.Value?.Id);
+        var result = await _service.CreateAsync(request, cancellationToken);
+        return ToResultWithBody(result, createdAtId: result.Value?.Id);
     }
 
     // Update routes
     [HttpPatch("{id}")]
-    [ProducesResponseType(typeof(RuleConfigDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RuleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -101,57 +101,64 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _service.UpdateAsync(id, request, cancellationToken);
-        return ToActionResult(result);
+        return ToResultWithBody(result);
     }
 
     [HttpPatch("bulk")]
     [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status207MultiStatus)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> UpdateBulk(
         [FromQuery] string ids,
         [FromBody] UpdateRuleRequest request,
         CancellationToken cancellationToken = default)
     {
         var result = await _service.UpdateBulkAsync(ParseIds(ids), request, cancellationToken);
-        return ToActionResult(result);
+        return ToResultWithBody(result);
     }
 
     [HttpPatch("{id}/activity")]
-    [ProducesResponseType(typeof(RuleConfigDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(RuleDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ChangeActivity(
         [FromRoute] string id,
-        [FromBody] ChangeRuleActivityRequest request,
+        [FromBody] ChangeRuleActivationStatusRequest request,
         CancellationToken cancellationToken = default)
     {
         var result = await _service.ChangeActivityAsync(id, request, cancellationToken);
-        return ToActionResult(result);
+        return ToResultWithBody(result);
     }
 
     // Sensor routes
     [HttpPatch("sensors/add")]
     [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status207MultiStatus)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> AddSensors(
         [FromQuery] string ids,
         [FromBody] RuleSensorUpdateRequest request,
         CancellationToken cancellationToken = default)
     {
         var result = await _service.AddSensorsAsync(ParseIds(ids), request, cancellationToken);
-        return ToActionResult(result);
+        return ToResultWithBody(result);
     }
 
     [HttpPatch("sensors/remove")]
     [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status207MultiStatus)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> RemoveSensors(
         [FromQuery] string ids,
         [FromBody] RuleSensorUpdateRequest request,
         CancellationToken cancellationToken = default)
     {
         var result = await _service.RemoveSensorsAsync(ParseIds(ids), request, cancellationToken);
-        return ToActionResult(result);
+        return ToResultWithBody(result);
     }
 
     // Delete route
@@ -163,16 +170,19 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _service.DeleteAsync(id, cancellationToken);
-        return result.Status == RuleOperationStatus.Success ? NoContent() : ToActionResult(result);
+        return result.Status == RuleOperationStatus.Success ? NoContent() : ToResultWithoutBody(result);
     }
 
-    private IActionResult ToActionResult<T>(RuleOperationResult<T> result, string? createdAtId = null)
+    private IActionResult ToResultWithBody<T>(RuleOperationResult<T> result, string? createdAtId = null)
     {
         return result.Status switch
         {
             RuleOperationStatus.Success when createdAtId is not null =>
                 CreatedAtAction(nameof(GetById), new { id = createdAtId }, result.Value),
             RuleOperationStatus.Success => Ok(result.Value),
+            RuleOperationStatus.PartialSuccess =>
+                StatusCode(StatusCodes.Status207MultiStatus, result.Value),
+            RuleOperationStatus.AllFailed => UnprocessableEntity(result.Value),
             RuleOperationStatus.ValidationFailed => BadRequest(new { error = result.Error }),
             RuleOperationStatus.NotFound => NotFound(new { error = result.Error }),
             RuleOperationStatus.Conflict => Conflict(new { error = result.Error }),
@@ -180,7 +190,7 @@ public sealed class RulesController : ControllerBase
         };
     }
 
-    private IActionResult ToActionResult(RuleOperationResult result)
+    private IActionResult ToResultWithoutBody(RuleOperationResult result)
     {
         return result.Status switch
         {

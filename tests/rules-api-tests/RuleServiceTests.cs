@@ -1,15 +1,31 @@
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Common.Dtos.Rules.Requests;
 using ImagingPipeline.Common.Dtos.Rules.Responses;
+using ImagingPipeline.Rules.Api.Configuration;
 using ImagingPipeline.Rules.Api.Services;
 using ImagingPipeline.Rules.Api.Tests.Fakes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace ImagingPipeline.Rules.Api.Tests;
 
 public sealed class RuleServiceTests
 {
+    [Fact]
+    public async Task CreateSeparatesMultipleValidationErrors()
+    {
+        var service = CreateService(new InMemoryRuleRepository());
+
+        var result = await service.CreateAsync(new CreateRuleRequest
+        {
+            AlgorithmName = AlgorithmName.FindAir
+        });
+
+        Assert.Equal(RuleOperationStatus.ValidationFailed, result.Status);
+        Assert.Contains(" | ", result.Error, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task CreateRejectsDuplicateRuleName()
     {
@@ -17,7 +33,7 @@ public sealed class RuleServiceTests
         repository.Add(ValidRule("rule-1", "same-name"));
         var service = CreateService(repository);
 
-        var result = await service.CreateAsync(ValidRule("rule-2", "same-name"));
+        var result = await service.CreateAsync(ValidCreateRequest("same-name"));
 
         Assert.Equal(RuleOperationStatus.Conflict, result.Status);
     }
@@ -27,13 +43,11 @@ public sealed class RuleServiceTests
     {
         var repository = new InMemoryRuleRepository();
         var service = CreateService(repository);
-        var rule = ValidRule("rule-1", "one");
-        rule.CreationTime = DateTimeOffset.MinValue;
-        rule.UpdateTime = DateTimeOffset.MinValue;
-        rule.Sensors["camera"] = ["cam-1", "cam-1", "", "cam-2"];
-        rule.Sensors[" "] = ["ignored"];
+        var request = ValidCreateRequest("one");
+        request.Sensors["camera"] = ["cam-1", "cam-1", "", "cam-2"];
+        request.Sensors[" "] = ["ignored"];
 
-        var result = await service.CreateAsync(rule);
+        var result = await service.CreateAsync(request);
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
         Assert.False(string.IsNullOrWhiteSpace(result.Value?.Id));
@@ -45,19 +59,16 @@ public sealed class RuleServiceTests
     }
 
     [Fact]
-    public async Task CreateUsesRepositoryGeneratedIdInsteadOfClientId()
+    public async Task CreateUsesRepositoryGeneratedId()
     {
         var repository = new InMemoryRuleRepository();
         var service = CreateService(repository);
-        var rule = ValidRule("client-controlled-id", "one");
 
-        var result = await service.CreateAsync(rule);
+        var result = await service.CreateAsync(ValidCreateRequest("one"));
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
         var generatedId = Assert.IsType<string>(result.Value?.Id);
         Assert.NotEmpty(generatedId);
-        Assert.NotEqual("client-controlled-id", generatedId);
-        Assert.Null(await repository.GetByIdAsync("client-controlled-id"));
         Assert.NotNull(await repository.GetByIdAsync(generatedId));
     }
 
@@ -190,7 +201,7 @@ public sealed class RuleServiceTests
 
         var result = await service.UpdateBulkAsync(["rule-1", "missing"], request);
 
-        Assert.Equal(RuleOperationStatus.Success, result.Status);
+        Assert.Equal(RuleOperationStatus.PartialSuccess, result.Status);
         Assert.Equal(["rule-1"], result.Value?.SuccessIds);
         var failure = Assert.Single(result.Value?.FailedIds ?? []);
         Assert.Equal("missing", failure.Id);
@@ -236,7 +247,9 @@ public sealed class RuleServiceTests
     {
         var service = CreateService(new InMemoryRuleRepository());
 
-        var result = await service.ChangeActivityAsync("missing", new ChangeRuleActivityRequest { IsActive = true });
+        var result = await service.ChangeActivityAsync(
+            "missing",
+            new ChangeRuleActivationStatusRequest { IsActive = true });
 
         Assert.Equal(RuleOperationStatus.NotFound, result.Status);
     }
@@ -347,7 +360,10 @@ public sealed class RuleServiceTests
     public async Task ValidationFailureWritesStructuredWarningMetadata()
     {
         var logger = new RecordingLogger<RuleService>();
-        var service = new RuleService(new InMemoryRuleRepository(), logger);
+        var service = new RuleService(
+            new InMemoryRuleRepository(),
+            Options.Create(new RulesElasticsearchOptions { IndexName = "rules" }),
+            logger);
         var request = new UpdateRuleRequest();
 
         var result = await service.UpdateAsync("rule-1", request);
@@ -365,9 +381,39 @@ public sealed class RuleServiceTests
     }
 
     private static RuleService CreateService(InMemoryRuleRepository repository) =>
-        new(repository, NullLogger<RuleService>.Instance);
+        new(
+            repository,
+            Options.Create(new RulesElasticsearchOptions { IndexName = "rules" }),
+            NullLogger<RuleService>.Instance);
 
-    private static RuleConfigDto ValidRule(string id, string ruleName) =>
+    private static CreateRuleRequest ValidCreateRequest(string ruleName) =>
+        new()
+        {
+            RuleName = ruleName,
+            AlgorithmName = AlgorithmName.FindAir,
+            IsActive = true,
+            MinimumResolution = 0.5,
+            MaximumResolution = 1,
+            Area = "area",
+            LocationWkt = "POINT (1 1)",
+            TenantsInfo =
+            [
+                new TenantInfo
+                {
+                    TenantId = "tenant-1",
+                    TilingConfigs =
+                    [
+                        new TilingConfig
+                        {
+                            TileSizeWidth = 512,
+                            TileSizeHeight = 512
+                        }
+                    ]
+                }
+            ]
+        };
+
+    private static RuleDto ValidRule(string id, string ruleName) =>
         new()
         {
             Id = id,

@@ -1,5 +1,5 @@
+using ImagingPipeline.ElasticsearchClient;
 using ImagingPipeline.Rules.Api.Health;
-using ImagingPipeline.Rules.Api.Repositories;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,12 +10,12 @@ namespace ImagingPipeline.Rules.Api.Tests.Fakes;
 
 internal sealed class RulesApiFactory : WebApplicationFactory<Program>
 {
-    private readonly IRuleRepository _repository;
+    private readonly IElasticsearchDocumentClient _client;
     private readonly bool _isHealthy;
 
-    public RulesApiFactory(IRuleRepository repository, bool isHealthy = true)
+    public RulesApiFactory(IElasticsearchDocumentClient client, bool isHealthy = true)
     {
-        _repository = repository;
+        _client = client;
         _isHealthy = isHealthy;
     }
 
@@ -25,8 +25,8 @@ internal sealed class RulesApiFactory : WebApplicationFactory<Program>
         builder.ConfigureLogging(logging => logging.ClearProviders());
         builder.ConfigureServices(services =>
         {
-            services.RemoveAll<IRuleRepository>();
-            services.AddSingleton<IRuleRepository>(_repository);
+            services.RemoveAll<IElasticsearchDocumentClient>();
+            services.AddSingleton<IElasticsearchDocumentClient>(_client);
             services.RemoveAll<IElasticsearchHealthProbe>();
             services.AddSingleton<IElasticsearchHealthProbe>(new StubElasticsearchHealthProbe(_isHealthy));
         });

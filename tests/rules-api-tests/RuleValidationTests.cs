@@ -10,12 +10,14 @@ public sealed class RuleValidationTests
     [Fact]
     public void ValidateRuleReturnsAllRequiredFieldErrors()
     {
-        var rule = new RuleConfigDto();
+        var rule = new RuleDto
+        {
+            AlgorithmName = AlgorithmName.FindAir
+        };
 
         var errors = RuleValidation.ValidateRule(rule);
 
         Assert.Contains("ruleName cannot be empty", errors);
-        Assert.Contains("algorithmName is required", errors);
         Assert.Contains("minimumResolution must be greater than 0", errors);
         Assert.Contains("tenantsInfo must contain at least one tenant", errors);
         Assert.Contains("RuleConfig must contain locationWkt, locationGeoJson, or both", errors);
@@ -74,12 +76,24 @@ public sealed class RuleValidationTests
     }
 
     [Fact]
-    public void RuleDefaultsMaximumResolutionTo999()
+    public void RuleRequiresPositiveMaximumResolution()
     {
-        var rule = new RuleConfigDto();
+        var rule = new RuleDto
+        {
+            AlgorithmName = AlgorithmName.FindAir
+        };
 
-        Assert.Equal(999, rule.MaximumResolution);
+        var errors = RuleValidation.ValidateRule(rule);
+
+        Assert.Contains("maximumResolution must be greater than 0", errors);
         Assert.True(rule.IsActive);
+    }
+
+    [Fact]
+    public void FullAndCreateModelsRequireAlgorithmNameDuringDeserialization()
+    {
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<RuleDto>("{}"));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<CreateRuleRequest>("{}"));
     }
 
     [Fact]
@@ -201,7 +215,7 @@ public sealed class RuleValidationTests
         Assert.False(request.HasField("description"));
     }
 
-    private static RuleConfigDto ValidRule() =>
+    private static RuleDto ValidRule() =>
         new()
         {
             Id = "rule-1",

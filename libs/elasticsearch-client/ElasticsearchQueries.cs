@@ -43,6 +43,8 @@ public sealed class ElasticsearchSearchRequest
     public required string IndexName { get; init; }
     public int From { get; init; }
     public int Size { get; init; } = 100;
+    public List<string> SourceIncludes { get; init; } = [];
+    public List<string> ExcludedIds { get; init; } = [];
     public List<ElasticsearchTermFilter> TermFilters { get; init; } = [];
     public List<ElasticsearchTermsFilter> TermsFilters { get; init; } = [];
     public List<ElasticsearchSensorFilter> SensorFilters { get; init; } = [];
@@ -82,6 +84,7 @@ public static class ElasticsearchQueryJsonBuilder
             writer.WriteStartObject();
             writer.WriteNumber("from", request.From);
             writer.WriteNumber("size", request.Size);
+            WriteSourceIncludes(writer, request);
             writer.WritePropertyName("query");
             WriteQuery(writer, request);
             writer.WriteEndObject();
@@ -105,6 +108,16 @@ public static class ElasticsearchQueryJsonBuilder
         if (request.Size <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(request), "Size must be greater than 0.");
+        }
+
+        foreach (var field in request.SourceIncludes)
+        {
+            RequireField(field, "Source include field must not be empty.", request);
+        }
+
+        foreach (var id in request.ExcludedIds)
+        {
+            RequireField(id, "Excluded id must not be empty.", request);
         }
 
         foreach (var filter in request.TermFilters)
@@ -152,6 +165,23 @@ public static class ElasticsearchQueryJsonBuilder
         }
     }
 
+    private static void WriteSourceIncludes(Utf8JsonWriter writer, ElasticsearchSearchRequest request)
+    {
+        if (request.SourceIncludes.Count == 0)
+        {
+            return;
+        }
+
+        writer.WritePropertyName("_source");
+        writer.WriteStartArray();
+        foreach (var field in request.SourceIncludes)
+        {
+            writer.WriteStringValue(field);
+        }
+
+        writer.WriteEndArray();
+    }
+
     private static void WriteQuery(Utf8JsonWriter writer, ElasticsearchSearchRequest request)
     {
         if (!HasFilters(request))
@@ -165,37 +195,60 @@ public static class ElasticsearchQueryJsonBuilder
 
         writer.WriteStartObject();
         writer.WriteStartObject("bool");
-        writer.WritePropertyName("filter");
-        writer.WriteStartArray();
 
-        foreach (var filter in request.TermFilters)
+        if (HasPositiveFilters(request))
         {
-            WriteTermFilter(writer, filter.Field, filter.Value);
+            writer.WritePropertyName("filter");
+            writer.WriteStartArray();
+
+            foreach (var filter in request.TermFilters)
+            {
+                WriteTermFilter(writer, filter.Field, filter.Value);
+            }
+
+            foreach (var filter in request.TermsFilters)
+            {
+                WriteTermsFilter(writer, filter.Field, filter.Values);
+            }
+
+            foreach (var filter in request.SensorFilters)
+            {
+                var field = $"{filter.SensorRootField}.{filter.SensorName}{filter.KeywordSuffix}";
+                var values = filter.Values.Distinct(StringComparer.Ordinal).Cast<object>().ToArray();
+                WriteTermsFilter(writer, field, values);
+            }
+
+            foreach (var filter in request.GeoShapeFilters)
+            {
+                WriteGeoShapeFilter(writer, filter);
+            }
+
+            writer.WriteEndArray();
         }
 
-        foreach (var filter in request.TermsFilters)
+        if (request.ExcludedIds.Count > 0)
         {
-            WriteTermsFilter(writer, filter.Field, filter.Values);
+            writer.WritePropertyName("must_not");
+            writer.WriteStartArray();
+            writer.WriteStartObject();
+            writer.WritePropertyName("ids");
+            writer.WriteStartObject();
+            writer.WritePropertyName("values");
+            JsonSerializer.Serialize(writer, request.ExcludedIds);
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+            writer.WriteEndArray();
         }
 
-        foreach (var filter in request.SensorFilters)
-        {
-            var field = $"{filter.SensorRootField}.{filter.SensorName}{filter.KeywordSuffix}";
-            var values = filter.Values.Distinct(StringComparer.Ordinal).Cast<object>().ToArray();
-            WriteTermsFilter(writer, field, values);
-        }
-
-        foreach (var filter in request.GeoShapeFilters)
-        {
-            WriteGeoShapeFilter(writer, filter);
-        }
-
-        writer.WriteEndArray();
         writer.WriteEndObject();
         writer.WriteEndObject();
     }
 
     private static bool HasFilters(ElasticsearchSearchRequest request) =>
+        HasPositiveFilters(request) ||
+        request.ExcludedIds.Count > 0;
+
+    private static bool HasPositiveFilters(ElasticsearchSearchRequest request) =>
         request.TermFilters.Count > 0 ||
         request.TermsFilters.Count > 0 ||
         request.SensorFilters.Count > 0 ||
@@ -268,7 +321,7 @@ internal sealed class ElasticsearchHits<TDocument>
 internal sealed class ElasticsearchHit<TDocument>
 {
     [JsonPropertyName("_id")]
-    public string? Id { get; set; }
+    public string Id { get; set; } = string.Empty;
 
     [JsonPropertyName("_source")]
     public TDocument? Source { get; set; }
