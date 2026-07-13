@@ -45,7 +45,8 @@ public sealed class RabbitMqClientOptions
     public int OutputPublishConcurrency { get; set; } = 4;
     public int RetryDelayMilliseconds { get; set; } = 10000;
     public int MaxRetryAttempts { get; set; } = 3;
-    public string RetryCountPath { get; set; } = "retry.count";
+    public string RetryCountHeader { get; set; } = "x-retry-count";
+    public List<RabbitMqRetryQueueOptions> RetryQueues { get; set; } = [];
     public int ReconnectDelaySeconds { get; set; } = 5;
 
     internal string EffectiveInputExchange => InputExchange;
@@ -64,6 +65,11 @@ public sealed class RabbitMqClientOptions
     internal string EffectiveDeadLetterQueue => DeadLetterQueue == DefaultDeadLetterQueue
         ? EffectiveDeadLetterRoutingKey
         : DeadLetterQueue;
+
+    internal IReadOnlyList<RabbitMqRetryQueueOptions> EffectiveRetryQueues =>
+        RetryQueues.Count == 0
+            ? [CreateLegacyRetryQueueOptions(1)]
+            : RetryQueues;
 
     internal bool IsPublisherValid(out string error)
     {
@@ -97,10 +103,9 @@ public sealed class RabbitMqClientOptions
         }
 
         if (string.IsNullOrWhiteSpace(OutputQueue) ||
-            string.IsNullOrWhiteSpace(EffectiveDeadLetterQueue) ||
-            string.IsNullOrWhiteSpace(RetryQueue))
+            string.IsNullOrWhiteSpace(EffectiveDeadLetterQueue))
         {
-            error = "RabbitMq OutputQueue, DeadLetterQueue, and RetryQueue must not be empty for consumers.";
+            error = "RabbitMq OutputQueue and DeadLetterQueue must not be empty for consumers.";
             return false;
         }
 
@@ -110,15 +115,86 @@ public sealed class RabbitMqClientOptions
             return false;
         }
 
-        if (RetryDelayMilliseconds <= 0 || MaxRetryAttempts < 0 || string.IsNullOrWhiteSpace(RetryCountPath))
+        if (RetryDelayMilliseconds <= 0 ||
+            MaxRetryAttempts < 0 ||
+            string.IsNullOrWhiteSpace(RetryCountHeader))
         {
-            error = "RabbitMq retry delay, retry attempts, and retry count path are outside their valid ranges.";
+            error = "RabbitMq retry delay, retry attempts, and retry count header are outside their valid ranges.";
+            return false;
+        }
+
+        if (!IsRetryQueueConfigurationValid(out error))
+        {
             return false;
         }
 
         error = string.Empty;
         return true;
     }
+
+    private bool IsRetryQueueConfigurationValid(out string error)
+    {
+        if (MaxRetryAttempts == 0)
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        if (RetryQueues.Count == 0)
+        {
+            if (string.IsNullOrWhiteSpace(RetryQueue))
+            {
+                error = "RabbitMq RetryQueue must not be empty when no attempt-specific RetryQueues are configured.";
+                return false;
+            }
+
+            error = string.Empty;
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(RetryExchange) ||
+            !string.Equals(RetryExchangeType, RabbitMQ.Client.ExchangeType.Headers, StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(EffectiveRetryRoutingKey))
+        {
+            error = "RabbitMq RetryQueues require a headers RetryExchange and a non-empty retry publish routing key.";
+            return false;
+        }
+
+        var retryCounts = new HashSet<int>();
+        foreach (var retryQueue in RetryQueues)
+        {
+            if (retryQueue.RetryCount < 1 ||
+                retryQueue.RetryCount > MaxRetryAttempts ||
+                !retryCounts.Add(retryQueue.RetryCount) ||
+                string.IsNullOrWhiteSpace(retryQueue.Queue) ||
+                retryQueue.EffectiveDelayMilliseconds(RetryDelayMilliseconds) <= 0)
+            {
+                error = "RabbitMq RetryQueues must contain one valid queue per retry attempt.";
+                return false;
+            }
+        }
+
+        for (var retryCount = 1; retryCount <= MaxRetryAttempts; retryCount++)
+        {
+            if (!retryCounts.Contains(retryCount))
+            {
+                error = "RabbitMq RetryQueues must contain one valid queue per retry attempt.";
+                return false;
+            }
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private RabbitMqRetryQueueOptions CreateLegacyRetryQueueOptions(int retryCount) =>
+        new()
+        {
+            RetryCount = retryCount,
+            Queue = RetryQueue,
+            RoutingKey = EffectiveRetryRoutingKey,
+            DelayMilliseconds = RetryDelayMilliseconds
+        };
 
     private static string EffectiveValue(string? value, string fallback) =>
         string.IsNullOrWhiteSpace(value) ? fallback : value;
@@ -131,4 +207,18 @@ public sealed class RabbitMqClientOptions
             byte[] bytes => System.Text.Encoding.UTF8.GetString(bytes),
             _ => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty
         };
+}
+
+public sealed class RabbitMqRetryQueueOptions
+{
+    public int RetryCount { get; set; }
+    public string Queue { get; set; } = string.Empty;
+    public string? RoutingKey { get; set; }
+    public int? DelayMilliseconds { get; set; }
+    public Dictionary<string, object?> QueueHeaders { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, object?> BindingArguments { get; set; } = new(StringComparer.Ordinal);
+
+    internal string EffectiveRoutingKey => string.IsNullOrWhiteSpace(RoutingKey) ? Queue : RoutingKey;
+
+    internal int EffectiveDelayMilliseconds(int fallback) => DelayMilliseconds ?? fallback;
 }

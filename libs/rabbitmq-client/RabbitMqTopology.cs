@@ -21,7 +21,15 @@ internal static class RabbitMqTopology
         await DeclareQueueAsync(channel, options.InputQueue, BuildInputQueueArguments(options), cancellationToken);
         await DeclareQueueAsync(channel, options.OutputQueue, options.OutputQueueHeaders, cancellationToken);
         await DeclareQueueAsync(channel, options.EffectiveDeadLetterQueue, options.DeadLetterQueueHeaders, cancellationToken);
-        await DeclareQueueAsync(channel, options.RetryQueue, BuildRetryQueueArguments(options), cancellationToken);
+        foreach (var retryQueue in options.EffectiveRetryQueues)
+        {
+            if (string.IsNullOrWhiteSpace(retryQueue.Queue))
+            {
+                continue;
+            }
+
+            await DeclareQueueAsync(channel, retryQueue.Queue, BuildRetryQueueArguments(options, retryQueue), cancellationToken);
+        }
 
         await BindQueueAsync(channel, options.InputQueue, options.EffectiveInputExchange, options.EffectiveInputRoutingKey,
             options.InputBindingArguments, cancellationToken);
@@ -29,8 +37,16 @@ internal static class RabbitMqTopology
             options.OutputBindingArguments, cancellationToken);
         await BindQueueAsync(channel, options.EffectiveDeadLetterQueue, options.EffectiveDeadLetterExchange,
             options.EffectiveDeadLetterRoutingKey, options.DeadLetterBindingArguments, cancellationToken);
-        await BindQueueAsync(channel, options.RetryQueue, options.RetryExchange,
-            options.EffectiveRetryRoutingKey, options.RetryBindingArguments, cancellationToken);
+        foreach (var retryQueue in options.EffectiveRetryQueues)
+        {
+            if (string.IsNullOrWhiteSpace(retryQueue.Queue))
+            {
+                continue;
+            }
+
+            await BindQueueAsync(channel, retryQueue.Queue, options.RetryExchange,
+                retryQueue.EffectiveRoutingKey, BuildRetryBindingArguments(options, retryQueue), cancellationToken);
+        }
     }
 
     private static Dictionary<string, object?> BuildInputQueueArguments(RabbitMqClientOptions options)
@@ -41,13 +57,39 @@ internal static class RabbitMqTopology
         return headers;
     }
 
-    private static Dictionary<string, object?> BuildRetryQueueArguments(RabbitMqClientOptions options)
+    private static Dictionary<string, object?> BuildRetryQueueArguments(
+        RabbitMqClientOptions options,
+        RabbitMqRetryQueueOptions retryQueue)
     {
         var headers = new Dictionary<string, object?>(options.RetryQueueHeaders, StringComparer.Ordinal);
-        headers.TryAdd("x-message-ttl", options.RetryDelayMilliseconds);
+        foreach (var header in retryQueue.QueueHeaders)
+        {
+            headers[header.Key] = header.Value;
+        }
+
+        headers.TryAdd("x-message-ttl", retryQueue.EffectiveDelayMilliseconds(options.RetryDelayMilliseconds));
         headers.TryAdd("x-dead-letter-exchange", options.EffectiveInputExchange);
         headers.TryAdd("x-dead-letter-routing-key", options.EffectiveInputRoutingKey);
         return headers;
+    }
+
+    private static Dictionary<string, object?> BuildRetryBindingArguments(
+        RabbitMqClientOptions options,
+        RabbitMqRetryQueueOptions retryQueue)
+    {
+        var arguments = new Dictionary<string, object?>(options.RetryBindingArguments, StringComparer.Ordinal);
+        foreach (var argument in retryQueue.BindingArguments)
+        {
+            arguments[argument.Key] = argument.Value;
+        }
+
+        if (string.Equals(options.RetryExchangeType, ExchangeType.Headers, StringComparison.OrdinalIgnoreCase))
+        {
+            arguments["x-match"] = "all";
+            arguments[options.RetryCountHeader] = retryQueue.RetryCount;
+        }
+
+        return arguments;
     }
 
     private static Task DeclareExchangeAsync(

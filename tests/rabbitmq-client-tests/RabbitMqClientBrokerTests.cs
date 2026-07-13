@@ -50,6 +50,33 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
     }
 
     [RabbitMqBrokerFact]
+    public async Task SuccessfulHandlerOutputResetsRetryCountHeader()
+    {
+        var topology = CreateTopology();
+        await using var provider = BuildProvider(topology);
+        var publisher = provider.GetRequiredService<IRabbitMqPublisher>();
+        var consumer = provider.GetRequiredService<IRabbitMqConsumer>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var consumerTask = consumer.ConsumeAsync(new SuccessHandler(), cts.Token);
+        await publisher.PublishToInputAsync(
+            new RabbitMqMessageEnvelope(
+                "input-with-retry-count",
+                Encoding.UTF8.GetBytes("ok"),
+                Headers: new Dictionary<string, object?>
+                {
+                    ["x-retry-count"] = 2
+                }),
+            cts.Token);
+
+        var output = await WaitForEnvelopeAsync(topology.OutputQueue, cts.Token);
+        await StopConsumerAsync(consumerTask, cts);
+
+        Assert.Equal("OK", output.BodyAsUtf8());
+        Assert.Equal(0, ReadRetryCount(output));
+    }
+
+    [RabbitMqBrokerFact]
     public async Task SuccessfulHandlerOutputMessagesArePublishedToOutputQueue()
     {
         var topology = CreateTopology();
@@ -93,7 +120,7 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
     }
 
     [RabbitMqBrokerFact]
-    public async Task HandlerExceptionIsDeadLetteredByBroker()
+    public async Task HandlerExceptionIsPublishedToRetryQueue()
     {
         var topology = CreateTopology();
         await using var provider = BuildProvider(topology);
@@ -104,15 +131,67 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
         var consumerTask = consumer.ConsumeAsync(new ThrowingHandler(), cts.Token);
         await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8("boom"), cts.Token);
 
-        var deadLetter = await WaitForMessageAsync(topology.DeadLetterQueue, cts.Token);
+        var retry = await WaitForEnvelopeAsync(topology.RetryQueue, cts.Token);
         await StopConsumerAsync(consumerTask, cts);
 
-        Assert.Equal("boom", deadLetter);
+        Assert.Equal("boom", retry.BodyAsUtf8());
+        Assert.Equal(1, ReadRetryCount(retry));
         Assert.Null(await BasicGetAsync(topology.OutputQueue, CancellationToken.None));
+        Assert.Null(await BasicGetAsync(topology.DeadLetterQueue, CancellationToken.None));
     }
 
     [RabbitMqBrokerFact]
-    public async Task HandlerExceptionWithJsonBodyIsPublishedToRetryQueue()
+    public async Task HandlerExceptionWithExistingRetryCountIsPublishedToMatchingRetryQueue()
+    {
+        var topology = CreateTopology();
+        var firstRetryQueue = _broker.CreateName("retry.1");
+        var secondRetryQueue = _broker.CreateName("retry.2");
+        var thirdRetryQueue = _broker.CreateName("retry.3");
+        _broker.TrackQueue(firstRetryQueue);
+        _broker.TrackQueue(secondRetryQueue);
+        _broker.TrackQueue(thirdRetryQueue);
+        var configuration = BuildConfiguration(topology, new Dictionary<string, string?>
+        {
+            ["RabbitMq:RetryExchangeType"] = "headers",
+            ["RabbitMq:RetryQueues:0:RetryCount"] = "1",
+            ["RabbitMq:RetryQueues:0:Queue"] = firstRetryQueue,
+            ["RabbitMq:RetryQueues:0:DelayMilliseconds"] = "60000",
+            ["RabbitMq:RetryQueues:1:RetryCount"] = "2",
+            ["RabbitMq:RetryQueues:1:Queue"] = secondRetryQueue,
+            ["RabbitMq:RetryQueues:1:DelayMilliseconds"] = "60000",
+            ["RabbitMq:RetryQueues:2:RetryCount"] = "3",
+            ["RabbitMq:RetryQueues:2:Queue"] = thirdRetryQueue,
+            ["RabbitMq:RetryQueues:2:DelayMilliseconds"] = "60000"
+        });
+        await using var provider = BuildProvider(configuration);
+        var publisher = provider.GetRequiredService<IRabbitMqPublisher>();
+        var consumer = provider.GetRequiredService<IRabbitMqConsumer>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var consumerTask = consumer.ConsumeAsync(new ThrowingHandler(), cts.Token);
+        await publisher.PublishToInputAsync(
+            new RabbitMqMessageEnvelope(
+                "retry-input",
+                Encoding.UTF8.GetBytes("""{"payload":{"id":"image-1"}}"""),
+                Headers: new Dictionary<string, object?>
+                {
+                    ["x-retry-count"] = 1
+                }),
+            cts.Token);
+
+        var retry = await WaitForEnvelopeAsync(secondRetryQueue, cts.Token);
+        await StopConsumerAsync(consumerTask, cts);
+
+        using var document = JsonDocument.Parse(retry.Body);
+        Assert.Equal("image-1", document.RootElement.GetProperty("payload").GetProperty("id").GetString());
+        Assert.Equal(2, ReadRetryCount(retry));
+        Assert.Null(await BasicGetAsync(firstRetryQueue, CancellationToken.None));
+        Assert.Null(await BasicGetAsync(thirdRetryQueue, CancellationToken.None));
+        Assert.Null(await BasicGetAsync(topology.DeadLetterQueue, CancellationToken.None));
+    }
+
+    [RabbitMqBrokerFact]
+    public async Task HandlerExceptionWithInvalidRetryCountHeaderIsDeadLetteredByBroker()
     {
         var topology = CreateTopology();
         await using var provider = BuildProvider(topology);
@@ -122,16 +201,20 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
 
         var consumerTask = consumer.ConsumeAsync(new ThrowingHandler(), cts.Token);
         await publisher.PublishToInputAsync(
-            RabbitMqMessageEnvelope.FromUtf8("""{"payload":{"id":"image-1"}}""", "retry-input"),
+            new RabbitMqMessageEnvelope(
+                "bad-retry-count",
+                Encoding.UTF8.GetBytes("boom"),
+                Headers: new Dictionary<string, object?>
+                {
+                    ["x-retry-count"] = "bad"
+                }),
             cts.Token);
 
-        var retry = await WaitForMessageAsync(topology.RetryQueue, cts.Token);
+        var deadLetter = await WaitForMessageAsync(topology.DeadLetterQueue, cts.Token);
         await StopConsumerAsync(consumerTask, cts);
 
-        using var document = JsonDocument.Parse(retry);
-        Assert.Equal("image-1", document.RootElement.GetProperty("payload").GetProperty("id").GetString());
-        Assert.Equal(1, document.RootElement.GetProperty("retry").GetProperty("count").GetInt32());
-        Assert.Null(await BasicGetAsync(topology.DeadLetterQueue, CancellationToken.None));
+        Assert.Equal("boom", deadLetter);
+        Assert.Null(await BasicGetAsync(topology.RetryQueue, CancellationToken.None));
     }
 
     [RabbitMqBrokerFact]
@@ -338,7 +421,7 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
             ["RabbitMq:PublisherChannelPoolSize"] = "2",
             ["RabbitMq:RetryDelayMilliseconds"] = "60000",
             ["RabbitMq:MaxRetryAttempts"] = "3",
-            ["RabbitMq:RetryCountPath"] = "retry.count",
+            ["RabbitMq:RetryCountHeader"] = "x-retry-count",
             ["RabbitMq:ReconnectDelaySeconds"] = "1"
         };
 
@@ -374,6 +457,27 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
         throw new TimeoutException($"Timed out waiting for message in {queue}.");
     }
 
+    private static async Task<RabbitMqMessageEnvelope> WaitForEnvelopeAsync(
+        string queue,
+        CancellationToken cancellationToken = default)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+
+        while (!timeout.IsCancellationRequested)
+        {
+            var message = await BasicGetEnvelopeAsync(queue, timeout.Token);
+            if (message is not null)
+            {
+                return message;
+            }
+
+            await Task.Delay(250, timeout.Token);
+        }
+
+        throw new TimeoutException($"Timed out waiting for message in {queue}.");
+    }
+
     private static async Task WaitForQueueMessageCountAsync(
         string queue,
         uint expectedCount,
@@ -398,10 +502,41 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
 
     private static async Task<string?> BasicGetAsync(string queue, CancellationToken cancellationToken)
     {
+        var result = await BasicGetEnvelopeAsync(queue, cancellationToken);
+        return result?.BodyAsUtf8();
+    }
+
+    private static async Task<RabbitMqMessageEnvelope?> BasicGetEnvelopeAsync(string queue, CancellationToken cancellationToken)
+    {
         await using var connection = await CreateConnectionAsync(cancellationToken);
         await using var channel = await connection.CreateChannelAsync(cancellationToken: cancellationToken);
         var result = await channel.BasicGetAsync(queue, autoAck: true, cancellationToken);
-        return result is null ? null : Encoding.UTF8.GetString(result.Body.Span);
+        if (result is null)
+        {
+            return null;
+        }
+
+        return new RabbitMqMessageEnvelope(
+            result.BasicProperties.MessageId ?? string.Empty,
+            result.Body.ToArray(),
+            result.BasicProperties.ContentType ?? "application/octet-stream",
+            result.BasicProperties.Headers is null
+                ? null
+                : new Dictionary<string, object?>(result.BasicProperties.Headers, StringComparer.Ordinal),
+            result.BasicProperties.CorrelationId);
+    }
+
+    private static int ReadRetryCount(RabbitMqMessageEnvelope message)
+    {
+        Assert.NotNull(message.Headers);
+        Assert.True(message.Headers.TryGetValue("x-retry-count", out var value));
+
+        return value switch
+        {
+            int retryCount => retryCount,
+            byte[] bytes => int.Parse(Encoding.UTF8.GetString(bytes), System.Globalization.CultureInfo.InvariantCulture),
+            _ => Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture)
+        };
     }
 
     private static async Task<QueueDeclareOk> PassiveQueueDeclareAsync(string queue)

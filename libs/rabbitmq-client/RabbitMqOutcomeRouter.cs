@@ -37,7 +37,7 @@ internal sealed class RabbitMqOutcomeRouter
                 else if (result.OutputBody is not null)
                 {
                     var output = delivery.Message with { Body = result.OutputBody };
-                    await _publisher.PublishToOutputAsync(output, cancellationToken);
+                    await _publisher.PublishToOutputAsync(ResetRetryCountHeader(output), cancellationToken);
                 }
 
                 await channel.BasicAckAsync(delivery.DeliveryTag, multiple: false, cancellationToken);
@@ -81,12 +81,12 @@ internal sealed class RabbitMqOutcomeRouter
 
         var retry = RabbitMqRetryMessageBuilder.Build(
             delivery.Message,
-            _options.RetryCountPath,
+            _options.RetryCountHeader,
             _options.MaxRetryAttempts);
 
         if (retry.Status == RabbitMqRetryBuildStatus.InvalidMessage)
         {
-            await DeadLetterAsync(channel, delivery, result, retry.Error ?? "retry count could not be updated", cancellationToken);
+            await DeadLetterAsync(channel, delivery, result, retry.Error ?? "retry count header could not be updated", cancellationToken);
             return;
         }
 
@@ -106,14 +106,14 @@ internal sealed class RabbitMqOutcomeRouter
         await channel.BasicAckAsync(delivery.DeliveryTag, multiple: false, cancellationToken);
         RabbitMqClientDiagnostics.RetriedMessages.Add(1,
             RabbitMqClientDiagnostics.Tag("queue", _options.InputQueue),
-            RabbitMqClientDiagnostics.Tag("retry_queue", _options.RetryQueue));
+            RabbitMqClientDiagnostics.Tag("retry_exchange", _options.RetryExchange));
         RabbitMqClientDiagnostics.AckedMessages.Add(1,
             RabbitMqClientDiagnostics.Tag("queue", _options.InputQueue),
             RabbitMqClientDiagnostics.Tag("outcome", "retry"));
         _logger.LogWarning(
-            "Retried RabbitMQ message {MessageId} through {RetryQueue}; attempt {RetryAttempt}/{MaxRetryAttempts}. Error: {Error}",
+            "Retried RabbitMQ message {MessageId} through retry exchange {RetryExchange}; attempt {RetryAttempt}/{MaxRetryAttempts}. Error: {Error}",
             delivery.Message.MessageId,
-            _options.RetryQueue,
+            _options.RetryExchange,
             retry.NextRetryCount,
             _options.MaxRetryAttempts,
             result.Error ?? "Message processing failed");
@@ -155,7 +155,7 @@ internal sealed class RabbitMqOutcomeRouter
         {
             foreach (var output in outputMessages)
             {
-                await _publisher.PublishToOutputAsync(output, cancellationToken);
+                await _publisher.PublishToOutputAsync(ResetRetryCountHeader(output), cancellationToken);
             }
 
             return;
@@ -170,7 +170,21 @@ internal sealed class RabbitMqOutcomeRouter
             },
             async (output, token) =>
             {
-                await _publisher.PublishToOutputAsync(output, token);
+                await _publisher.PublishToOutputAsync(ResetRetryCountHeader(output), token);
             });
+    }
+
+    private RabbitMqMessageEnvelope ResetRetryCountHeader(RabbitMqMessageEnvelope message)
+    {
+        if (string.IsNullOrWhiteSpace(_options.RetryCountHeader))
+        {
+            return message;
+        }
+
+        var headers = message.Headers is null
+            ? new Dictionary<string, object?>(StringComparer.Ordinal)
+            : new Dictionary<string, object?>(message.Headers, StringComparer.Ordinal);
+        headers[_options.RetryCountHeader] = 0;
+        return message with { Headers = headers };
     }
 }

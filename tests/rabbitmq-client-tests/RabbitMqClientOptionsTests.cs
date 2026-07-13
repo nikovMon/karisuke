@@ -22,7 +22,7 @@ public sealed class RabbitMqClientOptionsTests
         Assert.Equal(4, options.OutputPublishConcurrency);
         Assert.Equal(10000, options.RetryDelayMilliseconds);
         Assert.Equal(3, options.MaxRetryAttempts);
-        Assert.Equal("retry.count", options.RetryCountPath);
+        Assert.Equal("x-retry-count", options.RetryCountHeader);
     }
 
     [Fact]
@@ -224,7 +224,7 @@ public sealed class RabbitMqClientOptionsTests
         };
 
         Assert.False(options.IsConsumerValid(out var error));
-        Assert.Equal("RabbitMq OutputQueue, DeadLetterQueue, and RetryQueue must not be empty for consumers.", error);
+        Assert.Equal("RabbitMq OutputQueue and DeadLetterQueue must not be empty for consumers.", error);
     }
 
     [Fact]
@@ -240,11 +240,11 @@ public sealed class RabbitMqClientOptionsTests
         };
 
         Assert.False(options.IsConsumerValid(out var error));
-        Assert.Equal("RabbitMq OutputQueue, DeadLetterQueue, and RetryQueue must not be empty for consumers.", error);
+        Assert.Equal("RabbitMq OutputQueue and DeadLetterQueue must not be empty for consumers.", error);
     }
 
     [Fact]
-    public void ConsumerValidationRejectsEmptyRetryQueue()
+    public void ConsumerValidationRejectsEmptyLegacyRetryQueue()
     {
         var options = new RabbitMqClientOptions
         {
@@ -252,7 +252,7 @@ public sealed class RabbitMqClientOptionsTests
         };
 
         Assert.False(options.IsConsumerValid(out var error));
-        Assert.Equal("RabbitMq OutputQueue, DeadLetterQueue, and RetryQueue must not be empty for consumers.", error);
+        Assert.Equal("RabbitMq RetryQueue must not be empty when no attempt-specific RetryQueues are configured.", error);
     }
 
     [Fact]
@@ -280,23 +280,101 @@ public sealed class RabbitMqClientOptionsTests
     }
 
     [Theory]
-    [InlineData(0, 3, "retry.count")]
-    [InlineData(1000, -1, "retry.count")]
+    [InlineData(0, 3, "x-retry-count")]
+    [InlineData(1000, -1, "x-retry-count")]
     [InlineData(1000, 3, " ")]
     public void ConsumerValidationRejectsInvalidRetryPolicy(
         int retryDelayMilliseconds,
         int maxRetryAttempts,
-        string retryCountPath)
+        string retryCountHeader)
     {
         var options = new RabbitMqClientOptions
         {
             RetryDelayMilliseconds = retryDelayMilliseconds,
             MaxRetryAttempts = maxRetryAttempts,
-            RetryCountPath = retryCountPath
+            RetryCountHeader = retryCountHeader
         };
 
         Assert.False(options.IsConsumerValid(out var error));
-        Assert.Equal("RabbitMq retry delay, retry attempts, and retry count path are outside their valid ranges.", error);
+        Assert.Equal("RabbitMq retry delay, retry attempts, and retry count header are outside their valid ranges.", error);
+    }
+
+    [Fact]
+    public void ConsumerValidationAcceptsAttemptSpecificRetryQueues()
+    {
+        var options = new RabbitMqClientOptions
+        {
+            RetryExchange = "retry.exchange",
+            RetryExchangeType = RabbitMQ.Client.ExchangeType.Headers,
+            RetryRoutingKey = "retry",
+            MaxRetryAttempts = 2,
+            RetryQueues =
+            [
+                new RabbitMqRetryQueueOptions
+                {
+                    RetryCount = 1,
+                    Queue = "retry.1",
+                    DelayMilliseconds = 1000
+                },
+                new RabbitMqRetryQueueOptions
+                {
+                    RetryCount = 2,
+                    Queue = "retry.2",
+                    DelayMilliseconds = 2000
+                }
+            ]
+        };
+
+        Assert.True(options.IsConsumerValid(out var error));
+        Assert.Equal(string.Empty, error);
+        Assert.Equal("retry", options.EffectiveRetryRoutingKey);
+    }
+
+    [Fact]
+    public void ConsumerValidationRejectsMissingAttemptSpecificRetryQueue()
+    {
+        var options = new RabbitMqClientOptions
+        {
+            RetryExchange = "retry.exchange",
+            RetryExchangeType = RabbitMQ.Client.ExchangeType.Headers,
+            MaxRetryAttempts = 2,
+            RetryQueues =
+            [
+                new RabbitMqRetryQueueOptions
+                {
+                    RetryCount = 1,
+                    Queue = "retry.1",
+                    RoutingKey = "retry.1.key",
+                    DelayMilliseconds = 1000
+                }
+            ]
+        };
+
+        Assert.False(options.IsConsumerValid(out var error));
+        Assert.Equal("RabbitMq RetryQueues must contain one valid queue per retry attempt.", error);
+    }
+
+    [Fact]
+    public void ConsumerValidationRejectsAttemptSpecificRetryQueuesWithoutHeadersExchange()
+    {
+        var options = new RabbitMqClientOptions
+        {
+            RetryExchange = "retry.exchange",
+            RetryExchangeType = RabbitMQ.Client.ExchangeType.Direct,
+            MaxRetryAttempts = 1,
+            RetryQueues =
+            [
+                new RabbitMqRetryQueueOptions
+                {
+                    RetryCount = 1,
+                    Queue = "retry.1",
+                    DelayMilliseconds = 1000
+                }
+            ]
+        };
+
+        Assert.False(options.IsConsumerValid(out var error));
+        Assert.Equal("RabbitMq RetryQueues require a headers RetryExchange and a non-empty retry publish routing key.", error);
     }
 
     [Fact]

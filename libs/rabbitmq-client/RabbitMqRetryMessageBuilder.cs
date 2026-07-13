@@ -1,5 +1,5 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
+using System.Globalization;
+using System.Text;
 
 namespace ImagingPipeline.RabbitMqClient;
 
@@ -21,63 +21,23 @@ internal static class RabbitMqRetryMessageBuilder
 {
     public static RabbitMqRetryBuildResult Build(
         RabbitMqMessageEnvelope message,
-        string retryCountPath,
+        string retryCountHeader,
         int maxRetryAttempts)
     {
-        var segments = retryCountPath.Split(
-            '.',
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-        if (segments.Length == 0)
+        if (string.IsNullOrWhiteSpace(retryCountHeader))
         {
-            return Invalid("Retry count path must not be empty.");
+            return Invalid("Retry count header must not be empty.");
         }
 
-        JsonNode? parsed;
-        try
-        {
-            parsed = JsonNode.Parse(message.Body);
-        }
-        catch (JsonException ex)
-        {
-            return Invalid($"Message body is not valid JSON: {ex.Message}");
-        }
+        var headers = message.Headers is null
+            ? new Dictionary<string, object?>(StringComparer.Ordinal)
+            : new Dictionary<string, object?>(message.Headers, StringComparer.Ordinal);
 
-        if (parsed is not JsonObject root)
-        {
-            return Invalid("Message body must be a JSON object to update retry count.");
-        }
-
-        var current = root;
-        for (var segmentIndex = 0; segmentIndex < segments.Length - 1; segmentIndex++)
-        {
-            var segment = segments[segmentIndex];
-            if (!current.TryGetPropertyValue(segment, out var child) || child is null)
-            {
-                var next = new JsonObject();
-                current[segment] = next;
-                current = next;
-                continue;
-            }
-
-            if (child is not JsonObject childObject)
-            {
-                return Invalid($"Retry count path segment '{segment}' is not a JSON object.");
-            }
-
-            current = childObject;
-        }
-
-        var leaf = segments[^1];
         var currentRetryCount = 0;
-        if (current.TryGetPropertyValue(leaf, out var retryCountNode) && retryCountNode is not null)
+        if (headers.TryGetValue(retryCountHeader, out var retryCountHeaderValue) &&
+            !TryReadRetryCount(retryCountHeaderValue, out currentRetryCount))
         {
-            if (retryCountNode is not JsonValue retryCountValue ||
-                !retryCountValue.TryGetValue<int>(out currentRetryCount) ||
-                currentRetryCount < 0)
-            {
-                return Invalid($"Retry count path '{retryCountPath}' must contain a non-negative integer.");
-            }
+            return Invalid($"Retry count header '{retryCountHeader}' must contain a non-negative integer.");
         }
 
         if (currentRetryCount >= maxRetryAttempts)
@@ -91,14 +51,63 @@ internal static class RabbitMqRetryMessageBuilder
         }
 
         var nextRetryCount = currentRetryCount + 1;
-        current[leaf] = nextRetryCount;
+        headers[retryCountHeader] = nextRetryCount;
         return new RabbitMqRetryBuildResult(
             RabbitMqRetryBuildStatus.Retry,
-            message with { Body = JsonSerializer.SerializeToUtf8Bytes(root) },
+            message with { Headers = headers },
             currentRetryCount,
             nextRetryCount,
             null);
     }
+
+    private static bool TryReadRetryCount(object? value, out int retryCount)
+    {
+        retryCount = 0;
+
+        switch (value)
+        {
+            case null:
+                return true;
+            case byte number:
+                retryCount = number;
+                return true;
+            case sbyte number when number >= 0:
+                retryCount = number;
+                return true;
+            case short number when number >= 0:
+                retryCount = number;
+                return true;
+            case ushort number:
+                retryCount = number;
+                return true;
+            case int number when number >= 0:
+                retryCount = number;
+                return true;
+            case uint number when number <= int.MaxValue:
+                retryCount = (int)number;
+                return true;
+            case long number when number is >= 0 and <= int.MaxValue:
+                retryCount = (int)number;
+                return true;
+            case ulong number when number <= int.MaxValue:
+                retryCount = (int)number;
+                return true;
+            case string text:
+                return TryReadRetryCountText(text, out retryCount);
+            case byte[] bytes:
+                return TryReadRetryCountText(Encoding.UTF8.GetString(bytes), out retryCount);
+            default:
+                return false;
+        }
+    }
+
+    private static bool TryReadRetryCountText(string text, out int retryCount) =>
+        int.TryParse(
+            text,
+            NumberStyles.None,
+            CultureInfo.InvariantCulture,
+            out retryCount) &&
+        retryCount >= 0;
 
     private static RabbitMqRetryBuildResult Invalid(string error) =>
         new(
