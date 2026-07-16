@@ -159,7 +159,11 @@ public sealed class RabbitMqServiceCollectionTests
         var values = new Dictionary<string, string?>
         {
             ["RabbitMq:Host"] = "localhost",
-            ["RabbitMq:Port"] = "5672"
+            ["RabbitMq:Port"] = "5672",
+            ["RabbitMq:InputQueue"] = "input",
+            ["RabbitMq:OutputQueue"] = "output",
+            ["RabbitMq:DeadLetterQueue"] = "dlq",
+            ["RabbitMq:RetryQueue"] = "retry"
         };
 
         if (extra is not null)

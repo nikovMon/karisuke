@@ -3,18 +3,16 @@ namespace ImagingPipeline.RabbitMqClient;
 public sealed class RabbitMqClientOptions
 {
     public const string SectionName = "RabbitMq";
-    private const string DefaultDeadLetterQueue = "int.algo.gateway_rules.dlq";
-    private const string DefaultRetryQueue = "int.algo.gateway_rules.retry";
 
     public string Host { get; set; } = "localhost";
     public int Port { get; set; } = 5672;
     public string Username { get; set; } = "admin";
     public string Password { get; set; } = "admin";
     public string VirtualHost { get; set; } = "/";
-    public string InputQueue { get; set; } = "int.algo.gateway_rules";
-    public string OutputQueue { get; set; } = "int.algo.gateway_rules.output";
-    public string DeadLetterQueue { get; set; } = DefaultDeadLetterQueue;
-    public string RetryQueue { get; set; } = DefaultRetryQueue;
+    public string InputQueue { get; set; } = string.Empty;
+    public string OutputQueue { get; set; } = string.Empty;
+    public string DeadLetterQueue { get; set; } = string.Empty;
+    public string RetryQueue { get; set; } = string.Empty;
     public string InputExchange { get; set; } = string.Empty;
     public string OutputExchange { get; set; } = string.Empty;
     public string DeadLetterExchange { get; set; } = string.Empty;
@@ -62,7 +60,7 @@ public sealed class RabbitMqClientOptions
         ? HeaderToString(HeadersArguments.GetValueOrDefault("x-dead-letter-routing-key", DeadLetterQueue))
         : DeadLetterRoutingKey;
 
-    internal string EffectiveDeadLetterQueue => DeadLetterQueue == DefaultDeadLetterQueue
+    internal string EffectiveDeadLetterQueue => string.IsNullOrWhiteSpace(DeadLetterQueue)
         ? EffectiveDeadLetterRoutingKey
         : DeadLetterQueue;
 
@@ -145,6 +143,12 @@ public sealed class RabbitMqClientOptions
             if (string.IsNullOrWhiteSpace(RetryQueue))
             {
                 error = "RabbitMq RetryQueue must not be empty when no attempt-specific RetryQueues are configured.";
+                return false;
+            }
+
+            if (string.Equals(RetryExchangeType, RabbitMQ.Client.ExchangeType.Headers, StringComparison.OrdinalIgnoreCase))
+            {
+                error = "RabbitMq RetryExchangeType cannot be headers unless attempt-specific RetryQueues are configured.";
                 return false;
             }
 
