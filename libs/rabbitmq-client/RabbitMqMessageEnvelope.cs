@@ -36,3 +36,11 @@ public enum RabbitMqMessageFailureAction
     Retry
 }
 
+internal static class RabbitMqHeaders
+{
+    public static Dictionary<string, object?> Clone(IEnumerable<KeyValuePair<string, object?>>? headers) =>
+        headers is null
+            ? new Dictionary<string, object?>(StringComparer.Ordinal)
+            : new Dictionary<string, object?>(headers, StringComparer.Ordinal);
+}
+

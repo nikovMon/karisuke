@@ -29,9 +29,7 @@ internal static class RabbitMqRetryMessageBuilder
             return Invalid("Retry count header must not be empty.");
         }
 
-        var headers = message.Headers is null
-            ? new Dictionary<string, object?>(StringComparer.Ordinal)
-            : new Dictionary<string, object?>(message.Headers, StringComparer.Ordinal);
+        var headers = RabbitMqHeaders.Clone(message.Headers);
 
         var currentRetryCount = 0;
         if (headers.TryGetValue(retryCountHeader, out var retryCountHeaderValue) &&

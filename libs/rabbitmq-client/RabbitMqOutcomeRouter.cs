@@ -181,9 +181,7 @@ internal sealed class RabbitMqOutcomeRouter
             return message;
         }
 
-        var headers = message.Headers is null
-            ? new Dictionary<string, object?>(StringComparer.Ordinal)
-            : new Dictionary<string, object?>(message.Headers, StringComparer.Ordinal);
+        var headers = RabbitMqHeaders.Clone(message.Headers);
         headers[_options.RetryCountHeader] = 0;
         return message with { Headers = headers };
     }
