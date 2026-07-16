@@ -94,7 +94,6 @@ Consumer configuration:
         "Queue": "int.algo.gateway_rules.retry.1",
         "DelayMilliseconds": 10000,
         "BindingArguments": {
-          "x-match": "all",
           "x-retry-count": 1
         }
       },
@@ -103,7 +102,6 @@ Consumer configuration:
         "Queue": "int.algo.gateway_rules.retry.2",
         "DelayMilliseconds": 10000,
         "BindingArguments": {
-          "x-match": "all",
           "x-retry-count": 2
         }
       },
@@ -112,7 +110,6 @@ Consumer configuration:
         "Queue": "int.algo.gateway_rules.retry.3",
         "DelayMilliseconds": 10000,
         "BindingArguments": {
-          "x-match": "all",
           "x-retry-count": 3
         }
       }
@@ -187,8 +184,8 @@ Retry settings:
 - When `RetryQueues` is configured, `RetryExchangeType` must be `headers`.
   The client publishes the retry message once to `RetryExchange`; RabbitMQ
   routes it to the retry queue whose binding matches `RetryCountHeader`.
-  The topology builder adds `x-match = all` and the retry count header binding
-  for each configured retry queue.
+  The topology builder adds the retry count header binding for each
+  configured retry queue.
 - If `RetryQueues` is empty, the legacy `RetryQueue` / `RetryRoutingKey` pair
   is used for every attempt.
 - `RetryDelayMilliseconds` is the default retry queue `x-message-ttl`.

@@ -334,7 +334,6 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
         var configuration = BuildConfiguration(topology, new Dictionary<string, string?>
         {
             ["RabbitMq:InputExchangeType"] = "headers",
-            ["RabbitMq:InputBindingArguments:x-match"] = "all",
             ["RabbitMq:InputBindingArguments:message-kind"] = "image"
         });
         await using var provider = BuildProvider(configuration);
