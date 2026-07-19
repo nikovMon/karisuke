@@ -4,7 +4,7 @@ public sealed class ProjectionMapperOptions
 {
     public const string SectionName = "ProjectionMapper";
 
-    public string Host { get; set; } = "http://projection-mapper";
+    public string Host { get; set; } = string.Empty;
     public Dictionary<string, string> Endpoints { get; set; } = new(StringComparer.Ordinal);
     public string SendingSystem { get; set; } = string.Empty;
     public bool UseCache { get; set; }
