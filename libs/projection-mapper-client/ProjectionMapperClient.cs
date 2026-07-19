@@ -121,6 +121,7 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
             {
                 ProjectionMapperClientDiagnostics.Failures.Add(1);
                 activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+                _logger.LogError(ex, "Projection mapper i2g-by-id request failed for overlay {OverlayId}.", overlayId);
                 throw new ProjectionMapperClientException("Projection mapper i2g-by-id request failed.", ex);
             }
 

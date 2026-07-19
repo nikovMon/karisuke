@@ -29,10 +29,10 @@ public sealed class TbMessageHandler(
             return RabbitMqMessageProcessingResult.Failure("Validation failed: Tiles batch is null or empty.");
         }
 
-        var rawAlgorithmName = input.MissionMetadata.Overlay.AlgorithmName.ToString();
-        if (!Enum.TryParse<TargetAlgorithm>(rawAlgorithmName, ignoreCase: true, out var matchedAlgorithm))
+        var matchedAlgorithm = input.MissionMetadata.Overlay.AlgorithmName;
+        if (!Enum.IsDefined(typeof(AlgorithmName), matchedAlgorithm))
         {
-            throw new InvalidOperationException($"Invalid algorithm: {rawAlgorithmName}. Valid target algorithms are: {string.Join(", ", Enum.GetNames<TargetAlgorithm>())}");
+            throw new InvalidOperationException($"Invalid algorithm: {matchedAlgorithm}. Valid algorithms are: {string.Join(", ", Enum.GetNames<AlgorithmName>())}");
         }
 
         var headers = new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>
@@ -40,7 +40,6 @@ public sealed class TbMessageHandler(
             ["algorithm_name"] = matchedAlgorithm.ToString()
         });
 
-        // --- Step 4: Batch-level projection mapping (single call for all tiles) ---
         var overlay = input.MissionMetadata.Overlay;
 
         var tilesRois = input.Tiles
@@ -50,14 +49,12 @@ public sealed class TbMessageHandler(
         var batchMapped = await projectionMapper.ProcessBatchAsync(
             overlay.ImageId, tilesRois, cancellationToken);
 
-        // --- Step 5: Per-tile fan-out (map + publish only, no projection calls) ---
         for (var i = 0; i < input.Tiles.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var tile = input.Tiles[i];
 
-            // 5a. Extract pre-computed projection result for this tile
             double? lon = null;
             double? lat = null;
             var coordsList = new List<double[]>();
@@ -68,7 +65,6 @@ public sealed class TbMessageHandler(
                 lon = mapped[0];
                 lat = mapped[1];
 
-                // Pass through mapped coordinate pairs directly without geometrical manipulations
                 for (var j = 0; j < mapped.Count - 1; j += 2)
                 {
                     coordsList.Add([mapped[j], mapped[j + 1]]);
@@ -84,10 +80,10 @@ public sealed class TbMessageHandler(
             if (tile.Roi.Length >= 4 && overlay.ResolutionMPerPx > 0)
             {
                 var widthPx = System.Math.Abs(tile.Roi[2] - tile.Roi[0]);
-                tilesSizeMeters = widthPx * overlay.ResolutionMPerPx;
+                var heightPx = System.Math.Abs(tile.Roi[3] - tile.Roi[1]);
+                tilesSizeMeters = System.Math.Max(widthPx, heightPx) * overlay.ResolutionMPerPx;
             }
 
-            // 5c. Build EmbedderInput from processed tile + message metadata
             var embedderInput = new EmbedderInput
             {
                 TileId = tile.TileIndex.ToString(),
@@ -105,7 +101,6 @@ public sealed class TbMessageHandler(
                 RequestTime = timeProvider.GetUtcNow().UtcDateTime,
             };
 
-            // 5d. Wrap into final envelope
             var envelope = new EmbedderInputDto
             {
                 FrameMetadata = input.FrameMetadata,
@@ -117,7 +112,6 @@ public sealed class TbMessageHandler(
                 EmbedderInput = embedderInput
             };
 
-            // 5e. Serialize and publish with headers
             var body = JsonSerializer.SerializeToUtf8Bytes(envelope, JsonOptions);
             var outgoing = new RabbitMqMessageEnvelope(
                 MessageId: Guid.NewGuid().ToString("N"),

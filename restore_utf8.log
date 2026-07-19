@@ -1,0 +1,4 @@
+﻿  Determining projects to restore...
+C:\Users\lihik\source\repos\karisuke\tests\tb-consumer-tests\ImagingPipeline.TbConsumer.Tests.csproj : error NU1008: The following PackageReference items cannot define a value for Version: Moq. Projects using Central Package Management must define a Version value on a PackageVersion item. For more information, visit https://aka.ms/nuget/cpm/gettingstarted [C:\Users\lihik\source\repos\karisuke\ImagingPipeline.sln]
+  Failed to restore C:\Users\lihik\source\repos\karisuke\tests\tb-consumer-tests\ImagingPipeline.TbConsumer.Tests.csproj (in 117 ms).
+  11 of 12 projects are up-to-date for restore.

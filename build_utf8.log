@@ -1,0 +1,24 @@
+﻿  Determining projects to restore...
+  All projects are up-to-date for restore.
+  ImagingPipeline.Gateway -> C:\Users\lihik\source\repos\karisuke\apps\gateway\bin\Debug\net10.0\ImagingPipeline.Gateway.dll
+  ImagingPipeline.TbPublisher -> C:\Users\lihik\source\repos\karisuke\apps\tb-publisher\bin\Debug\net10.0\ImagingPipeline.TbPublisher.dll
+  RabbitMqClient -> C:\Users\lihik\source\repos\karisuke\libs\rabbitmq-client\bin\Debug\net10.0\ImagingPipeline.RabbitMqClient.dll
+  ImagingPipeline.IntegrationTests -> C:\Users\lihik\source\repos\karisuke\tests\integration-tests\bin\Debug\net10.0\ImagingPipeline.IntegrationTests.dll
+  ImagingPipeline.Common.Dtos -> C:\Users\lihik\source\repos\karisuke\libs\common-dtos\bin\Debug\net10.0\ImagingPipeline.Common.Dtos.dll
+  ImagingPipeline.Rules.Api -> C:\Users\lihik\source\repos\karisuke\apps\rules-api\bin\Debug\net10.0\ImagingPipeline.Rules.Api.dll
+  ImagingPipeline.Gateway.Tests -> C:\Users\lihik\source\repos\karisuke\tests\gateway-tests\bin\Debug\net10.0\ImagingPipeline.Gateway.Tests.dll
+  ImagingPipeline.TbPublisher.Tests -> C:\Users\lihik\source\repos\karisuke\tests\tb-publisher-tests\bin\Debug\net10.0\ImagingPipeline.TbPublisher.Tests.dll
+  ImagingPipeline.TbConsumer -> C:\Users\lihik\source\repos\karisuke\apps\tb-consumer\bin\Debug\net10.0\ImagingPipeline.TbConsumer.dll
+  ImagingPipeline.Rules.Api.Tests -> C:\Users\lihik\source\repos\karisuke\tests\rules-api-tests\bin\Debug\net10.0\ImagingPipeline.Rules.Api.Tests.dll
+C:\Users\lihik\source\repos\karisuke\tests\rabbitmq-client-tests\RabbitMqServiceCollectionTests.cs(179,41): error CS0535: 'RabbitMqServiceCollectionTests.FakeConsumer' does not implement interface member 'IRabbitMqConsumer.ConsumeBatchAsync(IRabbitMqBatchMessageHandler, int, TimeSpan, CancellationToken)' [C:\Users\lihik\source\repos\karisuke\tests\rabbitmq-client-tests\ImagingPipeline.RabbitMqClient.Tests.csproj]
+C:\Users\lihik\source\repos\karisuke\tests\rabbitmq-client-tests\RabbitMqServiceCollectionTests.cs(189,39): error CS0535: 'RabbitMqServiceCollectionTests.FakeClient' does not implement interface member 'IRabbitMqConsumer.ConsumeBatchAsync(IRabbitMqBatchMessageHandler, int, TimeSpan, CancellationToken)' [C:\Users\lihik\source\repos\karisuke\tests\rabbitmq-client-tests\ImagingPipeline.RabbitMqClient.Tests.csproj]
+  ImagingPipeline.TbConsumer.Tests -> C:\Users\lihik\source\repos\karisuke\tests\tb-consumer-tests\bin\Debug\net10.0\ImagingPipeline.TbConsumer.Tests.dll
+
+Build FAILED.
+
+C:\Users\lihik\source\repos\karisuke\tests\rabbitmq-client-tests\RabbitMqServiceCollectionTests.cs(179,41): error CS0535: 'RabbitMqServiceCollectionTests.FakeConsumer' does not implement interface member 'IRabbitMqConsumer.ConsumeBatchAsync(IRabbitMqBatchMessageHandler, int, TimeSpan, CancellationToken)' [C:\Users\lihik\source\repos\karisuke\tests\rabbitmq-client-tests\ImagingPipeline.RabbitMqClient.Tests.csproj]
+C:\Users\lihik\source\repos\karisuke\tests\rabbitmq-client-tests\RabbitMqServiceCollectionTests.cs(189,39): error CS0535: 'RabbitMqServiceCollectionTests.FakeClient' does not implement interface member 'IRabbitMqConsumer.ConsumeBatchAsync(IRabbitMqBatchMessageHandler, int, TimeSpan, CancellationToken)' [C:\Users\lihik\source\repos\karisuke\tests\rabbitmq-client-tests\ImagingPipeline.RabbitMqClient.Tests.csproj]
+    0 Warning(s)
+    2 Error(s)
+
+Time Elapsed 00:00:03.54
