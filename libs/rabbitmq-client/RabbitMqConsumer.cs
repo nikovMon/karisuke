@@ -28,11 +28,28 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
     public async Task ConsumeAsync(IRabbitMqMessageHandler handler, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(handler);
-        await ConsumeSingleAsync(handler, cancellationToken);
+
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var consumers = Enumerable.Range(0, _options.ConsumerConcurrency)
+            .Select(index => ConsumeSingleAsync(handler, index, linkedCancellation.Token))
+            .ToArray();
+
+        foreach (var consumer in consumers)
+        {
+            _ = consumer.ContinueWith(
+                static (_, state) => ((CancellationTokenSource)state!).Cancel(),
+                linkedCancellation,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+
+        await Task.WhenAll(consumers);
     }
 
     private async Task ConsumeSingleAsync(
         IRabbitMqMessageHandler handler,
+        int consumerIndex,
         CancellationToken cancellationToken)
     {
         var connection = await _connections.GetConnectionAsync(cancellationToken);
@@ -61,7 +78,7 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
                 RabbitMqClientDiagnostics.HandlerFailures.Add(1, RabbitMqClientDiagnostics.Tag("queue", _options.InputQueue));
                 activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
                 _logger.LogError(ex, "Handler failed for RabbitMQ message {MessageId}", delivery.Message.MessageId);
-                result = RabbitMqMessageProcessingResult.Failure(ex.Message);
+                result = RabbitMqMessageProcessingResult.RetryableFailure(ex.Message);
             }
             finally
             {
@@ -77,8 +94,11 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
             _options.InputQueue, autoAck: false, consumerTag: string.Empty, noLocal: false, exclusive: false,
             arguments: null, consumer: consumer, cancellationToken: cancellationToken);
         _logger.LogInformation(
-            "Consuming RabbitMQ queue {InputQueue} with prefetch {PrefetchCount}",
-            _options.InputQueue, _options.PrefetchCount);
+            "Consuming RabbitMQ queue {InputQueue} with consumer {ConsumerIndex}/{ConsumerConcurrency} and prefetch {PrefetchCount}",
+            _options.InputQueue,
+            consumerIndex + 1,
+            _options.ConsumerConcurrency,
+            _options.PrefetchCount);
 
         try
         {

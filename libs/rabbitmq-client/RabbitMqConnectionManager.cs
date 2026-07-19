@@ -47,6 +47,7 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
                     AutomaticRecoveryEnabled = true,
                     TopologyRecoveryEnabled = true,
                     NetworkRecoveryInterval = TimeSpan.FromSeconds(_options.ReconnectDelaySeconds),
+                    // Parallelism is provided by multiple consumer channels, not concurrent callbacks on one channel.
                     ConsumerDispatchConcurrency = 1,
                     ClientProvidedName = $"imagingpipeline-{Environment.ProcessId}"
                 };
