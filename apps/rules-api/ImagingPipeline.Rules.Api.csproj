@@ -5,6 +5,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.OpenApi" />
+    <PackageReference Include="NetTopologySuite" />
+    <PackageReference Include="NetTopologySuite.IO.GeoJSON" />
     <PackageReference Include="Swashbuckle.AspNetCore" />
   </ItemGroup>
 

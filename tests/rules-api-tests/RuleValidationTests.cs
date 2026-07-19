@@ -20,19 +20,19 @@ public sealed class RuleValidationTests
         Assert.Contains("ruleName cannot be empty", errors);
         Assert.Contains("minimumResolution must be greater than 0", errors);
         Assert.Contains("tenantsInfo must contain at least one tenant", errors);
-        Assert.Contains("RuleConfig must contain locationWkt, locationGeoJson, or both", errors);
+        Assert.Contains("locationWkt is required", errors);
     }
 
     [Fact]
-    public void ValidateRuleAcceptsGeoJsonWhenWktIsMissing()
+    public void ValidateRuleRejectsGeoJsonWhenWktIsMissing()
     {
         var rule = ValidRule();
-        rule.LocationWkt = null;
+        rule.LocationWkt = string.Empty;
         rule.LocationGeoJson = JsonDocument.Parse("{\"type\":\"Point\",\"coordinates\":[1,1]}").RootElement.Clone();
 
         var errors = RuleValidation.ValidateRule(rule);
 
-        Assert.Empty(errors);
+        Assert.Contains("locationWkt is required", errors);
     }
 
     [Fact]
