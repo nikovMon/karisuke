@@ -176,8 +176,7 @@ public sealed class RuleService : IRuleService
         {
             if (!RuleGeometry.ConvertWktToGeoJson(request.LocationWkt, out var convertedGeoJson, out var geometryError))
             {
-                var geometryErrors = new[] { geometryError! };
-                LogValidationFailure(operation, id, geometryErrors);
+                LogValidationFailure(operation, id, [geometryError!]);
                 return RuleOperationResult<RuleDto>.ValidationFailed(geometryError!);
             }
 
