@@ -2,11 +2,10 @@ using System.Text.Json;
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbPublisher.Errors;
-using ImagingPipeline.TbPublisher.Observability;
 using ImagingPipeline.TbPublisher.Processing;
 using Microsoft.Extensions.Logging;
 
-namespace ImagingPipeline.TbPublisher.Application;
+namespace ImagingPipeline.TbPublisher.MessageHandling;
 
 public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
 {
@@ -39,13 +38,9 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
         RabbitMqMessageEnvelope message,
         CancellationToken cancellationToken = default)
     {
-        using var activity = TbPublisherDiagnostics.ActivitySource.StartActivity("tb-publisher handle message");
-        activity?.SetTag("messaging.message.id", message.MessageId);
-
         var validation = _validator.Validate(message.Body);
         if (!validation.IsValid)
         {
-            TbPublisherDiagnostics.ValidationFailures.Add(1);
             var validationError = string.Join(" | ", validation.Errors);
             _logger.LogWarning(
                 "TBPublisher message {MessageId} failed validation. Errors: {ValidationErrors}",
@@ -54,7 +49,6 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
             return RabbitMqMessageProcessingResult.Failure(validationError);
         }
 
-        TbPublisherDiagnostics.MessagesValidated.Add(1);
         var inputMessage = validation.Message!;
 
         IReadOnlyList<IReadOnlyList<double>> groundPoints;
@@ -122,7 +116,6 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
             throw;
         }
 
-        TbPublisherDiagnostics.MessagesPublishedToOutput.Add(outputMessages.Count);
         _logger.LogInformation(
             "TBPublisher message {MessageId} processed successfully for tenant {TenantId}, published {Count} tiling-config message(s).",
             message.MessageId,

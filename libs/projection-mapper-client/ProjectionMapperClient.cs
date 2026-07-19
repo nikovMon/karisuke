@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -26,10 +25,6 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
         ProjectionMapperRequestDto request,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ProjectionMapperClientDiagnostics.ActivitySource.StartActivity(
-            "projection-mapper map", ActivityKind.Client);
-        activity?.SetTag("projection_mapper.overlay_id", overlayId);
-
         if (!_options.Endpoints.TryGetValue(ProjectionMapperEndpointKeys.G2IMultiPoints, out var endpoint))
         {
             throw new ProjectionMapperClientException(
@@ -38,54 +33,37 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
 
         var requestUri = $"{endpoint}?overlayId={Uri.EscapeDataString(overlayId)}&useCache={(_options.UseCache ? "true" : "false")}";
 
-        var started = Stopwatch.GetTimestamp();
+        HttpResponseMessage response;
         try
         {
-            HttpResponseMessage response;
-            try
-            {
-                response = await _httpClient.PostAsJsonAsync(requestUri, request, cancellationToken);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                ProjectionMapperClientDiagnostics.Failures.Add(1);
-                activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-                _logger.LogError(ex, "Projection mapper call failed for overlay {OverlayId}.", overlayId);
-                throw new ProjectionMapperClientException("Projection mapper request failed.", ex);
-            }
-
-            using (response)
-            {
-                if (!response.IsSuccessStatusCode)
-                {
-                    ProjectionMapperClientDiagnostics.Failures.Add(1);
-                    activity?.SetStatus(ActivityStatusCode.Error, $"HTTP {(int)response.StatusCode}");
-                    _logger.LogWarning(
-                        "Projection mapper returned {StatusCode} for overlay {OverlayId}.",
-                        (int)response.StatusCode,
-                        overlayId);
-                    throw new ProjectionMapperClientException(
-                        $"Projection mapper returned HTTP {(int)response.StatusCode}.");
-                }
-
-                var payload = await response.Content.ReadFromJsonAsync<ProjectionMapperResponseDto>(cancellationToken);
-                if (payload is null)
-                {
-                    ProjectionMapperClientDiagnostics.Failures.Add(1);
-                    activity?.SetStatus(ActivityStatusCode.Error, "empty response");
-                    _logger.LogWarning("Projection mapper returned an empty response for overlay {OverlayId}.", overlayId);
-                    throw new ProjectionMapperClientException("Projection mapper returned an empty response.");
-                }
-
-                ProjectionMapperClientDiagnostics.Calls.Add(1);
-                return payload.Coordinates;
-            }
+            response = await _httpClient.PostAsJsonAsync(requestUri, request, cancellationToken);
         }
-        finally
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            ProjectionMapperClientDiagnostics.DurationMs.Record(
-                Stopwatch.GetElapsedTime(started).TotalMilliseconds,
-                new KeyValuePair<string, object?>("overlay_id", overlayId));
+            _logger.LogError(ex, "Projection mapper call failed for overlay {OverlayId}.", overlayId);
+            throw new ProjectionMapperClientException("Projection mapper request failed.", ex);
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Projection mapper returned {StatusCode} for overlay {OverlayId}.",
+                    (int)response.StatusCode,
+                    overlayId);
+                throw new ProjectionMapperClientException(
+                    $"Projection mapper returned HTTP {(int)response.StatusCode}.");
+            }
+
+            var payload = await response.Content.ReadFromJsonAsync<ProjectionMapperResponseDto>(cancellationToken);
+            if (payload is null)
+            {
+                _logger.LogWarning("Projection mapper returned an empty response for overlay {OverlayId}.", overlayId);
+                throw new ProjectionMapperClientException("Projection mapper returned an empty response.");
+            }
+
+            return payload.Coordinates;
         }
     }
 }
