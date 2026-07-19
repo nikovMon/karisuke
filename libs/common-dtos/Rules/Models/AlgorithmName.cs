@@ -5,11 +5,6 @@ namespace ImagingPipeline.Common.Dtos.Rules.Models;
 /// </summary>
 public enum AlgorithmName
 {
-    Unknown = 0,
     FindAir,
-    FindShip,
-    FindVehicle,
-    FindBuilding,
-    FindChange,
     RPN
 }
