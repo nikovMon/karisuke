@@ -47,6 +47,26 @@ public static class RuleValidation
             errors.Add("isActive cannot be null.");
         }
 
+        if (request.HasField("locationWkt"))
+        {
+            if (string.IsNullOrWhiteSpace(request.LocationWkt))
+            {
+                errors.Add("locationWkt is required.");
+            }
+            else if (!RuleGeometry.ConvertWktToGeoJson(
+                request.LocationWkt,
+                out _,
+                out var geometryError))
+            {
+                errors.Add(geometryError!);
+            }
+        }
+
+        if (request.HasField("locationGeoJson") && !request.HasField("locationWkt"))
+        {
+            errors.Add("locationGeoJson is generated from locationWkt and cannot be updated directly.");
+        }
+
         if (request.HasField("sensors"))
         {
             AddSensorCollectionErrors(request.Sensors, errors);
