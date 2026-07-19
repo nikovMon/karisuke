@@ -3,7 +3,7 @@ using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Messaging;
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
-using ImagingPipeline.TbPublisher.Application;
+using ImagingPipeline.TbPublisher.MessageHandling;
 using ImagingPipeline.TbPublisher.Processing;
 using ImagingPipeline.TbPublisher.Tests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
