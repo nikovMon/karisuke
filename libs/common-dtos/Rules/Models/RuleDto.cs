@@ -41,8 +41,7 @@ public sealed class RuleDto : IValidatableObject
     public string Area { get; set; } = string.Empty;
 
     [JsonPropertyName("locationWkt")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? LocationWkt { get; set; }
+    public string LocationWkt { get; set; } = string.Empty;
 
     [JsonPropertyName("locationGeoJson")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -109,16 +108,11 @@ public sealed class RuleDto : IValidatableObject
             }
         }
 
-        var hasWkt = !string.IsNullOrWhiteSpace(LocationWkt);
-        var hasGeoJson = LocationGeoJson.HasValue &&
-            LocationGeoJson.Value.ValueKind != JsonValueKind.Null &&
-            LocationGeoJson.Value.ValueKind != JsonValueKind.Undefined;
-
-        if (!hasWkt && !hasGeoJson)
+        if (string.IsNullOrWhiteSpace(LocationWkt))
         {
             yield return new ValidationResult(
-                "RuleConfig must contain locationWkt, locationGeoJson, or both",
-                [nameof(LocationWkt), nameof(LocationGeoJson)]);
+                "locationWkt is required",
+                [nameof(LocationWkt)]);
         }
     }
 

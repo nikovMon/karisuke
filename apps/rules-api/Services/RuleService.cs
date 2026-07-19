@@ -5,6 +5,7 @@ using ImagingPipeline.ElasticsearchClient;
 using ImagingPipeline.Rules.Api.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace ImagingPipeline.Rules.Api.Services;
@@ -102,7 +103,19 @@ public sealed class RuleService : IRuleService
             rule.Id,
             rule.RuleName);
 
-        var errors = RuleValidation.ValidateRule(rule);
+        var errors = RuleValidation.ValidateRule(rule).ToList();
+        if (!string.IsNullOrWhiteSpace(rule.LocationWkt))
+        {
+            if (RuleGeometry.ConvertWktToGeoJson(rule.LocationWkt, out var geoJson, out var geometryError))
+            {
+                rule.LocationGeoJson = geoJson;
+            }
+            else
+            {
+                errors.Add(geometryError!);
+            }
+        }
+
         if (errors.Count > 0)
         {
             LogValidationFailure("create", rule.Id, errors);
@@ -158,6 +171,19 @@ public sealed class RuleService : IRuleService
             return RuleOperationResult<RuleDto>.ValidationFailed(string.Join(" | ", validationErrors));
         }
 
+        JsonElement? locationGeoJson = null;
+        if (request.HasField("locationWkt"))
+        {
+            if (!RuleGeometry.ConvertWktToGeoJson(request.LocationWkt, out var convertedGeoJson, out var geometryError))
+            {
+                var geometryErrors = new[] { geometryError! };
+                LogValidationFailure(operation, id, geometryErrors);
+                return RuleOperationResult<RuleDto>.ValidationFailed(geometryError!);
+            }
+
+            locationGeoJson = convertedGeoJson;
+        }
+
         var rule = await GetByIdAsync(id, cancellationToken);
         if (rule is null)
         {
@@ -181,6 +207,10 @@ public sealed class RuleService : IRuleService
         }
 
         ApplyUpdate(rule, request);
+        if (locationGeoJson.HasValue)
+        {
+            rule.LocationGeoJson = locationGeoJson.Value;
+        }
         var ruleErrors = RuleValidation.ValidateRule(rule);
         if (ruleErrors.Count > 0)
         {
@@ -487,8 +517,7 @@ public sealed class RuleService : IRuleService
             ["minimumResolution"] = () => rule.MinimumResolution = request.MinimumResolution.GetValueOrDefault(),
             ["maximumResolution"] = () => rule.MaximumResolution = request.MaximumResolution!.Value,
             ["area"] = () => rule.Area = request.Area ?? string.Empty,
-            ["locationWkt"] = () => rule.LocationWkt = request.LocationWkt,
-            ["locationGeoJson"] = () => rule.LocationGeoJson = request.LocationGeoJson,
+            ["locationWkt"] = () => rule.LocationWkt = request.LocationWkt!,
             ["isPhotoOld"] = () => rule.IsPhotoOld = request.IsPhotoOld
         };
 
