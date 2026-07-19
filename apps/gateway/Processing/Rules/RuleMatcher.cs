@@ -37,7 +37,7 @@ public sealed class RuleMatcher
 
     private static bool MatchesSensor(GatewayInputMessage input, ActiveRule rule)
     {
-        if (rule.Sensors is null || rule.Sensors.Count == 0)
+        if (rule.Sensors.Count == 0)
         {
             return true;
         }

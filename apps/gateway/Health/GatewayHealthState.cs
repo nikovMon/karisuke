@@ -3,13 +3,23 @@ namespace ImagingPipeline.Gateway.Health;
 public sealed class GatewayHealthState
 {
     private readonly object _rulesRefreshLock = new();
-    private volatile bool _rulesLoaded;
+    private bool _rulesLoaded;
     private volatile bool _consumerStarted;
     private DateTimeOffset? _lastSuccessfulRulesRefreshAt;
     private DateTimeOffset? _lastFailedRulesRefreshAt;
     private int _consecutiveRulesRefreshFailures;
 
-    public bool RulesLoaded => _rulesLoaded;
+    public bool RulesLoaded
+    {
+        get
+        {
+            lock (_rulesRefreshLock)
+            {
+                return _rulesLoaded;
+            }
+        }
+    }
+
     public bool ConsumerStarted => _consumerStarted;
 
     public DateTimeOffset? LastSuccessfulRulesRefreshAt
