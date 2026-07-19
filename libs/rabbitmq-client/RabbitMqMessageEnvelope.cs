@@ -15,6 +15,7 @@ public sealed record RabbitMqMessageEnvelope(
 
 public sealed record RabbitMqMessageProcessingResult(bool IsSuccess, byte[]? OutputBody, string? Error)
 {
+    public static RabbitMqMessageProcessingResult Success() => new(true, null, null);
     public static RabbitMqMessageProcessingResult Success(byte[] outputBody) => new(true, outputBody, null);
     public static RabbitMqMessageProcessingResult Failure(string error) => new(false, null, error);
 }

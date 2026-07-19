@@ -184,6 +184,15 @@ public sealed class RabbitMqServiceCollectionTests
         {
             return Task.CompletedTask;
         }
+
+        public Task ConsumeBatchAsync(
+            IRabbitMqBatchMessageHandler handler,
+            int batchSize,
+            TimeSpan maxWaitTime,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeClient : IRabbitMqClient
@@ -213,6 +222,15 @@ public sealed class RabbitMqServiceCollectionTests
 
         public Task ConsumeAsync(
             IRabbitMqMessageHandler handler,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task ConsumeBatchAsync(
+            IRabbitMqBatchMessageHandler handler,
+            int batchSize,
+            TimeSpan maxWaitTime,
             CancellationToken cancellationToken = default)
         {
             return Task.CompletedTask;

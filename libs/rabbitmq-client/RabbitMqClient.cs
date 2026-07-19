@@ -26,5 +26,8 @@ internal sealed class RabbitMqClient : IRabbitMqClient
 
     Task IRabbitMqConsumer.ConsumeAsync(IRabbitMqMessageHandler handler, CancellationToken cancellationToken) =>
         _consumer.ConsumeAsync(handler, cancellationToken);
+
+    Task IRabbitMqConsumer.ConsumeBatchAsync(IRabbitMqBatchMessageHandler handler, int batchSize, TimeSpan maxWaitTime, CancellationToken cancellationToken) =>
+        _consumer.ConsumeBatchAsync(handler, batchSize, maxWaitTime, cancellationToken);
 }
 
