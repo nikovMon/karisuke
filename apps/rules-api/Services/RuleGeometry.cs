@@ -28,7 +28,8 @@ internal static class RuleGeometry
             }
 
             var json = new GeoJsonWriter().Write(geometry);
-            geoJson = JsonDocument.Parse(json).RootElement.Clone();
+            using var doc = JsonDocument.Parse(json);
+            geoJson = doc.RootElement.Clone();
             error = null;
             return true;
         }
