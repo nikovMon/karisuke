@@ -1,14 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace ImagingPipeline.TbPublisher.Domain;
+namespace ImagingPipeline.TbPublisher.Identity;
 
 public static class DeterministicIdGenerator
 {
     public static string CreateMissionId(string messageId) => CreateId(messageId, "mission");
-
-    public static string CreateRequestId(string messageId, int tilingIndex) =>
-        CreateId($"{messageId}:{tilingIndex}", "request");
 
     private static string CreateId(string seed, string purpose) =>
         CreateDeterministicGuid($"{seed}:{purpose}").ToString();

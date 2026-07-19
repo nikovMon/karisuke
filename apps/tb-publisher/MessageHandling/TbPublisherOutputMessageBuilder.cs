@@ -1,8 +1,8 @@
 using ImagingPipeline.Common.Dtos.Messaging;
 using ImagingPipeline.Common.Dtos.Rules.Models;
-using ImagingPipeline.TbPublisher.Domain;
+using ImagingPipeline.TbPublisher.Identity;
 
-namespace ImagingPipeline.TbPublisher.Application;
+namespace ImagingPipeline.TbPublisher.MessageHandling;
 
 public sealed class TbPublisherOutputMessageBuilder : ITbPublisherOutputMessageBuilder
 {
@@ -10,7 +10,7 @@ public sealed class TbPublisherOutputMessageBuilder : ITbPublisherOutputMessageB
     {
         var missionId = DeterministicIdGenerator.CreateMissionId(message.TaskId);
         return message.TilingConfigs
-            .Select((tilingConfig, index) => BuildOutput(message, tilingConfig, focusedPxWkt, missionId, index))
+            .Select(tilingConfig => BuildOutput(message, tilingConfig, focusedPxWkt, missionId))
             .ToList();
     }
 
@@ -18,8 +18,7 @@ public sealed class TbPublisherOutputMessageBuilder : ITbPublisherOutputMessageB
         GatewayOutputMessageDto message,
         TilingConfig tilingConfig,
         string focusedPxWkt,
-        string missionId,
-        int tilingIndex) =>
+        string missionId) =>
         new()
         {
             FrameMetadata = new FrameMetadataDto
@@ -57,7 +56,6 @@ public sealed class TbPublisherOutputMessageBuilder : ITbPublisherOutputMessageB
                     SensorType = message.SensorType
                 }
             },
-            RequestId = DeterministicIdGenerator.CreateRequestId(message.TaskId, tilingIndex),
             TaskId = message.TaskId
         };
 }
