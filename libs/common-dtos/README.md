@@ -10,3 +10,10 @@ Rules contracts are grouped by responsibility:
 - `Rules/Models` contains the rule configuration document and nested models.
 - `Rules/Requests` contains activity, sensor, and partial-update request contracts.
 - `Rules/Responses` contains single-rule and bulk-operation result contracts.
+
+## Gateway contracts
+
+- `Gateway/Messages/GatewayInputMessageSchema.cs` contains the shared input
+  field paths read by the gateway.
+- `Gateway/Messages/GatewayOutputPayload.cs` contains the output payload
+  published by the gateway for downstream services.

@@ -12,7 +12,8 @@ Default local settings:
 {
   "Elasticsearch": {
     "Uri": "http://localhost:9200",
-    "DefaultIndex": "rules",
+    "Index": "rules",
+    "TimeoutSeconds": 30,
     "Username": "",
     "Password": ""
   },
