@@ -1,3 +1,5 @@
+using ImagingPipeline.ProjectionMapperClient;
+
 namespace ImagingPipeline.TbConsumer;
 
 public static class Program
@@ -6,6 +8,7 @@ public static class Program
     {
         var builder = Host.CreateApplicationBuilder(args);
 
+        builder.Services.AddProjectionMapperClient(builder.Configuration);
         builder.Services.AddHostedService<Worker>();
 
         await builder.Build().RunAsync();

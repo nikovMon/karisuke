@@ -22,6 +22,23 @@ public static class GeometryUtilities
     public static Geometry ReadTrustedGeoJson(JsonElement geoJson) =>
         Force2D(new GeoJsonReader().Read<Geometry>(geoJson.GetRawText()));
 
+    public static Geometry CreatePolygonFromCoordinates(IReadOnlyList<IReadOnlyList<double>> points)
+    {
+        if (points.Count < 3)
+        {
+            throw new GeometryValidationException("At least 3 coordinates are required to build a polygon.");
+        }
+
+        var coordinates = points.Select(point => new Coordinate(point[0], point[1])).ToList();
+        if (!coordinates[0].Equals2D(coordinates[^1]))
+        {
+            coordinates.Add(coordinates[0]);
+        }
+
+        var geometry = new GeometryFactory().CreatePolygon([.. coordinates]);
+        return Validate(Force2D(geometry));
+    }
+
     public static string WriteWkt(Geometry geometry) => new WKTWriter(2).Write(geometry);
 
     public static JsonElement WriteGeoJson(Geometry geometry)
