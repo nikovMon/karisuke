@@ -151,11 +151,11 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
         }
         catch (GatewayValidationException ex)
         {
-            return Task.FromResult(RabbitMqMessageProcessingResult.Failure($"{ex.ErrorCode}: {ex.Message}"));
+            return Task.FromResult(RabbitMqMessageProcessingResult.NonRetryableFailure($"{ex.ErrorCode}: {ex.Message}"));
         }
         catch (GatewayProcessingException ex)
         {
-            return Task.FromResult(RabbitMqMessageProcessingResult.Failure(ex.Message));
+            return Task.FromResult(RabbitMqMessageProcessingResult.RetryableFailure(ex.Message));
         }
     }
 

@@ -10,9 +10,7 @@ internal static class RabbitMqDeliveryFactory
     public static RabbitMqDelivery Create(BasicDeliverEventArgs args)
     {
         var properties = args.BasicProperties;
-        var headers = properties.Headers is null
-            ? new Dictionary<string, object?>()
-            : new Dictionary<string, object?>(properties.Headers, StringComparer.Ordinal);
+        var headers = RabbitMqHeaders.Clone(properties.Headers);
         var message = new RabbitMqMessageEnvelope(
             ReadStableMessageId(properties.MessageId, args.Body),
             args.Body.ToArray(),

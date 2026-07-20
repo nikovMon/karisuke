@@ -139,5 +139,107 @@ public sealed class RabbitMqMessageEnvelopeTests
         Assert.Null(result.OutputBody);
         Assert.Null(result.OutputMessages);
         Assert.Equal("bad", result.Error);
+        Assert.Equal(RabbitMqMessageFailureAction.DeadLetter, result.FailureAction);
+    }
+
+    [Fact]
+    public void ProcessingResultRetryableFailureCarriesRetryAction()
+    {
+        var result = RabbitMqMessageProcessingResult.RetryableFailure("temporary");
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal("temporary", result.Error);
+        Assert.Equal(RabbitMqMessageFailureAction.Retry, result.FailureAction);
+    }
+
+    [Fact]
+    public void RetryMessageBuilderAddsRetryCountHeaderWhenMissing()
+    {
+        var message = RabbitMqMessageEnvelope.FromUtf8("""{"payload":{"id":"image-1"}}""", "message-1");
+
+        var result = RabbitMqRetryMessageBuilder.Build(message, "x-retry-count", maxRetryAttempts: 3);
+
+        Assert.Equal(RabbitMqRetryBuildStatus.Retry, result.Status);
+        Assert.Equal(0, result.CurrentRetryCount);
+        Assert.Equal(1, result.NextRetryCount);
+        Assert.NotNull(result.Message);
+        Assert.Equal(message.Body, result.Message!.Body);
+        Assert.Equal(1, result.Message.Headers?["x-retry-count"]);
+    }
+
+    [Fact]
+    public void RetryMessageBuilderIncrementsExistingRetryCount()
+    {
+        var message = new RabbitMqMessageEnvelope(
+            "message-1",
+            Encoding.UTF8.GetBytes("""{"payload":{}}"""),
+            Headers: new Dictionary<string, object?>
+            {
+                ["x-retry-count"] = 2
+            });
+
+        var result = RabbitMqRetryMessageBuilder.Build(message, "x-retry-count", maxRetryAttempts: 3);
+
+        Assert.Equal(RabbitMqRetryBuildStatus.Retry, result.Status);
+        Assert.Equal(2, result.CurrentRetryCount);
+        Assert.Equal(3, result.NextRetryCount);
+        Assert.Equal(3, result.Message!.Headers?["x-retry-count"]);
+    }
+
+    [Fact]
+    public void RetryMessageBuilderStopsAtMaxAttempts()
+    {
+        var message = new RabbitMqMessageEnvelope(
+            "message-1",
+            Encoding.UTF8.GetBytes("""{"payload":{}}"""),
+            Headers: new Dictionary<string, object?>
+            {
+                ["x-retry-count"] = 3
+            });
+
+        var result = RabbitMqRetryMessageBuilder.Build(message, "x-retry-count", maxRetryAttempts: 3);
+
+        Assert.Equal(RabbitMqRetryBuildStatus.AttemptsExhausted, result.Status);
+        Assert.Null(result.Message);
+        Assert.Equal(3, result.CurrentRetryCount);
+    }
+
+    [Theory]
+    [InlineData("bad")]
+    [InlineData("-1")]
+    public void RetryMessageBuilderRejectsInvalidRetryCountHeader(string retryCount)
+    {
+        var message = new RabbitMqMessageEnvelope(
+            "message-1",
+            Encoding.UTF8.GetBytes("""{"payload":{}}"""),
+            Headers: new Dictionary<string, object?>
+            {
+                ["x-retry-count"] = retryCount
+            });
+
+        var result = RabbitMqRetryMessageBuilder.Build(message, "x-retry-count", maxRetryAttempts: 3);
+
+        Assert.Equal(RabbitMqRetryBuildStatus.InvalidMessage, result.Status);
+        Assert.Null(result.Message);
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
+    }
+
+    [Fact]
+    public void RetryMessageBuilderReadsBrokerByteArrayRetryCountHeader()
+    {
+        var message = new RabbitMqMessageEnvelope(
+            "message-1",
+            Encoding.UTF8.GetBytes("""{"payload":{}}"""),
+            Headers: new Dictionary<string, object?>
+            {
+                ["x-retry-count"] = Encoding.UTF8.GetBytes("1")
+            });
+
+        var result = RabbitMqRetryMessageBuilder.Build(message, "x-retry-count", maxRetryAttempts: 3);
+
+        Assert.Equal(RabbitMqRetryBuildStatus.Retry, result.Status);
+        Assert.Equal(1, result.CurrentRetryCount);
+        Assert.Equal(2, result.NextRetryCount);
+        Assert.Equal(2, result.Message!.Headers?["x-retry-count"]);
     }
 }

@@ -58,7 +58,14 @@ public sealed class RabbitMqServiceCollectionTests
                 ["RabbitMq:Port"] = "5673",
                 ["RabbitMq:InputQueue"] = "input",
                 ["RabbitMq:ConsumerConcurrency"] = "3",
-                ["RabbitMq:OutputPublishConcurrency"] = "7"
+                ["RabbitMq:OutputPublishConcurrency"] = "7",
+                ["RabbitMq:RetryDelayMilliseconds"] = "2500",
+                ["RabbitMq:MaxRetryAttempts"] = "5",
+                ["RabbitMq:RetryCountHeader"] = "x-service-retry-count",
+                ["RabbitMq:RetryQueues:0:RetryCount"] = "1",
+                ["RabbitMq:RetryQueues:0:Queue"] = "retry.1",
+                ["RabbitMq:RetryQueues:0:RoutingKey"] = "retry.1.key",
+                ["RabbitMq:RetryQueues:0:DelayMilliseconds"] = "1000"
             }))
             .AddLogging()
             .AddRabbitMqPublisher(Configuration(new Dictionary<string, string?>
@@ -67,7 +74,14 @@ public sealed class RabbitMqServiceCollectionTests
                 ["RabbitMq:Port"] = "5673",
                 ["RabbitMq:InputQueue"] = "input",
                 ["RabbitMq:ConsumerConcurrency"] = "3",
-                ["RabbitMq:OutputPublishConcurrency"] = "7"
+                ["RabbitMq:OutputPublishConcurrency"] = "7",
+                ["RabbitMq:RetryDelayMilliseconds"] = "2500",
+                ["RabbitMq:MaxRetryAttempts"] = "5",
+                ["RabbitMq:RetryCountHeader"] = "x-service-retry-count",
+                ["RabbitMq:RetryQueues:0:RetryCount"] = "1",
+                ["RabbitMq:RetryQueues:0:Queue"] = "retry.1",
+                ["RabbitMq:RetryQueues:0:RoutingKey"] = "retry.1.key",
+                ["RabbitMq:RetryQueues:0:DelayMilliseconds"] = "1000"
             }))
             .BuildServiceProvider(validateScopes: true);
 
@@ -78,6 +92,11 @@ public sealed class RabbitMqServiceCollectionTests
         Assert.Equal("input", options.InputQueue);
         Assert.Equal((ushort)3, options.ConsumerConcurrency);
         Assert.Equal(7, options.OutputPublishConcurrency);
+        Assert.Equal(2500, options.RetryDelayMilliseconds);
+        Assert.Equal(5, options.MaxRetryAttempts);
+        Assert.Equal("x-service-retry-count", options.RetryCountHeader);
+        Assert.Equal("retry.1", options.RetryQueues[0].Queue);
+        Assert.Equal("retry.1.key", options.RetryQueues[0].RoutingKey);
     }
 
     [Fact]
@@ -140,7 +159,11 @@ public sealed class RabbitMqServiceCollectionTests
         var values = new Dictionary<string, string?>
         {
             ["RabbitMq:Host"] = "localhost",
-            ["RabbitMq:Port"] = "5672"
+            ["RabbitMq:Port"] = "5672",
+            ["RabbitMq:InputQueue"] = "input",
+            ["RabbitMq:OutputQueue"] = "output",
+            ["RabbitMq:DeadLetterQueue"] = "dlq",
+            ["RabbitMq:RetryQueue"] = "retry"
         };
 
         if (extra is not null)

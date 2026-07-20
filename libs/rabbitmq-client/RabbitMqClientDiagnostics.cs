@@ -39,6 +39,12 @@ internal static class RabbitMqClientDiagnostics
     public static readonly Counter<long> DeadLetteredMessages =
         Meter.CreateCounter<long>("imagingpipeline.rabbitmq.messages.dead_lettered");
 
+    public static readonly Counter<long> RetriedMessages =
+        Meter.CreateCounter<long>("imagingpipeline.rabbitmq.messages.retried");
+
+    public static readonly Counter<long> RetryExhaustedMessages =
+        Meter.CreateCounter<long>("imagingpipeline.rabbitmq.messages.retry_exhausted");
+
     public static readonly UpDownCounter<long> PublisherChannels =
         Meter.CreateUpDownCounter<long>("imagingpipeline.rabbitmq.publisher.channels");
 

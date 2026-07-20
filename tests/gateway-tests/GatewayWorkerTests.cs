@@ -167,6 +167,7 @@ public sealed class GatewayWorkerTests
 
         Assert.False(result.IsSuccess);
         Assert.Contains("gateway.missing_image_id", result.Error, StringComparison.Ordinal);
+        Assert.Equal(RabbitMqMessageFailureAction.DeadLetter, result.FailureAction);
         Assert.Empty(OutputMessages(result));
     }
 
