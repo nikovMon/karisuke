@@ -102,13 +102,24 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
 
     private ActiveRule[] BuildSnapshot(IReadOnlyList<RuleDto> rules)
     {
-        var snapshot = new ActiveRule[rules.Count];
-        for (var ruleIndex = 0; ruleIndex < rules.Count; ruleIndex++)
+        var snapshot = new List<ActiveRule>(rules.Count);
+        foreach (var rule in rules)
         {
-            snapshot[ruleIndex] = BuildSnapshot(rules[ruleIndex]);
+            try
+            {
+                snapshot.Add(BuildSnapshot(rule));
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                // TODO: Log a warning with the skipped rule id and exception details once cache logging is wired.
+            }
         }
 
-        return snapshot;
+        return snapshot.ToArray();
     }
 
     private ActiveRule BuildSnapshot(RuleDto rule) =>

@@ -5,6 +5,7 @@ using ImagingPipeline.Gateway.Health;
 using ImagingPipeline.Gateway.Processing.Messages;
 using ImagingPipeline.Gateway.Processing.Rules;
 using ImagingPipeline.RabbitMqClient;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace ImagingPipeline.Gateway.Tests;
@@ -105,6 +106,41 @@ public sealed class GatewayWorkerTests
         {
             await cache.StopAsync(CancellationToken.None);
             cache.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task ActiveRuleCacheSkipsInvalidRulesWhenBuildingSnapshot()
+    {
+        var invalidRule = MatchingRule();
+        invalidRule.Id = "invalid-rule";
+        invalidRule.LocationWkt = "not valid wkt";
+        var validRule = MatchingRule();
+        await using var harness = await GatewayWorkerHarness.CreateAsync([invalidRule, validRule]);
+
+        Assert.Single(harness.RuleCache.Current);
+        Assert.Equal("rule-1", harness.RuleCache.Current[0].Id);
+    }
+
+    [Fact]
+    public async Task ExecuteAsyncRestartsConsumerWhenConsumeAsyncFails()
+    {
+        var consumer = new FailingThenBlockingConsumer();
+        await using var harness = await GatewayWorkerHarness.CreateAsync(
+            [MatchingRule()],
+            consumer,
+            TimeSpan.Zero);
+
+        await harness.GatewayWorker.StartAsync(CancellationToken.None);
+        try
+        {
+            await consumer.SecondCallStarted.WaitAsync(TimeSpan.FromSeconds(1));
+
+            Assert.True(consumer.Calls >= 2);
+        }
+        finally
+        {
+            await harness.GatewayWorker.StopAsync(CancellationToken.None);
         }
     }
 
@@ -224,9 +260,12 @@ public sealed class GatewayWorkerTests
         }
 
         public GatewayWorker GatewayWorker { get; }
-        private ActiveRuleCache RuleCache { get; }
+        public ActiveRuleCache RuleCache { get; }
 
-        public static async Task<GatewayWorkerHarness> CreateAsync(IReadOnlyList<RuleDto> rules)
+        public static async Task<GatewayWorkerHarness> CreateAsync(
+            IReadOnlyList<RuleDto> rules,
+            IRabbitMqConsumer? consumer = null,
+            TimeSpan? consumerRestartDelay = null)
         {
             var health = new GatewayHealthState();
             var geometry = new GatewayGeometryConverter();
@@ -246,12 +285,14 @@ public sealed class GatewayWorkerTests
             await ruleCache.StartAsync(CancellationToken.None);
 
             var worker = new GatewayWorker(
-                new NoopConsumer(),
+                consumer ?? new NoopConsumer(),
                 ruleCache,
                 inputParser,
                 new RuleMatcher(),
                 outputBuilder,
-                health);
+                health,
+                NullLogger<GatewayWorker>.Instance,
+                consumerRestartDelay ?? TimeSpan.FromSeconds(5));
 
             return new GatewayWorkerHarness(worker, ruleCache);
         }
@@ -294,6 +335,34 @@ public sealed class GatewayWorkerTests
             }
 
             throw new InvalidOperationException("Refresh failed.");
+        }
+    }
+
+    private sealed class FailingThenBlockingConsumer : IRabbitMqConsumer
+    {
+        private readonly TaskCompletionSource _secondCallStarted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _calls;
+
+        public int Calls => Volatile.Read(ref _calls);
+
+        public Task SecondCallStarted => _secondCallStarted.Task;
+
+        public async Task ConsumeAsync(IRabbitMqMessageHandler handler, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _calls) == 1)
+            {
+                throw new InvalidOperationException("Consumer failed.");
+            }
+
+            _secondCallStarted.TrySetResult();
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
         }
     }
 
