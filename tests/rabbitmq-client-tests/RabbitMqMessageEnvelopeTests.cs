@@ -1,4 +1,7 @@
+using System.Security.Cryptography;
 using System.Text;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
 
 namespace ImagingPipeline.RabbitMqClient.Tests;
 
@@ -21,6 +24,25 @@ public sealed class RabbitMqMessageEnvelopeTests
 
         Assert.Equal("message-1", message.MessageId);
         Assert.Equal(Encoding.UTF8.GetBytes("hello"), message.Body);
+    }
+
+    [Fact]
+    public void DeliveryFactoryDerivesStableMessageIdFromBodyWhenMissing()
+    {
+        var body = Encoding.UTF8.GetBytes("hello");
+        var args = new BasicDeliverEventArgs(
+            "consumer",
+            1,
+            redelivered: false,
+            exchange: string.Empty,
+            routingKey: "input",
+            properties: new BasicProperties(),
+            body: body,
+            cancellationToken: CancellationToken.None);
+
+        var delivery = RabbitMqDeliveryFactory.Create(args);
+
+        Assert.Equal($"body-sha256:{Convert.ToHexString(SHA256.HashData(body))}", delivery.Message.MessageId);
     }
 
     [Fact]
@@ -75,6 +97,7 @@ public sealed class RabbitMqMessageEnvelopeTests
         Assert.True(result.IsSuccess);
         Assert.Equal(body, result.OutputBody);
         Assert.Null(result.Error);
+        Assert.Null(result.OutputMessages);
     }
 
     [Fact]
@@ -87,6 +110,24 @@ public sealed class RabbitMqMessageEnvelopeTests
         Assert.True(result.IsSuccess);
         Assert.Same(body, result.OutputBody);
         Assert.Null(result.Error);
+        Assert.Null(result.OutputMessages);
+    }
+
+    [Fact]
+    public void ProcessingResultSuccessCarriesOutputMessages()
+    {
+        var outputs = new[]
+        {
+            RabbitMqMessageEnvelope.FromUtf8("first", "output-1"),
+            RabbitMqMessageEnvelope.FromUtf8("second", "output-2")
+        };
+
+        var result = RabbitMqMessageProcessingResult.Success(outputs);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.OutputBody);
+        Assert.Null(result.Error);
+        Assert.Same(outputs, result.OutputMessages);
     }
 
     [Fact]
@@ -96,6 +137,7 @@ public sealed class RabbitMqMessageEnvelopeTests
 
         Assert.False(result.IsSuccess);
         Assert.Null(result.OutputBody);
+        Assert.Null(result.OutputMessages);
         Assert.Equal("bad", result.Error);
     }
 }

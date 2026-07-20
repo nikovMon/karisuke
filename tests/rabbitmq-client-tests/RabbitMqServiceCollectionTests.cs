@@ -56,14 +56,18 @@ public sealed class RabbitMqServiceCollectionTests
             {
                 ["RabbitMq:Host"] = "broker",
                 ["RabbitMq:Port"] = "5673",
-                ["RabbitMq:InputQueue"] = "input"
+                ["RabbitMq:InputQueue"] = "input",
+                ["RabbitMq:ConsumerConcurrency"] = "3",
+                ["RabbitMq:OutputPublishConcurrency"] = "7"
             }))
             .AddLogging()
             .AddRabbitMqPublisher(Configuration(new Dictionary<string, string?>
             {
                 ["RabbitMq:Host"] = "broker",
                 ["RabbitMq:Port"] = "5673",
-                ["RabbitMq:InputQueue"] = "input"
+                ["RabbitMq:InputQueue"] = "input",
+                ["RabbitMq:ConsumerConcurrency"] = "3",
+                ["RabbitMq:OutputPublishConcurrency"] = "7"
             }))
             .BuildServiceProvider(validateScopes: true);
 
@@ -72,6 +76,8 @@ public sealed class RabbitMqServiceCollectionTests
         Assert.Equal("broker", options.Host);
         Assert.Equal(5673, options.Port);
         Assert.Equal("input", options.InputQueue);
+        Assert.Equal((ushort)3, options.ConsumerConcurrency);
+        Assert.Equal(7, options.OutputPublishConcurrency);
     }
 
     [Fact]

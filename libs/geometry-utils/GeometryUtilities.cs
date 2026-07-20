@@ -8,15 +8,19 @@ public static class GeometryUtilities
 {
     public static Geometry ReadWkt(string wkt)
     {
-        var geometry = new WKTReader().Read(wkt);
-        return Validate(Force2D(geometry));
+        return Validate(ReadTrustedWkt(wkt));
     }
 
     public static Geometry ReadGeoJson(JsonElement geoJson)
     {
-        var geometry = new GeoJsonReader().Read<Geometry>(geoJson.GetRawText());
-        return Validate(Force2D(geometry));
+        return Validate(ReadTrustedGeoJson(geoJson));
     }
+
+    public static Geometry ReadTrustedWkt(string wkt) =>
+        Force2D(new WKTReader().Read(wkt));
+
+    public static Geometry ReadTrustedGeoJson(JsonElement geoJson) =>
+        Force2D(new GeoJsonReader().Read<Geometry>(geoJson.GetRawText()));
 
     public static string WriteWkt(Geometry geometry) => new WKTWriter(2).Write(geometry);
 

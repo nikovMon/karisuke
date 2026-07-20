@@ -36,13 +36,13 @@ public sealed class GatewayGeometryConverter
     {
         if (!string.IsNullOrWhiteSpace(rule.LocationWkt))
         {
-            return ReadWkt(rule.LocationWkt, $"rule '{RuleLabel(rule)}'");
+            return GeometryUtilities.ReadTrustedWkt(rule.LocationWkt);
         }
 
         if (rule.LocationGeoJson.HasValue &&
             rule.LocationGeoJson.Value.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
         {
-            return ReadGeoJson(rule.LocationGeoJson.Value, $"rule '{RuleLabel(rule)}'");
+            return GeometryUtilities.ReadTrustedGeoJson(rule.LocationGeoJson.Value);
         }
 
         throw new GatewayValidationException(

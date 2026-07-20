@@ -34,7 +34,7 @@ public sealed class JsonPathReader
                     return false;
                 }
 
-                value = value.EnumerateArray().ElementAt(index);
+                value = value[index];
                 continue;
             }
 

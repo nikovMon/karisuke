@@ -12,7 +12,6 @@ public static class Program
     public static async Task Main(string[] args)
     {
         var builder = Host.CreateApplicationBuilder(args);
-        builder.Logging.ClearProviders();
 
         var shutdownTimeoutSeconds = 30;
         var configuredShutdownTimeout = builder.Configuration["Gateway:ShutdownTimeoutSeconds"];
@@ -39,7 +38,6 @@ public static class Program
         builder.Services.AddSingleton<GatewayGeometryConverter>();
         builder.Services.AddSingleton<GatewayInputMessageParser>();
         builder.Services.AddSingleton<GatewayOutputMessageBuilder>();
-        builder.Services.AddSingleton<RuleValidator>();
         builder.Services.AddSingleton<RuleMatcher>();
         builder.Services.AddSingleton<IRuleRepository, ElasticsearchRuleRepository>();
         builder.Services.AddSingleton<ActiveRuleCache>();

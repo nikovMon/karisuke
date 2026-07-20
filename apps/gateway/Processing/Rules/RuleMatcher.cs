@@ -1,4 +1,3 @@
-using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Gateway.Contracts.Messages;
 
 namespace ImagingPipeline.Gateway.Processing.Rules;
@@ -13,10 +12,8 @@ public sealed class RuleMatcher
 
         foreach (var activeRule in activeRules)
         {
-            var rule = activeRule.Rule;
-            if (!rule.IsActive ||
-                !MatchesSensor(input, rule) ||
-                !MatchesResolution(input, rule))
+            if (!MatchesSensor(input, activeRule) ||
+                !MatchesResolution(input, activeRule))
             {
                 continue;
             }
@@ -32,15 +29,15 @@ public sealed class RuleMatcher
                 continue;
             }
 
-            matches.Add(new RuleMatchResult(rule, intersection));
+            matches.Add(new RuleMatchResult(activeRule, intersection));
         }
 
         return matches;
     }
 
-    private static bool MatchesSensor(GatewayInputMessage input, RuleDto rule)
+    private static bool MatchesSensor(GatewayInputMessage input, ActiveRule rule)
     {
-        if (rule.Sensors is null || rule.Sensors.Count == 0)
+        if (rule.Sensors.Count == 0)
         {
             return true;
         }
@@ -48,7 +45,7 @@ public sealed class RuleMatcher
         if (!string.IsNullOrWhiteSpace(input.SensorType) &&
             rule.Sensors.TryGetValue(input.SensorType, out var typedSensors))
         {
-            return typedSensors.Contains(input.SensorName, StringComparer.Ordinal);
+            return typedSensors.Contains(input.SensorName);
         }
 
         if (!string.IsNullOrWhiteSpace(input.SensorType))
@@ -56,9 +53,9 @@ public sealed class RuleMatcher
             return false;
         }
 
-        return rule.Sensors.Values.Any(values => values.Contains(input.SensorName, StringComparer.Ordinal));
+        return rule.Sensors.Values.Any(values => values.Contains(input.SensorName));
     }
 
-    private static bool MatchesResolution(GatewayInputMessage input, RuleDto rule) =>
+    private static bool MatchesResolution(GatewayInputMessage input, ActiveRule rule) =>
         input.Resolution >= rule.MinimumResolution && input.Resolution <= rule.MaximumResolution;
 }

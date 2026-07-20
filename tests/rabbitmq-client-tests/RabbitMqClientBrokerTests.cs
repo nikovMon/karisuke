@@ -49,6 +49,30 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
     }
 
     [RabbitMqBrokerFact]
+    public async Task SuccessfulHandlerOutputMessagesArePublishedToOutputQueue()
+    {
+        var topology = CreateTopology();
+        await using var provider = BuildProvider(topology);
+        var publisher = provider.GetRequiredService<IRabbitMqPublisher>();
+        var consumer = provider.GetRequiredService<IRabbitMqConsumer>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var consumerTask = consumer.ConsumeAsync(new MultiOutputHandler(), cts.Token);
+        await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8("ok", "input-1"), cts.Token);
+
+        var outputs = new[]
+        {
+            await WaitForMessageAsync(topology.OutputQueue, cts.Token),
+            await WaitForMessageAsync(topology.OutputQueue, cts.Token)
+        };
+        await StopConsumerAsync(consumerTask, cts);
+
+        Assert.Contains("OK-1", outputs);
+        Assert.Contains("OK-2", outputs);
+        Assert.Null(await BasicGetAsync(topology.DeadLetterQueue, CancellationToken.None));
+    }
+
+    [RabbitMqBrokerFact]
     public async Task FailedHandlerIsDeadLetteredByBroker()
     {
         var topology = CreateTopology();
@@ -102,6 +126,33 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
         await StopConsumerAsync(consumerTask, cts);
 
         Assert.Null(await BasicGetAsync(topology.OutputQueue, CancellationToken.None));
+        Assert.Null(await BasicGetAsync(topology.DeadLetterQueue, CancellationToken.None));
+    }
+
+    [RabbitMqBrokerFact]
+    public async Task ConsumerConcurrencyProcessesMessagesAtTheSameTime()
+    {
+        var topology = CreateTopology();
+        var configuration = BuildConfiguration(topology, new Dictionary<string, string?>
+        {
+            ["RabbitMq:ConsumerConcurrency"] = "2",
+            ["RabbitMq:PrefetchCount"] = "1"
+        });
+        await using var provider = BuildProvider(configuration);
+        var publisher = provider.GetRequiredService<IRabbitMqPublisher>();
+        var consumer = provider.GetRequiredService<IRabbitMqConsumer>();
+        var handler = new BlockingConcurrencyHandler(expectedConcurrentMessages: 2);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var consumerTask = consumer.ConsumeAsync(handler, cts.Token);
+        await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8("first"), cts.Token);
+        await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8("second"), cts.Token);
+
+        await handler.WaitForConcurrentMessagesAsync(cts.Token);
+        handler.Release();
+        await WaitForQueueMessageCountAsync(topology.InputQueue, 0, cts.Token);
+        await StopConsumerAsync(consumerTask, cts);
+
         Assert.Null(await BasicGetAsync(topology.DeadLetterQueue, CancellationToken.None));
     }
 
@@ -251,6 +302,7 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
             ["RabbitMq:OutputRoutingKey"] = topology.OutputQueue,
             ["RabbitMq:DeadLetterRoutingKey"] = topology.DeadLetterQueue,
             ["RabbitMq:PrefetchCount"] = "1",
+            ["RabbitMq:ConsumerConcurrency"] = "1",
             ["RabbitMq:PublisherChannelPoolSize"] = "2",
             ["RabbitMq:ReconnectDelaySeconds"] = "1"
         };
@@ -379,6 +431,32 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
         }
     }
 
+    private sealed class MultiOutputHandler : IRabbitMqMessageHandler
+    {
+        public Task<RabbitMqMessageProcessingResult> HandleAsync(
+            RabbitMqMessageEnvelope message,
+            CancellationToken cancellationToken = default)
+        {
+            var outputs = new[]
+            {
+                message with
+                {
+                    MessageId = $"{message.MessageId}:output:1",
+                    Body = Encoding.UTF8.GetBytes("OK-1"),
+                    CorrelationId = message.MessageId
+                },
+                message with
+                {
+                    MessageId = $"{message.MessageId}:output:2",
+                    Body = Encoding.UTF8.GetBytes("OK-2"),
+                    CorrelationId = message.MessageId
+                }
+            };
+
+            return Task.FromResult(RabbitMqMessageProcessingResult.Success(outputs));
+        }
+    }
+
     private sealed class FailureHandler : IRabbitMqMessageHandler
     {
         public Task<RabbitMqMessageProcessingResult> HandleAsync(
@@ -387,6 +465,39 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
         {
             return Task.FromResult(RabbitMqMessageProcessingResult.Failure("expected failure"));
         }
+    }
+
+    private sealed class BlockingConcurrencyHandler : IRabbitMqMessageHandler
+    {
+        private readonly int _expectedConcurrentMessages;
+        private readonly TaskCompletionSource _concurrencyReached =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _startedMessages;
+
+        public BlockingConcurrencyHandler(int expectedConcurrentMessages)
+        {
+            _expectedConcurrentMessages = expectedConcurrentMessages;
+        }
+
+        public async Task<RabbitMqMessageProcessingResult> HandleAsync(
+            RabbitMqMessageEnvelope message,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _startedMessages) >= _expectedConcurrentMessages)
+            {
+                _concurrencyReached.TrySetResult();
+            }
+
+            await _release.Task.WaitAsync(cancellationToken);
+            return new RabbitMqMessageProcessingResult(true, null, null);
+        }
+
+        public Task WaitForConcurrentMessagesAsync(CancellationToken cancellationToken) =>
+            _concurrencyReached.Task.WaitAsync(cancellationToken);
+
+        public void Release() => _release.TrySetResult();
     }
 
     private sealed class ThrowingHandler : IRabbitMqMessageHandler

@@ -48,7 +48,6 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
         var started = Stopwatch.GetTimestamp();
         await using var lease = await _channels.LeaseAsync(cancellationToken);
         var channel = lease.Channel;
-        await RabbitMqTopology.DeclareAsync(channel, _options, cancellationToken);
 
         var properties = new BasicProperties
         {

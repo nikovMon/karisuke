@@ -75,7 +75,17 @@ internal sealed class RabbitMqPublisherChannelPool : IRabbitMqPublisherChannelPo
             publisherConfirmationTrackingEnabled: true);
         var channel = await connection.CreateChannelAsync(channelOptions, cancellationToken);
         RabbitMqClientDiagnostics.PublisherChannels.Add(1);
-        return channel;
+
+        try
+        {
+            await RabbitMqTopology.DeclareAsync(channel, _options, cancellationToken);
+            return channel;
+        }
+        catch
+        {
+            await DisposeChannelAsync(channel);
+            throw;
+        }
     }
 
     internal async ValueTask ReturnAsync(IChannel channel)
