@@ -73,6 +73,68 @@ public sealed class RuleServiceTests
     }
 
     [Fact]
+    public async Task CreateConvertsValidWktToGeoJsonAndRejectsInvalidWkt()
+    {
+        var service = CreateService(new InMemoryRuleRepository());
+        var valid = ValidCreateRequest("valid");
+        valid.LocationWkt = "POINT (10 20)";
+        var invalid = ValidCreateRequest("invalid");
+        invalid.LocationWkt = "not wkt";
+
+        var validResult = await service.CreateAsync(valid);
+        var invalidResult = await service.CreateAsync(invalid);
+
+        Assert.Equal(RuleOperationStatus.Success, validResult.Status);
+        Assert.Equal("Point", validResult.Value?.LocationGeoJson?.GetProperty("type").GetString());
+        Assert.Equal(10, validResult.Value?.LocationGeoJson?.GetProperty("coordinates")[0].GetDouble());
+        Assert.Equal(RuleOperationStatus.ValidationFailed, invalidResult.Status);
+        Assert.Contains("valid WKT", invalidResult.Error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task UpdateAndBulkUpdateConvertWktToGeoJson()
+    {
+        var repository = new InMemoryRuleRepository();
+        repository.Add(ValidRule("rule-1", "one"));
+        repository.Add(ValidRule("rule-2", "two"));
+        var service = CreateService(repository);
+
+        var update = await service.UpdateAsync("rule-1", new UpdateRuleRequest
+        {
+            LocationWkt = "POINT (2 3)"
+        });
+        var bulk = await service.UpdateBulkAsync(["rule-1", "rule-2"], new UpdateRuleRequest
+        {
+            LocationWkt = "POINT (4 5)"
+        });
+
+        Assert.Equal(RuleOperationStatus.Success, update.Status);
+        Assert.Equal(2, update.Value?.LocationGeoJson?.GetProperty("coordinates")[0].GetDouble());
+        Assert.Equal(RuleOperationStatus.Success, bulk.Status);
+        Assert.All(new[] { "rule-1", "rule-2" }, id =>
+        {
+            var stored = repository.GetByIdAsync(id).GetAwaiter().GetResult();
+            Assert.Equal(4, stored?.LocationGeoJson?.GetProperty("coordinates")[0].GetDouble());
+        });
+    }
+
+    [Fact]
+    public async Task UpdateAndBulkUpdateRejectInvalidWkt()
+    {
+        var repository = new InMemoryRuleRepository();
+        repository.Add(ValidRule("rule-1", "one"));
+        var service = CreateService(repository);
+        var invalid = new UpdateRuleRequest { LocationWkt = "invalid" };
+
+        var update = await service.UpdateAsync("rule-1", invalid);
+        var bulk = await service.UpdateBulkAsync(["rule-1"], invalid);
+
+        Assert.Equal(RuleOperationStatus.ValidationFailed, update.Status);
+        Assert.Equal(RuleOperationStatus.ValidationFailed, bulk.Status);
+        Assert.Equal("POINT (1 1)", (await repository.GetByIdAsync("rule-1"))?.LocationWkt);
+    }
+
+    [Fact]
     public async Task UpdateOnlyChangesProvidedFieldsAndUpdatesModifiedAt()
     {
         var repository = new InMemoryRuleRepository();
@@ -118,7 +180,7 @@ public sealed class RuleServiceTests
 
         Assert.Equal(RuleOperationStatus.Success, sameNameResult.Status);
         Assert.Equal(RuleOperationStatus.ValidationFailed, invalidResult.Status);
-        Assert.Contains("locationWkt, locationGeoJson, or both", invalidResult.Error, StringComparison.Ordinal);
+        Assert.Contains("locationWkt is required", invalidResult.Error, StringComparison.Ordinal);
     }
 
     [Fact]

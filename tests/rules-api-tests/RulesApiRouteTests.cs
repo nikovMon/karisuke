@@ -218,20 +218,15 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
-    public async Task CreateAcceptsGeoJsonOnlyRule()
+    public async Task CreateRejectsGeoJsonOnlyRule()
     {
         using var context = CreateContext();
         var rule = ValidRule("rule-1", "geo-json-only");
-        rule.LocationWkt = null;
+        rule.LocationWkt = string.Empty;
         rule.LocationGeoJson = JsonDocument.Parse("{\"type\":\"Point\",\"coordinates\":[1,1]}").RootElement.Clone();
 
         var response = await context.Client.PostAsJsonAsync("/rules", rule, JsonOptions);
-        var created = await response.Content.ReadFromJsonAsync<RuleDto>(JsonOptions);
-
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var stored = await context.Repository.GetByIdAsync(created!.Id);
-        Assert.Null(stored?.LocationWkt);
-        Assert.Equal(JsonValueKind.Object, stored?.LocationGeoJson?.ValueKind);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
@@ -355,7 +350,7 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
-    public async Task PatchOneCanClearIsPhotoOldAndOptionalGeometry()
+    public async Task PatchOneCannotClearRequiredWkt()
     {
         var rule = ValidRule("rule-1", "one");
         rule.IsPhotoOld = true;
@@ -365,12 +360,10 @@ public sealed class RulesApiRouteTests
         var response = await context.Client.PatchAsync(
             "/rules/rule-1",
             Json("{\"isPhotoOld\":null,\"locationWkt\":null}"));
-        var updated = await response.Content.ReadFromJsonAsync<RuleDto>(JsonOptions);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Null(updated?.IsPhotoOld);
-        Assert.Null(updated?.LocationWkt);
-        Assert.Equal(JsonValueKind.Object, updated?.LocationGeoJson?.ValueKind);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var stored = await context.Repository.GetByIdAsync("rule-1");
+        Assert.True(stored?.IsPhotoOld);
+        Assert.Equal("POINT (1 1)", stored?.LocationWkt);
     }
 
     [Fact]
