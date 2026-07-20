@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Messaging;
 
-namespace ImagingPipeline.TbPublisher.Application;
+namespace ImagingPipeline.TbPublisher.MessageHandling;
 
 public sealed class InputMessageValidator : IInputMessageValidator
 {

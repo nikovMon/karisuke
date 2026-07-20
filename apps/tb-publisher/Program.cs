@@ -1,6 +1,6 @@
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
-using ImagingPipeline.TbPublisher.Application;
+using ImagingPipeline.TbPublisher.MessageHandling;
 using ImagingPipeline.TbPublisher.Processing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

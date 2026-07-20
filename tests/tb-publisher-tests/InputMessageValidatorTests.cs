@@ -1,5 +1,5 @@
 using System.Text;
-using ImagingPipeline.TbPublisher.Application;
+using ImagingPipeline.TbPublisher.MessageHandling;
 
 namespace ImagingPipeline.TbPublisher.Tests;
 

@@ -1,8 +1,8 @@
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Messaging;
 using ImagingPipeline.Common.Dtos.Rules.Models;
-using ImagingPipeline.TbPublisher.Application;
-using ImagingPipeline.TbPublisher.Domain;
+using ImagingPipeline.TbPublisher.MessageHandling;
+using ImagingPipeline.TbPublisher.Identity;
 
 namespace ImagingPipeline.TbPublisher.Tests;
 
@@ -31,11 +31,9 @@ public sealed class TbPublisherOutputMessageBuilderTests
             Assert.Equal("rule-1", outputMessage.MissionMetadata.Overlay.RuleId);
             Assert.Equal("image-1", outputMessage.MissionMetadata.Overlay.ImageId);
             Assert.Equal("image-1", outputMessage.FrameMetadata.General.Id);
-            Assert.NotEmpty(outputMessage.RequestId);
             Assert.NotEmpty(outputMessage.TaskId);
         }
 
-        Assert.NotEqual(messages[0].RequestId, messages[1].RequestId);
         Assert.Equal(messages[0].TaskId, messages[1].TaskId);
 
         Assert.Equal(110, messages[0].ModelMetadata.TbCropSizeX);
@@ -56,7 +54,6 @@ public sealed class TbPublisherOutputMessageBuilderTests
         var second = _builder.Map(CreateMessage("msg-1"), FocusedPxWkt);
 
         Assert.Equal(first[0].MissionMetadata.MissionId, second[0].MissionMetadata.MissionId);
-        Assert.Equal(first[0].RequestId, second[0].RequestId);
         Assert.Equal(first[0].TaskId, second[0].TaskId);
     }
 
