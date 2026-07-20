@@ -6,6 +6,9 @@ namespace ImagingPipeline.Common.Dtos.Gateway.Messages;
 
 public sealed class GatewayOutputPayload
 {
+    [JsonPropertyName("taskId")]
+    public string TaskId { get; init; } = string.Empty;
+
     [JsonPropertyName("ruleId")]
     public string RuleId { get; init; } = string.Empty;
 

@@ -131,7 +131,7 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
             var rules = _ruleCache.Current;
             var input = _inputParser.Parse(message.Body);
             var matches = _ruleMatcher.Match(input, rules);
-            var outputs = _outputBuilder.BuildOutputs(input, matches);
+            var outputs = _outputBuilder.BuildOutputs(message.MessageId, input, matches);
             var correlationId = message.CorrelationId ?? message.MessageId;
             var outputMessages = new RabbitMqMessageEnvelope[outputs.Count];
 

@@ -32,6 +32,7 @@ public sealed class GatewayWorkerTests
 
         using var first = JsonDocument.Parse(outputs[0].Body);
         using var second = JsonDocument.Parse(outputs[1].Body);
+        Assert.Equal("message-1:gateway-task:rule-1:der:0", first.RootElement.GetProperty("taskId").GetString());
         Assert.Equal("rule-1", first.RootElement.GetProperty("ruleId").GetString());
         Assert.Equal("FindAir", first.RootElement.GetProperty("algorithmName").GetString());
         Assert.Equal("der", first.RootElement.GetProperty("tenantId").GetString());
@@ -40,10 +41,12 @@ public sealed class GatewayWorkerTests
         Assert.Equal("2026-06-30T06:54:07+00:00", first.RootElement.GetProperty("photoTime").GetString());
         Assert.Equal("camera", first.RootElement.GetProperty("sensorType").GetString());
         Assert.Equal("Polygon", first.RootElement.GetProperty("roiFootprint").GetProperty("type").GetString());
+        Assert.Equal("message-1:gateway-task:rule-1:findair:1", second.RootElement.GetProperty("taskId").GetString());
         Assert.Equal("findair", second.RootElement.GetProperty("tenantId").GetString());
         Assert.Equal(2, second.RootElement.GetProperty("tilingConfigs").GetArrayLength());
         Assert.Equal(
             [
+                "taskId",
                 "ruleId",
                 "algorithmName",
                 "tenantId",
@@ -63,10 +66,39 @@ public sealed class GatewayWorkerTests
     }
 
     [Fact]
+    public async Task HandleAsyncCreatesDifferentTaskIdsForDifferentInputMessages()
+    {
+        await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
+
+        var firstResult = await harness.GatewayWorker.HandleAsync(InputMessage(messageId: "message-1"));
+        var secondResult = await harness.GatewayWorker.HandleAsync(InputMessage(messageId: "message-2"));
+
+        var firstTaskId = OutputTaskId(firstResult);
+        var secondTaskId = OutputTaskId(secondResult);
+        Assert.Equal("message-1:gateway-task:rule-1:der:0", firstTaskId);
+        Assert.Equal("message-2:gateway-task:rule-1:der:0", secondTaskId);
+        Assert.NotEqual(firstTaskId, secondTaskId);
+    }
+
+    [Fact]
     public async Task HandleAsyncAcknowledgesWithoutPublishingWhenNoRulesMatch()
     {
         var rule = MatchingRule();
         rule.Sensors["camera"] = ["other-camera"];
+        await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
+
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage());
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(OutputMessages(result));
+    }
+
+    [Fact]
+    public async Task HandleAsyncAcknowledgesWithoutPublishingWhenResolutionIsOutsideRuleRange()
+    {
+        var rule = MatchingRule();
+        rule.MinimumResolution = 30;
+        rule.MaximumResolution = 40;
         await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
 
         var result = await harness.GatewayWorker.HandleAsync(InputMessage());
@@ -171,7 +203,7 @@ public sealed class GatewayWorkerTests
         Assert.Empty(OutputMessages(result));
     }
 
-    private static RabbitMqMessageEnvelope InputMessage(string sensorType = "camera") =>
+    private static RabbitMqMessageEnvelope InputMessage(string sensorType = "camera", string messageId = "message-1") =>
         RabbitMqMessageEnvelope.FromUtf8(
             $$"""
             {
@@ -196,7 +228,7 @@ public sealed class GatewayWorkerTests
               }
             }
             """,
-            "message-1");
+            messageId);
 
     private static RuleDto MatchingRule() =>
         new()
@@ -251,6 +283,13 @@ public sealed class GatewayWorkerTests
 
     private static IReadOnlyList<RabbitMqMessageEnvelope> OutputMessages(RabbitMqMessageProcessingResult result) =>
         result.OutputMessages ?? [];
+
+    private static string? OutputTaskId(RabbitMqMessageProcessingResult result)
+    {
+        var output = Assert.Single(OutputMessages(result));
+        using var document = JsonDocument.Parse(output.Body);
+        return document.RootElement.GetProperty("taskId").GetString();
+    }
 
     private sealed class GatewayWorkerHarness : IAsyncDisposable
     {
