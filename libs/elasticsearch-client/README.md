@@ -28,7 +28,8 @@ Configuration:
 {
   "Elasticsearch": {
     "Uri": "http://localhost:9200",
-    "DefaultIndex": "rules",
+    "Index": "rules",
+    "TimeoutSeconds": 30,
     "Username": "optional-user",
     "Password": "optional-password"
   }
@@ -38,7 +39,8 @@ Configuration:
 Validation:
 
 - `Uri` must be absolute `http` or `https`.
-- `DefaultIndex` cannot be empty.
+- `Index` cannot be empty.
+- `TimeoutSeconds` must be greater than zero.
 - `Username` and `Password` must be configured together.
 
 ## Generic Functions

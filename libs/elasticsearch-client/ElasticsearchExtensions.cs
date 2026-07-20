@@ -24,7 +24,8 @@ public static class ElasticsearchExtensions
             var settings = new ConnectionSettings(
                     pool,
                     sourceSerializer: (_, _) => new SystemTextJsonSourceSerializer())
-                .DefaultIndex(options.DefaultIndex)
+                .DefaultIndex(options.Index)
+                .RequestTimeout(TimeSpan.FromSeconds(options.TimeoutSeconds))
                 .DisableDirectStreaming();
 
             if (!string.IsNullOrEmpty(options.Username) && !string.IsNullOrEmpty(options.Password))

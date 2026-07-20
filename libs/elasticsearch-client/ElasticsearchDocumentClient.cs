@@ -1,4 +1,5 @@
 using System.Net;
+using System.Reflection;
 using System.Text.Json;
 using Elasticsearch.Net;
 using Nest;
@@ -260,8 +261,34 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
         var response = JsonSerializer.Deserialize<ElasticsearchSearchResponse<TDocument>>(body, JsonOptions);
         return response?.Hits?.Items
             .Where(hit => hit.Source is not null)
-            .Select(hit => new ElasticsearchDocument<TDocument>(hit.Id, hit.Source!))
+            .Select(hit =>
+            {
+                HydrateSourceId(hit.Source!, hit.Id);
+                return new ElasticsearchDocument<TDocument>(hit.Id, hit.Source!);
+            })
             .ToArray() ?? [];
+    }
+
+    private static void HydrateSourceId<TDocument>(TDocument source, string id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return;
+        }
+
+        var property = typeof(TDocument).GetProperty(
+            "Id",
+            BindingFlags.Instance | BindingFlags.Public);
+        if (property?.CanWrite != true || property.PropertyType != typeof(string))
+        {
+            return;
+        }
+
+        var currentValue = (string?)property.GetValue(source);
+        if (string.IsNullOrWhiteSpace(currentValue))
+        {
+            property.SetValue(source, id);
+        }
     }
 
     private static void ValidateIndexAndId(string indexName, string id)

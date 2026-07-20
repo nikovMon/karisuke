@@ -1,15 +1,50 @@
+using ImagingPipeline.RabbitMqClient;
+using Microsoft.Extensions.Logging;
+
 namespace ImagingPipeline.TbPublisher;
 
 public sealed class Worker : BackgroundService
 {
+    private static readonly TimeSpan RestartDelay = TimeSpan.FromSeconds(5);
+
+    private readonly IRabbitMqConsumer _consumer;
+    private readonly IRabbitMqMessageHandler _handler;
+    private readonly ILogger<Worker> _logger;
+
+    public Worker(IRabbitMqConsumer consumer, IRabbitMqMessageHandler handler, ILogger<Worker> logger)
+    {
+        _consumer = consumer;
+        _handler = handler;
+        _logger = logger;
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        try
+        while (!stoppingToken.IsCancellationRequested)
         {
-            await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-        {
+            try
+            {
+                await _consumer.ConsumeAsync(_handler, stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "TBPublisher RabbitMQ consumer loop exited unexpectedly; restarting in {DelaySeconds}s.",
+                    RestartDelay.TotalSeconds);
+                try
+                {
+                    await Task.Delay(RestartDelay, stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
         }
     }
 }

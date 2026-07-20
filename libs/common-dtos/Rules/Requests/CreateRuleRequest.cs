@@ -37,8 +37,8 @@ public sealed class CreateRuleRequest : IValidatableObject
     public string Area { get; set; } = string.Empty;
 
     [JsonPropertyName("locationWkt")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? LocationWkt { get; set; }
+    [Required]
+    public string LocationWkt { get; set; } = string.Empty;
 
     [JsonPropertyName("locationGeoJson")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

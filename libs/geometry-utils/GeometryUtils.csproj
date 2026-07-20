@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>ImagingPipeline.GeometryUtils</AssemblyName>
+    <PackageId>ImagingPipeline.GeometryUtils</PackageId>
+    <RootNamespace>ImagingPipeline.GeometryUtils</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NetTopologySuite" />
+    <PackageReference Include="NetTopologySuite.IO.GeoJSON" />
+  </ItemGroup>
+</Project>
