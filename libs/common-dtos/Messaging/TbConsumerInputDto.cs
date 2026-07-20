@@ -2,9 +2,6 @@ using System.Text.Json.Serialization;
 
 namespace ImagingPipeline.Common.Dtos.Messaging;
 
-/// <summary>
-/// The input message consumed by the TbConsumer component from the tile-builder output queue.
-/// </summary>
 public class TbConsumerInputDto
 {
     [JsonPropertyName("frameMetadata")] 
