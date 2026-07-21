@@ -3,6 +3,8 @@ WORKDIR /src
 
 COPY global.json Directory.Build.props Directory.Packages.props ./
 COPY apps/rules-api/ImagingPipeline.Rules.Api.csproj apps/rules-api/
+COPY libs/elasticsearch-client/ElasticsearchClient.csproj libs/elasticsearch-client/
+COPY libs/common-dtos/ImagingPipeline.Common.Dtos.csproj libs/common-dtos/
 RUN dotnet restore apps/rules-api/ImagingPipeline.Rules.Api.csproj
 
 COPY . .
