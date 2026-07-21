@@ -17,6 +17,8 @@ public sealed class FakeProjectionMapperClient : IProjectionMapperClient
 
     public ProjectionMapperRequestDto? LastRequest { get; private set; }
 
+    public IReadOnlyList<IReadOnlyList<double>>? LastCoordinates { get; private set; }
+
     public CancellationToken LastCancellationToken { get; private set; }
 
     public static FakeProjectionMapperClient ReturningSuccess(IReadOnlyList<IReadOnlyList<double>> result) => new(result, null);
@@ -30,6 +32,23 @@ public sealed class FakeProjectionMapperClient : IProjectionMapperClient
     {
         LastOverlayId = overlayId;
         LastRequest = request;
+        LastCancellationToken = cancellationToken;
+
+        if (_exception is not null)
+        {
+            throw _exception;
+        }
+
+        return Task.FromResult(_result!);
+    }
+
+    public Task<IReadOnlyList<IReadOnlyList<double>>> ProcessBatchAsync(
+        string overlayId,
+        IReadOnlyList<IReadOnlyList<double>> coordinates,
+        CancellationToken cancellationToken = default)
+    {
+        LastOverlayId = overlayId;
+        LastCoordinates = coordinates;
         LastCancellationToken = cancellationToken;
 
         if (_exception is not null)

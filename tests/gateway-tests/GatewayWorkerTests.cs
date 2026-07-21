@@ -404,11 +404,25 @@ public sealed class GatewayWorkerTests
             {
             }
         }
+
+        public Task ConsumeBatchAsync(
+            IRabbitMqBatchMessageHandler handler,
+            int batchSize,
+            TimeSpan maxWaitTime,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("Gateway does not consume in batch mode.");
     }
 
     private sealed class NoopConsumer : IRabbitMqConsumer
     {
         public Task ConsumeAsync(IRabbitMqMessageHandler handler, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public Task ConsumeBatchAsync(
+            IRabbitMqBatchMessageHandler handler,
+            int batchSize,
+            TimeSpan maxWaitTime,
+            CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
     }
 }
