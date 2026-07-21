@@ -18,11 +18,13 @@ public sealed class GatewayOutputMessageBuilder
     }
 
     public IReadOnlyList<GatewayOutputMessage> BuildOutputs(
+        string inputMessageId,
         GatewayInputMessage input,
         IReadOnlyList<RuleMatchResult> matches)
     {
         var outputCount = matches.Sum(match => match.Rule.TenantsInfo.Count);
         var outputs = new List<GatewayOutputMessage>(outputCount);
+        var outputIndex = 0;
 
         foreach (var match in matches)
         {
@@ -31,9 +33,10 @@ public sealed class GatewayOutputMessageBuilder
             foreach (var tenant in match.Rule.TenantsInfo)
             {
                 outputs.Add(new GatewayOutputMessage(
-                    BuildOutput(input, match, tenant, roiFootprint),
+                    BuildOutput(inputMessageId, input, match, tenant, roiFootprint, outputIndex),
                     match.Rule.Id,
                     tenant.TenantId));
+                outputIndex++;
             }
         }
 
@@ -41,13 +44,16 @@ public sealed class GatewayOutputMessageBuilder
     }
 
     private byte[] BuildOutput(
+        string inputMessageId,
         GatewayInputMessage input,
         RuleMatchResult match,
         TenantInfo tenant,
-        JsonElement roiFootprint)
+        JsonElement roiFootprint,
+        int outputIndex)
     {
         var payload = new GatewayOutputPayload
         {
+            TaskId = CreateTaskId(inputMessageId, match.Rule.Id, tenant.TenantId, outputIndex),
             RuleId = match.Rule.Id,
             AlgorithmName = match.Rule.AlgorithmName,
             TenantId = tenant.TenantId,
@@ -60,4 +66,11 @@ public sealed class GatewayOutputMessageBuilder
 
         return JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);
     }
+
+    private static string CreateTaskId(
+        string inputMessageId,
+        string ruleId,
+        string tenantId,
+        int outputIndex) =>
+        $"{inputMessageId}:gateway-task:{ruleId}:{tenantId}:{outputIndex}";
 }
