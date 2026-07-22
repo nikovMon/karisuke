@@ -1,10 +1,13 @@
 using System.Text.Json;
+using System.Diagnostics;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Gateway.Configuration;
 using ImagingPipeline.Gateway.Health;
 using ImagingPipeline.Gateway.Processing.Messages;
 using ImagingPipeline.Gateway.Processing.Rules;
+using ImagingPipeline.Observability;
 using ImagingPipeline.RabbitMqClient;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -23,7 +26,16 @@ public sealed class GatewayWorkerTests
         ];
         await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
 
-        var result = await harness.GatewayWorker.HandleAsync(InputMessage());
+        var inputEnvelope = InputMessage() with
+        {
+            Headers = new Dictionary<string, object?>
+            {
+                ["x-pipeline-start-unix-ms"] = DateTimeOffset.UtcNow.AddSeconds(-1).ToUnixTimeMilliseconds(),
+                ["business-header"] = "preserved"
+            }
+        };
+
+        var result = await harness.GatewayWorker.HandleAsync(inputEnvelope);
 
         Assert.True(result.IsSuccess);
         Assert.Null(result.OutputBody);
@@ -60,6 +72,9 @@ public sealed class GatewayWorkerTests
         Assert.All(outputs, output =>
         {
             Assert.Equal("message-1", output.CorrelationId);
+            Assert.NotNull(output.Headers);
+            Assert.Equal("preserved", output.Headers["business-header"]);
+            Assert.True(output.Headers.ContainsKey("x-pipeline-start-unix-ms"));
         });
         Assert.Equal("message-1:gateway-output:rule-1:der:0", outputs[0].MessageId);
         Assert.Equal("message-1:gateway-output:rule-1:findair:1", outputs[1].MessageId);
@@ -78,6 +93,22 @@ public sealed class GatewayWorkerTests
         Assert.Equal("message-1:gateway-task:rule-1:der:0", firstTaskId);
         Assert.Equal("message-2:gateway-task:rule-1:der:0", secondTaskId);
         Assert.NotEqual(firstTaskId, secondTaskId);
+    }
+
+    [Fact]
+    public async Task HandleAsyncCreatesAggregateParseMatchAndBuildSpans()
+    {
+        await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
+        using var activities = new TelemetryActivityCollector(TelemetrySourceNames.Gateway);
+
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage(messageId: "telemetry-message"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(
+            ["gateway.parse", "gateway.match", "gateway.build"],
+            activities.Activities.Select(activity => activity.DisplayName).ToArray());
+        Assert.All(activities.Activities, activity => Assert.Equal(ActivityKind.Internal, activity.Kind));
+        Assert.All(activities.Activities, activity => Assert.Equal(ActivityStatusCode.Ok, activity.Status));
     }
 
     [Fact]
@@ -119,7 +150,8 @@ public sealed class GatewayWorkerTests
             {
                 RuleRefreshIntervalSeconds = 1
             }),
-            health);
+            health,
+            NullLogger<ActiveRuleCache>.Instance);
 
         await cache.StartAsync(CancellationToken.None);
         try
@@ -142,6 +174,29 @@ public sealed class GatewayWorkerTests
     }
 
     [Fact]
+    public async Task ActiveRuleCacheMarksInitialRefreshCancellationOnSpan()
+    {
+        using var activities = new TelemetryActivityCollector(TelemetrySourceNames.Gateway);
+        using var cache = new ActiveRuleCache(
+            new CancellingRuleRepository(),
+            new GatewayGeometryConverter(),
+            Options.Create(new GatewaySettings
+            {
+                RuleRefreshIntervalSeconds = 3600
+            }),
+            new GatewayHealthState(),
+            NullLogger<ActiveRuleCache>.Instance);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => cache.StartAsync(CancellationToken.None));
+
+        var activity = Assert.Single(activities.Activities);
+        Assert.Equal("gateway.rule_cache.refresh", activity.DisplayName);
+        Assert.Equal(ActivityStatusCode.Error, activity.Status);
+        Assert.Equal("cancelled", activity.GetTagItem(TelemetryAttributeNames.ErrorCategory));
+    }
+
+    [Fact]
     public async Task ActiveRuleCacheSkipsInvalidRulesWhenBuildingSnapshot()
     {
         var invalidRule = MatchingRule();
@@ -152,6 +207,49 @@ public sealed class GatewayWorkerTests
 
         Assert.Single(harness.RuleCache.Current);
         Assert.Equal("rule-1", harness.RuleCache.Current[0].Id);
+    }
+
+    [Fact]
+    public async Task ActiveRuleCacheAggregatesInvalidRuleWarningsWithBoundedSample()
+    {
+        var rules = Enumerable.Range(0, 12)
+            .Select(index =>
+            {
+                var rule = MatchingRule();
+                rule.Id = $"invalid-{index}";
+                rule.RuleName = $"invalid-name-{index}";
+                rule.LocationWkt = "not valid wkt";
+                return rule;
+            })
+            .ToArray();
+        var logger = new RecordingLogger<ActiveRuleCache>();
+        using var cache = new ActiveRuleCache(
+            new StaticRuleRepository(rules),
+            new GatewayGeometryConverter(),
+            Options.Create(new GatewaySettings
+            {
+                RuleRefreshIntervalSeconds = 3600
+            }),
+            new GatewayHealthState(),
+            logger);
+
+        await cache.StartAsync(CancellationToken.None);
+        try
+        {
+            var warning = Assert.Single(logger.Entries, entry => entry.EventId.Id == 2023);
+            Assert.Equal(LogLevel.Warning, warning.Level);
+            Assert.Equal(12, warning.Properties["SkippedCount"]);
+            Assert.Equal(2, warning.Properties["OmittedFailureCount"]);
+            var sample = Assert.IsType<string>(warning.Properties["FailedRuleSample"]);
+            Assert.Contains("invalid-0:invalid-name-0", sample, StringComparison.Ordinal);
+            Assert.Contains("invalid-9:invalid-name-9", sample, StringComparison.Ordinal);
+            Assert.DoesNotContain("invalid-10", sample, StringComparison.Ordinal);
+            Assert.NotNull(warning.Exception);
+        }
+        finally
+        {
+            await cache.StopAsync(CancellationToken.None);
+        }
     }
 
     [Fact]
@@ -321,7 +419,8 @@ public sealed class GatewayWorkerTests
                 {
                     RuleRefreshIntervalSeconds = 3600
                 }),
-                health);
+                health,
+                NullLogger<ActiveRuleCache>.Instance);
             await ruleCache.StartAsync(CancellationToken.None);
 
             var worker = new GatewayWorker(
@@ -376,6 +475,12 @@ public sealed class GatewayWorkerTests
 
             throw new InvalidOperationException("Refresh failed.");
         }
+    }
+
+    private sealed class CancellingRuleRepository : IRuleRepository
+    {
+        public Task<IReadOnlyList<RuleDto>> GetActiveRulesAsync(CancellationToken cancellationToken) =>
+            Task.FromCanceled<IReadOnlyList<RuleDto>>(new CancellationToken(canceled: true));
     }
 
     private sealed class FailingThenBlockingConsumer : IRabbitMqConsumer

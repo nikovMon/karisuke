@@ -1,3 +1,4 @@
+using ImagingPipeline.Observability;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -11,12 +12,15 @@ public static class RabbitMqClientServiceCollectionExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        RabbitMqNativeTracing.Configure();
+
         AddRabbitMqOptions(services, configuration)
             .Validate(options => options.IsPublisherValid(out _), "RabbitMq publisher configuration is invalid.")
             .ValidateOnStart();
 
         services.TryAddSingleton<IRabbitMqConnectionManager, RabbitMqConnectionManager>();
         services.TryAddSingleton<IRabbitMqPublisherChannelPool, RabbitMqPublisherChannelPool>();
+        services.TryAddSingleton<IMessageTraceContextPropagator>(RabbitMqNativeTracing.Propagator);
         services.TryAddSingleton<IRabbitMqPublisher, RabbitMqPublisher>();
         return services;
     }

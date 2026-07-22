@@ -1,4 +1,7 @@
 using System.Text.Json;
+using System.Diagnostics;
+using ImagingPipeline.Common.Dtos.Messaging;
+using ImagingPipeline.Observability;
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbPublisher.Errors;
@@ -38,89 +41,327 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
         RabbitMqMessageEnvelope message,
         CancellationToken cancellationToken = default)
     {
-        var validation = _validator.Validate(message.Body);
-        if (!validation.IsValid)
+        var started = TelemetryTiming.StartTimestamp();
+        var outcome = TelemetryOutcome.Failure;
+        var error = TelemetryErrorCategory.Unknown;
+        var outputCount = 0;
+        var publishedCount = 0;
+
+        PipelineTelemetry.RecordPayloadSize(PipelineStage.TbPublisher, PipelineDirection.Ingress, message.Body.LongLength);
+        if (PipelineTimingHeaders.TryGetElapsedSeconds(message.Headers, out var elapsedSeconds))
         {
-            var validationError = string.Join(" | ", validation.Errors);
-            _logger.LogWarning(
-                "TBPublisher message {MessageId} failed validation. Errors: {ValidationErrors}",
-                message.MessageId,
-                validationError);
-            return RabbitMqMessageProcessingResult.Failure(validationError);
+            PipelineTelemetry.RecordEndToEndDuration(PipelineStage.TbPublisher, elapsedSeconds);
         }
 
-        var inputMessage = validation.Message!;
-
-        IReadOnlyList<IReadOnlyList<double>> groundPoints;
         try
         {
-            groundPoints = _geometryConverter.ExtractGroundPoints(inputMessage.RoiFootprint);
-        }
-        catch (TbPublisherValidationException ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "TBPublisher message {MessageId} has an invalid roiFootprint for image {ImageId}.",
-                message.MessageId,
-                inputMessage.ImageId);
-            return RabbitMqMessageProcessingResult.Failure(ex.Message);
-        }
-
-        string focusedPxWkt;
-        try
-        {
-            var request = new ProjectionMapperRequestDto { GroundPoints = groundPoints };
-            var coordinates = await _projectionMapperClient.MapAsync(inputMessage.ImageId, request, cancellationToken);
-            focusedPxWkt = _geometryConverter.BuildFocusedPxWkt(coordinates);
-        }
-        catch (ProjectionMapperClientException ex)
-        {
-            _logger.LogError(
-                ex,
-                "TBPublisher message {MessageId} failed projection mapping for image {ImageId}.",
-                message.MessageId,
-                inputMessage.ImageId);
-            return RabbitMqMessageProcessingResult.Failure($"projection mapping failed: {ex.Message}");
-        }
-        catch (TbPublisherValidationException ex)
-        {
-            _logger.LogError(
-                ex,
-                "TBPublisher message {MessageId} received an invalid pixel geometry from the projection mapper for image {ImageId}.",
-                message.MessageId,
-                inputMessage.ImageId);
-            return RabbitMqMessageProcessingResult.Failure(ex.Message);
-        }
-
-        var outputMessages = _outputMessageBuilder.Map(inputMessage, focusedPxWkt);
-
-        var index = 0;
-        try
-        {
-            foreach (var ingestMessage in outputMessages)
+            GatewayOutputMessageDto inputMessage;
+            using (var validationActivity = StartStageActivity("validate"))
             {
-                var outputBody = JsonSerializer.SerializeToUtf8Bytes(ingestMessage, SerializerOptions);
-                var outputEnvelope = new RabbitMqMessageEnvelope($"{message.MessageId}-{index}", outputBody);
-                await _publisher.PublishToOutputAsync(outputEnvelope, cancellationToken);
-                index++;
+                try
+                {
+                    var validation = _validator.Validate(message.Body);
+                    if (!validation.IsValid)
+                    {
+                        var validationError = string.Join(" | ", validation.Errors);
+                        outcome = TelemetryOutcome.Rejected;
+                        error = TelemetryErrorCategory.Validation;
+                        validationActivity.SetTelemetryError(error);
+                        if (validationActivity?.IsAllDataRequested == true)
+                        {
+                            validationActivity.SetTag(
+                                "imaging_pipeline.validation.error.count",
+                                validation.Errors.Count);
+                        }
+                        _logger.MessageRejected(validationError);
+                        return RabbitMqMessageProcessingResult.Failure(validationError);
+                    }
+
+                    inputMessage = validation.Message!;
+                    validationActivity
+                        .AddPipelineContext(
+                            taskId: inputMessage.TaskId,
+                            imageId: inputMessage.ImageId,
+                            ruleId: inputMessage.RuleId,
+                            tenantId: inputMessage.TenantId,
+                            algorithmName: inputMessage.AlgorithmName.ToString())
+                        .SetTelemetrySuccess();
+                }
+                catch (OperationCanceledException ex)
+                {
+                    validationActivity.SetTelemetryError(
+                        TelemetryErrorCategory.Cancelled,
+                        ex,
+                        recordException: false);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    validationActivity.SetTelemetryError(TelemetryErrorCategory.Handler, ex);
+                    throw;
+                }
             }
+
+            using var pipelineScope = _logger.BeginTelemetryScope(new TelemetryLogContext(
+                TaskId: inputMessage.TaskId,
+                ImageId: inputMessage.ImageId,
+                RuleId: inputMessage.RuleId,
+                TenantId: inputMessage.TenantId,
+                AlgorithmName: inputMessage.AlgorithmName.ToString()));
+            using var correlationBaggage = PipelineCorrelationBaggage.Push(
+                new PipelineCorrelationContext(
+                    TaskId: inputMessage.TaskId,
+                    ImageId: inputMessage.ImageId,
+                    RuleId: inputMessage.RuleId,
+                    TenantId: inputMessage.TenantId,
+                    AlgorithmName: inputMessage.AlgorithmName.ToString()),
+                includeExistingCanonicalValues: true);
+
+            PipelineTelemetry.RecordBatchSize(
+                PipelineStage.TbPublisher,
+                PipelineItem.TilingConfig,
+                inputMessage.TilingConfigs.Count);
+
+            IReadOnlyList<IReadOnlyList<double>> groundPoints;
+            using (var geometryActivity = StartStageActivity("geometry"))
+            {
+                try
+                {
+                    geometryActivity.AddPipelineContext(
+                        taskId: inputMessage.TaskId,
+                        imageId: inputMessage.ImageId,
+                        ruleId: inputMessage.RuleId,
+                        tenantId: inputMessage.TenantId,
+                        algorithmName: inputMessage.AlgorithmName.ToString());
+                    groundPoints = _geometryConverter.ExtractGroundPoints(inputMessage.RoiFootprint);
+                    if (geometryActivity?.IsAllDataRequested == true)
+                    {
+                        geometryActivity.SetTag(
+                            "imaging_pipeline.pipeline.ground_point.count",
+                            groundPoints.Count);
+                    }
+                    geometryActivity.SetTelemetrySuccess();
+                }
+                catch (TbPublisherValidationException ex)
+                {
+                    outcome = TelemetryOutcome.Rejected;
+                    error = TelemetryErrorCategory.Validation;
+                    geometryActivity.SetTelemetryError(error, ex);
+                    _logger.InvalidRoiGeometry(ex);
+                    return RabbitMqMessageProcessingResult.Failure(ex.Message);
+                }
+                catch (OperationCanceledException ex)
+                {
+                    geometryActivity.SetTelemetryError(
+                        TelemetryErrorCategory.Cancelled,
+                        ex,
+                        recordException: false);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    geometryActivity.SetTelemetryError(TelemetryErrorCategory.Handler, ex);
+                    throw;
+                }
+            }
+
+            PipelineTelemetry.RecordBatchSize(PipelineStage.TbPublisher, PipelineItem.GroundPoint, groundPoints.Count);
+
+            string focusedPxWkt;
+            IReadOnlyList<IReadOnlyList<double>> coordinates;
+            using (var projectionActivity = StartStageActivity("projection"))
+            {
+                try
+                {
+                    projectionActivity.AddPipelineContext(
+                        taskId: inputMessage.TaskId,
+                        imageId: inputMessage.ImageId,
+                        ruleId: inputMessage.RuleId,
+                        tenantId: inputMessage.TenantId,
+                        algorithmName: inputMessage.AlgorithmName.ToString());
+                    var request = new ProjectionMapperRequestDto { GroundPoints = groundPoints };
+                    coordinates = await _projectionMapperClient.MapAsync(inputMessage.ImageId, request, cancellationToken);
+                    if (projectionActivity?.IsAllDataRequested == true)
+                    {
+                        projectionActivity.SetTag(
+                            "imaging_pipeline.pipeline.coordinate.count",
+                            coordinates.Count);
+                    }
+                    focusedPxWkt = _geometryConverter.BuildFocusedPxWkt(coordinates);
+                    projectionActivity.SetTelemetrySuccess();
+                }
+                catch (ProjectionMapperClientException ex)
+                {
+                    outcome = TelemetryOutcome.Failure;
+                    error = TelemetryErrorCategory.Dependency;
+                    projectionActivity.SetTelemetryError(error, ex, recordException: false);
+                    _logger.ProjectionFailed(ex);
+                    return RabbitMqMessageProcessingResult.Failure($"projection mapping failed: {ex.Message}");
+                }
+                catch (TbPublisherValidationException ex)
+                {
+                    outcome = TelemetryOutcome.Rejected;
+                    error = TelemetryErrorCategory.Validation;
+                    projectionActivity.SetTelemetryError(error, ex);
+                    _logger.InvalidProjectedGeometry(ex);
+                    return RabbitMqMessageProcessingResult.Failure(ex.Message);
+                }
+                catch (OperationCanceledException ex)
+                {
+                    projectionActivity.SetTelemetryError(
+                        TelemetryErrorCategory.Cancelled,
+                        ex,
+                        recordException: false);
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    outcome = TelemetryOutcome.Retry;
+                    error = TelemetryErrorCategory.Dependency;
+                    projectionActivity.SetTelemetryError(error, ex);
+                    throw;
+                }
+            }
+
+            PipelineTelemetry.RecordBatchSize(PipelineStage.TbPublisher, PipelineItem.Coordinate, coordinates.Count);
+
+            using var buildActivity = StartStageActivity("build");
+            try
+            {
+                buildActivity.AddPipelineContext(
+                    taskId: inputMessage.TaskId,
+                    imageId: inputMessage.ImageId,
+                    ruleId: inputMessage.RuleId,
+                    tenantId: inputMessage.TenantId,
+                    algorithmName: inputMessage.AlgorithmName.ToString());
+                var outputMessages = _outputMessageBuilder.Map(inputMessage, focusedPxWkt);
+                outputCount = outputMessages.Count;
+                if (buildActivity?.IsAllDataRequested == true)
+                {
+                    buildActivity.SetTag("imaging_pipeline.pipeline.output.count", outputCount);
+                }
+
+                var index = 0;
+                foreach (var ingestMessage in outputMessages)
+                {
+                    var outputBody = JsonSerializer.SerializeToUtf8Bytes(ingestMessage, SerializerOptions);
+                    PipelineTelemetry.RecordPayloadSize(
+                        PipelineStage.TbPublisher,
+                        PipelineDirection.Egress,
+                        outputBody.LongLength);
+
+                    var outputEnvelope = new RabbitMqMessageEnvelope(
+                        $"{message.MessageId}-{index}",
+                        outputBody,
+                        Headers: message.Headers is null
+                            ? null
+                            : new Dictionary<string, object?>(message.Headers, StringComparer.Ordinal),
+                        CorrelationId: message.CorrelationId ?? message.MessageId);
+                    try
+                    {
+                        await _publisher.PublishToOutputAsync(outputEnvelope, cancellationToken);
+                        publishedCount++;
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        outcome = TelemetryOutcome.Retry;
+                        error = TelemetryErrorCategory.Publish;
+                        // RabbitMQ's handler boundary owns the exception-bearing error log.
+                        _logger.OutputPublishScheduledForRetry(publishedCount, outputCount);
+                        throw;
+                    }
+
+                    index++;
+                }
+
+                buildActivity.SetTelemetrySuccess();
+            }
+            catch (OperationCanceledException ex)
+            {
+                buildActivity.SetTelemetryError(
+                    TelemetryErrorCategory.Cancelled,
+                    ex,
+                    recordException: false);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                if (error != TelemetryErrorCategory.Publish)
+                {
+                    outcome = TelemetryOutcome.Retry;
+                    error = TelemetryErrorCategory.Serialization;
+                }
+
+                buildActivity.SetTelemetryError(
+                    error,
+                    ex,
+                    recordException: error != TelemetryErrorCategory.Publish);
+                throw;
+            }
+
+            outcome = TelemetryOutcome.Success;
+            error = TelemetryErrorCategory.None;
+            PipelineTelemetry.RecordFanOut(PipelineStage.TbPublisher, outputCount);
+            PipelineTelemetry.RecordMessage(
+                PipelineStage.TbPublisher,
+                PipelineDirection.Egress,
+                TelemetryOutcome.Success,
+                count: publishedCount);
+            _logger.MessageProcessed(groundPoints.Count, inputMessage.TilingConfigs.Count, outputCount);
+            return new RabbitMqMessageProcessingResult(true, null, null);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
         {
-            _logger.LogWarning(
-                ex,
-                "TBPublisher message {MessageId} failed while publishing output messages: {PublishedCount} of {TotalCount} were already published before the failure and may be duplicated if this message is later replayed from the dead-letter queue.",
-                message.MessageId,
-                index,
-                outputMessages.Count);
+            outcome = TelemetryOutcome.Cancelled;
+            error = TelemetryErrorCategory.Cancelled;
             throw;
         }
+        catch
+        {
+            if (outcome == TelemetryOutcome.Failure && error == TelemetryErrorCategory.Unknown)
+            {
+                outcome = TelemetryOutcome.Retry;
+                error = TelemetryErrorCategory.Handler;
+            }
 
-        _logger.LogInformation(
-            "TBPublisher message {MessageId} processed successfully for tenant {TenantId}, published {Count} tiling-config message(s).",
-            message.MessageId,
-            inputMessage.TenantId,
-            outputMessages.Count);
-        return new RabbitMqMessageProcessingResult(true, null, null);
+            throw;
+        }
+        finally
+        {
+            if (publishedCount > 0 && outcome != TelemetryOutcome.Success)
+            {
+                PipelineTelemetry.RecordMessage(
+                    PipelineStage.TbPublisher,
+                    PipelineDirection.Egress,
+                    TelemetryOutcome.Success,
+                    count: publishedCount);
+            }
+
+            PipelineTelemetry.RecordMessage(PipelineStage.TbPublisher, PipelineDirection.Ingress, outcome, error);
+            PipelineTelemetry.RecordStageDuration(
+                PipelineStage.TbPublisher,
+                TelemetryTiming.ElapsedSeconds(started),
+                outcome,
+                error);
+        }
+    }
+
+    private static Activity? StartStageActivity(string operation)
+    {
+        var spanName = operation switch
+        {
+            "validate" => "tb_publisher.validate",
+            "geometry" => "tb_publisher.geometry",
+            "projection" => "tb_publisher.projection",
+            "build" => "tb_publisher.build",
+            _ => "tb_publisher.stage"
+        };
+        var activity = TelemetrySources.TbPublisher.StartActivity(spanName, ActivityKind.Internal);
+        if (activity?.IsAllDataRequested == true)
+        {
+            activity.SetTag(TelemetryAttributeNames.PipelineStage, "tb_publisher");
+            activity.SetTag("imaging_pipeline.pipeline.operation", operation);
+        }
+        return activity;
     }
 }

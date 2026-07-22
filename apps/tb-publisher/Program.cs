@@ -1,3 +1,4 @@
+using ImagingPipeline.Observability;
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbPublisher.MessageHandling;
@@ -12,6 +13,7 @@ public static class Program
     public static async Task Main(string[] args)
     {
         var builder = Host.CreateApplicationBuilder(args);
+        builder.AddImagingPipelineObservability(ObservabilityServiceNames.TbPublisher);
 
         builder.Services.AddRabbitMqConsumer(builder.Configuration);
         builder.Services.AddProjectionMapperClient(builder.Configuration);

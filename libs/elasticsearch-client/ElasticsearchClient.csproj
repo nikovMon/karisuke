@@ -10,4 +10,8 @@
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
     <PackageReference Include="NEST" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\observability\ImagingPipeline.Observability.csproj" />
+  </ItemGroup>
 </Project>

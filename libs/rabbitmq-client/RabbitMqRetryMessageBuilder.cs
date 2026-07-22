@@ -31,11 +31,10 @@ internal static class RabbitMqRetryMessageBuilder
 
         var headers = RabbitMqHeaders.Clone(message.Headers);
 
-        var currentRetryCount = 0;
-        if (headers.TryGetValue(retryCountHeader, out var retryCountHeaderValue) &&
-            !TryReadRetryCount(retryCountHeaderValue, out currentRetryCount))
+        if (!TryReadRetryCount(headers, retryCountHeader, out var currentRetryCount))
         {
-            return Invalid($"Retry count header '{retryCountHeader}' must contain a non-negative integer.");
+            return Invalid(
+                $"Retry count header '{retryCountHeader}' must contain one unambiguous non-negative integer.");
         }
 
         if (currentRetryCount >= maxRetryAttempts)
@@ -49,6 +48,12 @@ internal static class RabbitMqRetryMessageBuilder
         }
 
         var nextRetryCount = currentRetryCount + 1;
+        foreach (var key in headers.Keys
+                     .Where(key => string.Equals(key, retryCountHeader, StringComparison.OrdinalIgnoreCase))
+                     .ToArray())
+        {
+            headers.Remove(key);
+        }
         headers[retryCountHeader] = nextRetryCount;
         return new RabbitMqRetryBuildResult(
             RabbitMqRetryBuildStatus.Retry,
@@ -58,7 +63,7 @@ internal static class RabbitMqRetryMessageBuilder
             null);
     }
 
-    private static bool TryReadRetryCount(object? value, out int retryCount)
+    internal static bool TryReadRetryCount(object? value, out int retryCount)
     {
         retryCount = 0;
 
@@ -94,9 +99,46 @@ internal static class RabbitMqRetryMessageBuilder
                 return TryReadRetryCountText(text, out retryCount);
             case byte[] bytes:
                 return TryReadRetryCountText(Encoding.UTF8.GetString(bytes), out retryCount);
+            case ReadOnlyMemory<byte> bytes:
+                return TryReadRetryCountText(Encoding.UTF8.GetString(bytes.Span), out retryCount);
+            case Memory<byte> bytes:
+                return TryReadRetryCountText(Encoding.UTF8.GetString(bytes.Span), out retryCount);
             default:
                 return false;
         }
+    }
+
+    internal static bool TryReadRetryCount(
+        IReadOnlyDictionary<string, object?>? headers,
+        string retryCountHeader,
+        out int retryCount)
+    {
+        retryCount = 0;
+        if (headers is null)
+        {
+            return true;
+        }
+
+        var found = false;
+        foreach (var pair in headers)
+        {
+            if (!string.Equals(pair.Key, retryCountHeader, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!TryReadRetryCount(pair.Value, out var candidate)
+                || found && candidate != retryCount)
+            {
+                retryCount = 0;
+                return false;
+            }
+
+            retryCount = candidate;
+            found = true;
+        }
+
+        return true;
     }
 
     private static bool TryReadRetryCountText(string text, out int retryCount) =>

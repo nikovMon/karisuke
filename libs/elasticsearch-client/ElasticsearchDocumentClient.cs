@@ -2,6 +2,7 @@ using System.Net;
 using System.Reflection;
 using System.Text.Json;
 using Elasticsearch.Net;
+using ImagingPipeline.Observability;
 using Nest;
 
 namespace ImagingPipeline.ElasticsearchClient;
@@ -60,6 +61,8 @@ public sealed record ElasticsearchDocument<TDocument>(string Id, TDocument Sourc
 
 public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
 {
+    private const int MaximumErrorResponseInspectionLength = 32 * 1024;
+    private const int MaximumServerReasonLength = 512;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly IElasticClient _client;
 
@@ -131,19 +134,38 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
         where TDocument : class
     {
         ValidateIndexAndId(indexName, id);
-
-        var response = await _client.GetAsync<TDocument>(
+        using var telemetry = ElasticsearchOperationTelemetry.Start(
+            DependencyOperation.Get,
+            indexName,
             id,
-            descriptor => descriptor.Index(indexName),
-            cancellationToken);
+            requestedDocumentCount: 1);
 
-        if (!response.Found && response.ApiCall?.HttpStatusCode == (int)HttpStatusCode.NotFound)
+        try
         {
-            return null;
-        }
+            var response = await _client.GetAsync<TDocument>(
+                id,
+                descriptor => descriptor.Index(indexName),
+                cancellationToken);
+            telemetry.SetResponseMetadata(response.ApiCall);
 
-        EnsureValid(response, $"get document '{id}' from index '{indexName}'");
-        return response.Source is null ? null : new ElasticsearchDocument<TDocument>(response.Id, response.Source);
+            if (!response.Found && response.ApiCall?.HttpStatusCode == (int)HttpStatusCode.NotFound)
+            {
+                telemetry.Complete(0);
+                return null;
+            }
+
+            EnsureValid(response, $"get document '{id}' from index '{indexName}'");
+            var document = response.Source is null
+                ? null
+                : new ElasticsearchDocument<TDocument>(response.Id, response.Source);
+            telemetry.Complete(document is null ? 0 : 1);
+            return document;
+        }
+        catch (Exception exception)
+        {
+            telemetry.Fail(exception, cancellationToken);
+            throw;
+        }
     }
 
     public async Task<IReadOnlyList<ElasticsearchDocument<TDocument>>> SearchDocumentsAsync<TDocument>(
@@ -152,14 +174,30 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
         where TDocument : class
     {
         var body = ElasticsearchQueryJsonBuilder.BuildSearchBody(request);
-        var response = await _client.LowLevel.SearchAsync<StringResponse>(
+        using var telemetry = ElasticsearchOperationTelemetry.Start(
+            DependencyOperation.Search,
             request.IndexName,
-            PostData.String(body),
-            new SearchRequestParameters(),
-            cancellationToken);
+            requestedDocumentCount: request.Size);
 
-        EnsureValid(response, $"search index '{request.IndexName}'");
-        return DeserializeDocumentSearchResponse<TDocument>(response.Body);
+        try
+        {
+            var response = await _client.LowLevel.SearchAsync<StringResponse>(
+                request.IndexName,
+                PostData.String(body),
+                new SearchRequestParameters(),
+                cancellationToken);
+            telemetry.SetResponseMetadata(response.ApiCall);
+
+            EnsureValid(response, $"search index '{request.IndexName}'");
+            var documents = DeserializeDocumentSearchResponse<TDocument>(response.Body);
+            telemetry.Complete(documents.Count);
+            return documents;
+        }
+        catch (Exception exception)
+        {
+            telemetry.Fail(exception, cancellationToken);
+            throw;
+        }
     }
 
     public async Task<IReadOnlyList<ElasticsearchDocument<TDocument>>> SearchDocumentsAsync<TDocument>(
@@ -168,16 +206,36 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
         where TDocument : class
     {
         ArgumentNullException.ThrowIfNull(configure);
+        using var telemetry = ElasticsearchOperationTelemetry.Start(DependencyOperation.Search);
 
-        var response = await _client.SearchAsync<TDocument>(
-            descriptor => configure(descriptor),
-            cancellationToken);
+        try
+        {
+            var response = await _client.SearchAsync<TDocument>(
+                descriptor =>
+                {
+                    var configuredRequest = configure(descriptor);
+                    var indexName = configuredRequest.Index is null
+                        ? null
+                        : ((IUrlParameter)configuredRequest.Index).GetString(_client.ConnectionSettings);
+                    telemetry.SetIndex(indexName);
+                    return configuredRequest;
+                },
+                cancellationToken);
+            telemetry.SetResponseMetadata(response.ApiCall);
 
-        EnsureValid(response, "search documents");
-        return response.Hits
-            .Where(hit => hit.Source is not null)
-            .Select(hit => new ElasticsearchDocument<TDocument>(hit.Id, hit.Source))
-            .ToArray();
+            EnsureValid(response, "search documents");
+            var documents = response.Hits
+                .Where(hit => hit.Source is not null)
+                .Select(hit => new ElasticsearchDocument<TDocument>(hit.Id, hit.Source))
+                .ToArray();
+            telemetry.Complete(documents.Length);
+            return documents;
+        }
+        catch (Exception exception)
+        {
+            telemetry.Fail(exception, cancellationToken);
+            throw;
+        }
     }
 
     public async Task<string> IndexAsync<TDocument>(
@@ -196,23 +254,39 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
         }
 
         ArgumentNullException.ThrowIfNull(document);
+        using var telemetry = ElasticsearchOperationTelemetry.Start(
+            DependencyOperation.Index,
+            indexName,
+            id,
+            requestedDocumentCount: 1);
 
-        var response = await _client.IndexAsync(
-            document,
-            descriptor =>
-            {
-                descriptor = descriptor.Index(indexName);
-                if (!string.IsNullOrWhiteSpace(id))
+        try
+        {
+            var response = await _client.IndexAsync(
+                document,
+                descriptor =>
                 {
-                    descriptor = descriptor.Id(id);
-                }
+                    descriptor = descriptor.Index(indexName);
+                    if (!string.IsNullOrWhiteSpace(id))
+                    {
+                        descriptor = descriptor.Id(id);
+                    }
 
-                return waitForRefresh ? descriptor.Refresh(Refresh.WaitFor) : descriptor;
-            },
-            cancellationToken);
+                    return waitForRefresh ? descriptor.Refresh(Refresh.WaitFor) : descriptor;
+                },
+                cancellationToken);
+            telemetry.SetResponseMetadata(response.ApiCall);
 
-        EnsureValid(response, $"index document '{id}' into index '{indexName}'");
-        return response.Id;
+            EnsureValid(response, $"index document '{id}' into index '{indexName}'");
+            telemetry.SetDocumentId(response.Id);
+            telemetry.Complete(1);
+            return response.Id;
+        }
+        catch (Exception exception)
+        {
+            telemetry.Fail(exception, cancellationToken);
+            throw;
+        }
     }
 
     public async Task<bool> DeleteAsync<TDocument>(
@@ -223,23 +297,39 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
         where TDocument : class
     {
         ValidateIndexAndId(indexName, id);
-
-        var response = await _client.DeleteAsync<TDocument>(
+        using var telemetry = ElasticsearchOperationTelemetry.Start(
+            DependencyOperation.Delete,
+            indexName,
             id,
-            descriptor =>
-            {
-                descriptor = descriptor.Index(indexName);
-                return waitForRefresh ? descriptor.Refresh(Refresh.WaitFor) : descriptor;
-            },
-            cancellationToken);
+            requestedDocumentCount: 1);
 
-        if (response.Result == Result.NotFound)
+        try
         {
-            return false;
-        }
+            var response = await _client.DeleteAsync<TDocument>(
+                id,
+                descriptor =>
+                {
+                    descriptor = descriptor.Index(indexName);
+                    return waitForRefresh ? descriptor.Refresh(Refresh.WaitFor) : descriptor;
+                },
+                cancellationToken);
+            telemetry.SetResponseMetadata(response.ApiCall);
 
-        EnsureValid(response, $"delete document '{id}' from index '{indexName}'");
-        return true;
+            if (response.Result == Result.NotFound)
+            {
+                telemetry.Complete(0);
+                return false;
+            }
+
+            EnsureValid(response, $"delete document '{id}' from index '{indexName}'");
+            telemetry.Complete(1);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            telemetry.Fail(exception, cancellationToken);
+            throw;
+        }
     }
 
     private static IReadOnlyList<TDocument> DeserializeSearchResponse<TDocument>(string body)
@@ -320,10 +410,10 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
             return;
         }
 
-        var reason = response.ServerError?.Error?.Reason ??
-            response.OriginalException?.Message ??
-            response.DebugInformation;
-        throw new ElasticsearchClientException($"Elasticsearch failed to {operation}: {reason}");
+        var reason = response.ServerError?.Error?.Reason ?? response.OriginalException?.Message;
+        throw new ElasticsearchClientException(
+            BuildFailureMessage(operation, response.ApiCall?.HttpStatusCode, reason),
+            response.OriginalException);
     }
 
     private static void EnsureValid(StringResponse response, string operation)
@@ -333,10 +423,74 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
             return;
         }
 
-        var reason = response.OriginalException?.Message ??
-            response.Body ??
-            response.DebugInformation;
-        throw new ElasticsearchClientException($"Elasticsearch failed to {operation}: {reason}");
+        var reason = response.OriginalException?.Message ?? TryReadServerReason(response.Body);
+        throw new ElasticsearchClientException(
+            BuildFailureMessage(operation, response.HttpStatusCode, reason),
+            response.OriginalException);
+    }
+
+    private static string BuildFailureMessage(string operation, int? statusCode, string? serverReason)
+    {
+        var message = $"Elasticsearch failed to {operation}";
+        if (statusCode.HasValue)
+        {
+            message += $" with status {statusCode.Value}";
+        }
+
+        var safeReason = TruncateServerReason(serverReason);
+        return string.IsNullOrEmpty(safeReason)
+            ? $"{message}."
+            : $"{message}: {safeReason}";
+    }
+
+    private static string? TryReadServerReason(string? responseBody)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody) ||
+            responseBody.Length > MaximumErrorResponseInspectionLength)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(responseBody);
+            if (!document.RootElement.TryGetProperty("error", out var error))
+            {
+                return null;
+            }
+
+            if (error.ValueKind == JsonValueKind.String)
+            {
+                return error.GetString();
+            }
+
+            return error.ValueKind == JsonValueKind.Object &&
+                error.TryGetProperty("reason", out var reason) &&
+                reason.ValueKind == JsonValueKind.String
+                    ? reason.GetString()
+                    : null;
+        }
+        catch (JsonException)
+        {
+            // Raw or malformed response bodies are intentionally excluded from exceptions.
+            return null;
+        }
+    }
+
+    private static string? TruncateServerReason(string? serverReason)
+    {
+        if (string.IsNullOrWhiteSpace(serverReason))
+        {
+            return null;
+        }
+
+        var normalized = serverReason
+            .Replace('\r', ' ')
+            .Replace('\n', ' ')
+            .Trim();
+        return normalized.Length <= MaximumServerReasonLength
+            ? normalized
+            : normalized[..MaximumServerReasonLength];
     }
 }
 
@@ -344,6 +498,11 @@ public sealed class ElasticsearchClientException : Exception
 {
     public ElasticsearchClientException(string message)
         : base(message)
+    {
+    }
+
+    public ElasticsearchClientException(string message, Exception? innerException)
+        : base(message, innerException)
     {
     }
 }

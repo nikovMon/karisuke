@@ -131,14 +131,16 @@ Bulk operation response:
 
 Repository failures, usually Elasticsearch failures, return `503 Service Unavailable`.
 
-## Logging
+## Observability
 
-The API uses the default .NET logging provider and structured message templates.
+The API exports OpenTelemetry traces, metrics, and correlated structured logs through OTLP.
 
-- Every HTTP request logs method, path, status code, duration, endpoint, route ID, and trace ID.
-- Create, update, bulk, delete, activity, and sensor operations log their outcome and relevant IDs or counts.
-- MVC and domain validation failures log field names, error counts, and safe validation messages.
-- Elasticsearch failures include full exception details in server logs, while clients receive only a stable generic error.
+- ASP.NET Core produces the HTTP server spans and request-duration metrics; a separate request-logging middleware is intentionally not used.
+- Rules actions add child spans and bounded metrics for operation outcome, duration, validation failures, requested bulk size, and returned or changed document counts.
+- Elasticsearch client operations add dependency spans and metrics for get, search, index, and delete calls.
+- Rule and document IDs are attached only to spans and logs, never to metric labels.
+- Health-check success traffic is excluded from traces and does not produce success logs; failures still emit warnings.
+- Elasticsearch failures include exception details in server telemetry, while clients receive only a stable generic error.
 - Request bodies, credentials, and Elasticsearch debug payloads are not logged.
 
 Debug logs are disabled by default. Enable them temporarily for the Rules API category:
@@ -147,18 +149,7 @@ Debug logs are disabled by default. Enable them temporarily for the Rules API ca
 Logging__LogLevel__ImagingPipeline.Rules.Api=Debug
 ```
 
-Example diagnostic sequence:
-
-```text
-dbug: ImagingPipeline.Rules.Api.Observability.RequestLoggingMiddleware[999]
-      HTTP PATCH /rules/8e771b31-1031-46c3-aacf-e72f96c04c6d started. TraceId: 0HNMK...
-dbug: ImagingPipeline.Rules.Api.Services.RuleService[0]
-      Starting rule operation update. RuleId: 8e771b31-1031-46c3-aacf-e72f96c04c6d; UpdatedFields: description, isActive
-info: ImagingPipeline.Rules.Api.Services.RuleService[0]
-      Rule operation update succeeded. RuleId: 8e771b31-1031-46c3-aacf-e72f96c04c6d; UpdatedFieldCount: 2
-info: ImagingPipeline.Rules.Api.Observability.RequestLoggingMiddleware[1000]
-      HTTP PATCH /rules/8e771b31-1031-46c3-aacf-e72f96c04c6d completed with 200 in 18.42 ms.
-```
+Trace and span identifiers are supplied by OpenTelemetry log correlation rather than repeated in message templates.
 
 ## Routes
 

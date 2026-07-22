@@ -14,5 +14,6 @@
     <ProjectReference Include="..\..\libs\projection-mapper-client\ProjectionMapperClient.csproj" />
     <ProjectReference Include="..\..\libs\common-dtos\ImagingPipeline.Common.Dtos.csproj" />
     <ProjectReference Include="..\..\libs\geometry-utils\GeometryUtils.csproj" />
+    <ProjectReference Include="..\..\libs\observability\ImagingPipeline.Observability.csproj" />
   </ItemGroup>
 </Project>

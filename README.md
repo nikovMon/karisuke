@@ -1,6 +1,6 @@
 # Karisuke
 
-Karisuke is a minimal C#/.NET 10 monorepo for an imaging pipeline base. It provides the project structure, build orchestration, tests, and Docker packaging needed to start implementation later.
+Karisuke is a C#/.NET 10 imaging-pipeline monorepo. It contains the Rules API, Gateway, Tile Builder publisher/consumer boundaries, shared data and dependency clients, OpenTelemetry instrumentation, tests, and Docker packaging.
 
 Nx is the monorepo task orchestrator. `dotnet` and MSBuild perform the actual restore, build, test, run, and publish work.
 
@@ -21,16 +21,52 @@ apps/
   rules-api/
 libs/
   common-dtos/
+  elasticsearch-client/
+  geometry-utils/
+  observability/
+  projection-mapper-client/
   rabbitmq-client/
 tests/
+  elasticsearch-client-tests/
   gateway-tests/
+  observability-tests/
+  projection-mapper-client-tests/
+  rabbitmq-client-tests/
   tb-publisher-tests/
   tb-consumer-tests/
   rules-api-tests/
   integration-tests/
 ```
 
-`libs/common-dtos` contains DTO contracts shared by multiple apps. `libs/rabbitmq-client` contains shared RabbitMQ client logic.
+`libs/common-dtos` contains DTO contracts shared by multiple apps. `libs/observability` is the central OpenTelemetry contract and host bootstrap. The RabbitMQ, Projection Mapper, and Elasticsearch libraries own their dependency instrumentation while using that common contract.
+
+Tile Builder and Embedder implementations are not present in this repository; their current integration boundary is represented by RabbitMQ DTOs and the publisher/consumer applications.
+
+The external Tile Builder forwards W3C trace/baggage and timing headers but exports
+its own telemetry to a separate backend. TB Consumer therefore continues the same
+trace identity while this repository reports the otherwise invisible boundary as a
+bounded `tile_builder` external-stage transit metric; Tile Builder spans themselves
+remain visible only in its telemetry backend.
+
+## Observability
+
+All runnable applications export traces, metrics, and correlated structured logs through OTLP to an OpenTelemetry Collector. Configure the Collector endpoint with standard OpenTelemetry environment variables:
+
+```text
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_TRACES_SAMPLER=parentbased_traceidratio
+OTEL_TRACES_SAMPLER_ARG=0.10
+```
+
+RabbitMQ carries W3C trace context, trace state, bounded allowlisted baggage, and a stable pipeline-origin timestamp across services. The applications emit aggregate stage spans and bounded-cardinality latency, throughput, payload-size, fan-out, batch, dependency, runtime, and messaging metrics. Broker queue depth and OpenShift container/node metrics belong in Collector RabbitMQ and kubelet receivers so they are collected once rather than once per application pod.
+
+The checked-in fallback samples 10% of new root traces with parent-based decisions when
+`OTEL_TRACES_SAMPLER` is absent. Production still needs the Collector endpoint and an
+explicit, capacity-tested sampler in the external OpenShift deployment configuration;
+this repository contains no deployment manifests.
+
+See [libs/observability/README.md](libs/observability/README.md) for signal controls, OpenShift resource attributes, Collector guidance, performance rules, and the metric contract.
 
 ## Install
 
@@ -65,6 +101,7 @@ npx nx build tb-publisher
 npx nx build tb-consumer
 npx nx build rules-api
 npx nx build common-dtos
+npx nx build observability
 npx nx build rabbitmq-client
 ```
 
@@ -75,6 +112,7 @@ npx nx test gateway-tests
 npx nx test tb-publisher-tests
 npx nx test tb-consumer-tests
 npx nx test rules-api-tests
+npx nx test observability-tests
 npx nx test integration-tests
 ```
 

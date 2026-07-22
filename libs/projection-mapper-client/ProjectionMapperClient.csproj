@@ -9,4 +9,8 @@
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\observability\ImagingPipeline.Observability.csproj" />
+  </ItemGroup>
 </Project>

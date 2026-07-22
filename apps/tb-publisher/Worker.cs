@@ -1,3 +1,4 @@
+using ImagingPipeline.Observability;
 using ImagingPipeline.RabbitMqClient;
 using Microsoft.Extensions.Logging;
 
@@ -20,6 +21,8 @@ public sealed class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _logger.ConsumerStarting();
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -32,10 +35,8 @@ public sealed class Worker : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogError(
-                    ex,
-                    "TBPublisher RabbitMQ consumer loop exited unexpectedly; restarting in {DelaySeconds}s.",
-                    RestartDelay.TotalSeconds);
+                MessagingTelemetry.RecordConsumerRestart(TelemetryErrorCategory.Connection);
+                _logger.ConsumerRestartAfterFailure(ex, RestartDelay.TotalSeconds);
                 try
                 {
                     await Task.Delay(RestartDelay, stoppingToken);
@@ -46,5 +47,7 @@ public sealed class Worker : BackgroundService
                 }
             }
         }
+
+        _logger.ConsumerStopped();
     }
 }

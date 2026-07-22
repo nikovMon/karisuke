@@ -7,6 +7,7 @@ COPY libs/rabbitmq-client/RabbitMqClient.csproj libs/rabbitmq-client/
 COPY libs/projection-mapper-client/ProjectionMapperClient.csproj libs/projection-mapper-client/
 COPY libs/common-dtos/ImagingPipeline.Common.Dtos.csproj libs/common-dtos/
 COPY libs/geometry-utils/GeometryUtils.csproj libs/geometry-utils/
+COPY libs/observability/ImagingPipeline.Observability.csproj libs/observability/
 RUN dotnet restore apps/tb-publisher/ImagingPipeline.TbPublisher.csproj
 
 COPY . .

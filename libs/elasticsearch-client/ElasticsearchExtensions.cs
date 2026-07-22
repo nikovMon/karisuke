@@ -25,8 +25,7 @@ public static class ElasticsearchExtensions
                     pool,
                     sourceSerializer: (_, _) => new SystemTextJsonSourceSerializer())
                 .DefaultIndex(options.Index)
-                .RequestTimeout(TimeSpan.FromSeconds(options.TimeoutSeconds))
-                .DisableDirectStreaming();
+                .RequestTimeout(TimeSpan.FromSeconds(options.TimeoutSeconds));
 
             if (!string.IsNullOrEmpty(options.Username) && !string.IsNullOrEmpty(options.Password))
             {

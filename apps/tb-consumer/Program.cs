@@ -1,3 +1,4 @@
+using ImagingPipeline.Observability;
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbConsumer.Application;
@@ -9,6 +10,7 @@ public static class Program
     public static async Task Main(string[] args)
     {
         var builder = Host.CreateApplicationBuilder(args);
+        builder.AddImagingPipelineObservability(ObservabilityServiceNames.TbConsumer);
 
         // RabbitMQ consumer services (also registers IRabbitMqPublisher)
         builder.Services.AddRabbitMqConsumer(builder.Configuration);

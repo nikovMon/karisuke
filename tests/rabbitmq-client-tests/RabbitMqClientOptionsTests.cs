@@ -23,6 +23,7 @@ public sealed class RabbitMqClientOptionsTests
         Assert.Equal(10000, options.RetryDelayMilliseconds);
         Assert.Equal(3, options.MaxRetryAttempts);
         Assert.Equal("x-retry-count", options.RetryCountHeader);
+        Assert.Null(options.ForwardedInputStage);
     }
 
     [Fact]

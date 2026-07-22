@@ -46,6 +46,98 @@ public sealed class RabbitMqMessageEnvelopeTests
     }
 
     [Fact]
+    public void DeliveryFactorySeedsPipelineStartHeaderWhenAbsent()
+    {
+        var args = DeliveryArgs(new BasicProperties());
+
+        var delivery = RabbitMqDeliveryFactory.Create(args);
+
+        Assert.NotNull(delivery.Message.Headers);
+        Assert.IsType<long>(delivery.Message.Headers["x-pipeline-start-unix-ms"]);
+        Assert.Null(delivery.PublishedToDeliverySeconds);
+    }
+
+    [Fact]
+    public void DeliveryFactoryRepairsMalformedPipelineStartHeader()
+    {
+        var properties = new BasicProperties
+        {
+            Headers = new Dictionary<string, object?>
+            {
+                ["x-pipeline-start-unix-ms"] = "external-clock"
+            }
+        };
+
+        var delivery = RabbitMqDeliveryFactory.Create(DeliveryArgs(properties));
+
+        Assert.IsType<long>(delivery.Message.Headers!["x-pipeline-start-unix-ms"]);
+        Assert.Null(delivery.PublishedToDeliverySeconds);
+    }
+
+    [Fact]
+    public void DeliveryFactoryComputesBrokerDelayFromPerHopTimestamp()
+    {
+        var publishedAt = DateTimeOffset.UtcNow.AddSeconds(-1).ToUnixTimeMilliseconds();
+        var properties = new BasicProperties
+        {
+            Headers = new Dictionary<string, object?>
+            {
+                ["x-pipeline-published-unix-ms"] = publishedAt,
+                ["x-pipeline-start-unix-ms"] = publishedAt - 10_000
+            }
+        };
+
+        var delivery = RabbitMqDeliveryFactory.Create(DeliveryArgs(properties));
+
+        Assert.NotNull(delivery.PublishedToDeliverySeconds);
+        Assert.InRange(delivery.PublishedToDeliverySeconds.Value, 0.9, 5);
+        Assert.Equal(
+            publishedAt - 10_000,
+            delivery.Message.Headers!["x-pipeline-start-unix-ms"]);
+    }
+
+    [Theory]
+    [InlineData("input.exchange", "input.key", "input.exchange")]
+    [InlineData("output.exchange", "output.key", "output.exchange")]
+    [InlineData("retry.exchange", "retry.key", "retry.exchange")]
+    [InlineData("customer-controlled.exchange", "customer-controlled.key", "other")]
+    public void TelemetryDestinationIsBounded(string exchange, string routingKey, string expected)
+    {
+        var options = new RabbitMqClientOptions
+        {
+            InputExchange = "input.exchange",
+            InputQueue = "input.queue",
+            InputRoutingKey = "input.key",
+            OutputExchange = "output.exchange",
+            OutputQueue = "output.queue",
+            OutputRoutingKey = "output.key",
+            RetryExchange = "retry.exchange",
+            RetryQueue = "retry.queue",
+            RetryRoutingKey = "retry.key",
+            DeadLetterExchange = "dead.exchange",
+            DeadLetterQueue = "dead.queue",
+            DeadLetterRoutingKey = "dead.key"
+        };
+
+        Assert.Equal(expected, RabbitMqTelemetryDimensions.Destination(options, exchange, routingKey));
+    }
+
+    [Fact]
+    public void TelemetryDestinationUsesQueueForConfiguredDefaultExchange()
+    {
+        var options = new RabbitMqClientOptions
+        {
+            InputExchange = string.Empty,
+            InputQueue = "input.queue",
+            InputRoutingKey = "input.queue"
+        };
+
+        Assert.Equal(
+            "input.queue",
+            RabbitMqTelemetryDimensions.Destination(options, string.Empty, "input.queue"));
+    }
+
+    [Fact]
     public void EnvelopeCanCarryHeadersAndCorrelationId()
     {
         var headers = new Dictionary<string, object?>
@@ -242,4 +334,71 @@ public sealed class RabbitMqMessageEnvelopeTests
         Assert.Equal(2, result.NextRetryCount);
         Assert.Equal(2, result.Message!.Headers?["x-retry-count"]);
     }
+
+    [Fact]
+    public void RetryMessageBuilderReadsCaseInsensitiveHeaderAndWritesOneCanonicalValue()
+    {
+        var message = new RabbitMqMessageEnvelope(
+            "message-1",
+            Encoding.UTF8.GetBytes("{}"),
+            Headers: new Dictionary<string, object?>
+            {
+                ["X-RETRY-COUNT"] = new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes("2"))
+            });
+
+        var result = RabbitMqRetryMessageBuilder.Build(message, "x-retry-count", maxRetryAttempts: 3);
+
+        Assert.Equal(RabbitMqRetryBuildStatus.Retry, result.Status);
+        Assert.Equal(2, result.CurrentRetryCount);
+        Assert.Equal(3, result.NextRetryCount);
+        Assert.NotNull(result.Message?.Headers);
+        Assert.DoesNotContain("X-RETRY-COUNT", result.Message.Headers.Keys);
+        Assert.Equal(3, result.Message.Headers["x-retry-count"]);
+    }
+
+    [Fact]
+    public void RetryMessageBuilderRejectsConflictingCaseVariantHeaders()
+    {
+        var message = new RabbitMqMessageEnvelope(
+            "message-1",
+            Encoding.UTF8.GetBytes("{}"),
+            Headers: new Dictionary<string, object?>
+            {
+                ["x-retry-count"] = 1,
+                ["X-RETRY-COUNT"] = 2
+            });
+
+        var result = RabbitMqRetryMessageBuilder.Build(message, "x-retry-count", maxRetryAttempts: 3);
+
+        Assert.Equal(RabbitMqRetryBuildStatus.InvalidMessage, result.Status);
+        Assert.Null(result.Message);
+    }
+
+    [Fact]
+    public void OutputPublishRetryResetCanonicalizesCaseAndStartsTheNextServiceAtZero()
+    {
+        var headers = new Dictionary<string, object?>
+        {
+            ["x-retry-count"] = 1,
+            ["X-RETRY-COUNT"] = Encoding.UTF8.GetBytes("2"),
+            ["business-header"] = "preserved"
+        };
+
+        RabbitMqPublisher.ResetRetryCount(headers, "x-retry-count");
+
+        Assert.DoesNotContain("X-RETRY-COUNT", headers.Keys);
+        Assert.Equal(0, headers["x-retry-count"]);
+        Assert.Equal("preserved", headers["business-header"]);
+    }
+
+    private static BasicDeliverEventArgs DeliveryArgs(IReadOnlyBasicProperties properties) =>
+        new(
+            "consumer",
+            1,
+            redelivered: false,
+            exchange: string.Empty,
+            routingKey: "input",
+            properties,
+            body: Encoding.UTF8.GetBytes("hello"),
+            cancellationToken: CancellationToken.None);
 }

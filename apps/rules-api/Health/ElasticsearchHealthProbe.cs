@@ -1,3 +1,5 @@
+using ImagingPipeline.Observability;
+using ImagingPipeline.Rules.Api;
 using Nest;
 
 namespace ImagingPipeline.Rules.Api.Health;
@@ -6,6 +8,7 @@ public sealed class ElasticsearchHealthProbe : IElasticsearchHealthProbe
 {
     private readonly IElasticClient _client;
     private readonly ILogger<ElasticsearchHealthProbe> _logger;
+    private int _isUnhealthy;
 
     public ElasticsearchHealthProbe(
         IElasticClient client,
@@ -17,29 +20,55 @@ public sealed class ElasticsearchHealthProbe : IElasticsearchHealthProbe
 
     public async Task<bool> IsHealthyAsync(CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug("Starting Elasticsearch health probe.");
+        var startedAt = TelemetryTiming.StartTimestamp();
+        var outcome = TelemetryOutcome.Failure;
+        var error = TelemetryErrorCategory.Dependency;
 
         try
         {
             var response = await _client.PingAsync(descriptor => descriptor, cancellationToken);
             if (response.IsValid)
             {
-                _logger.LogDebug(
-                    "Elasticsearch health probe succeeded. HttpStatusCode: {HttpStatusCode}",
-                    response.ApiCall?.HttpStatusCode);
+                outcome = TelemetryOutcome.Success;
+                error = TelemetryErrorCategory.None;
+                Interlocked.Exchange(ref _isUnhealthy, 0);
                 return true;
             }
 
-            _logger.LogWarning(
-                "Elasticsearch health probe returned an invalid response. HttpStatusCode: {HttpStatusCode}; FailureType: {FailureType}",
-                response.ApiCall?.HttpStatusCode,
-                response.OriginalException?.GetType().Name);
+            if (Interlocked.Exchange(ref _isUnhealthy, 1) == 0)
+            {
+                _logger.ElasticsearchHealthInvalidResponse(
+                    response.ApiCall?.HttpStatusCode,
+                    response.OriginalException?.GetType().Name);
+            }
+
             return false;
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        {
+            outcome = TelemetryOutcome.Cancelled;
+            error = TelemetryErrorCategory.Cancelled;
+            throw;
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
-            _logger.LogWarning(exception, "Elasticsearch health probe failed.");
+            error = exception is OperationCanceledException or TimeoutException
+                ? TelemetryErrorCategory.Timeout
+                : TelemetryErrorCategory.Dependency;
+            if (Interlocked.Exchange(ref _isUnhealthy, 1) == 0)
+            {
+                _logger.ElasticsearchHealthProbeFailed(exception);
+            }
+
             return false;
+        }
+        finally
+        {
+            RulesTelemetry.RecordOperation(
+                RulesOperation.Health,
+                TelemetryTiming.ElapsedSeconds(startedAt),
+                outcome,
+                error: error);
         }
     }
 }

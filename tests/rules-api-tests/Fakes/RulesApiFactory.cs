@@ -22,6 +22,7 @@ internal sealed class RulesApiFactory : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+        builder.UseSetting("Observability:Enabled", bool.FalseString);
         builder.ConfigureLogging(logging => logging.ClearProviders());
         builder.ConfigureServices(services =>
         {

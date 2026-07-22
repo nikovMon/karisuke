@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using ImagingPipeline.Observability;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 
@@ -44,7 +45,15 @@ internal sealed class RabbitMqPublisherChannelPool : IRabbitMqPublisherChannelPo
     public async ValueTask<RabbitMqPublisherChannelLease> LeaseAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        await _leases.WaitAsync(cancellationToken);
+        var waitStarted = TelemetryTiming.StartTimestamp();
+        try
+        {
+            await _leases.WaitAsync(cancellationToken);
+        }
+        finally
+        {
+            MessagingTelemetry.RecordPublisherChannelWait(TelemetryTiming.ElapsedSeconds(waitStarted));
+        }
 
         try
         {
@@ -74,7 +83,7 @@ internal sealed class RabbitMqPublisherChannelPool : IRabbitMqPublisherChannelPo
             publisherConfirmationsEnabled: true,
             publisherConfirmationTrackingEnabled: true);
         var channel = await connection.CreateChannelAsync(channelOptions, cancellationToken);
-        RabbitMqClientDiagnostics.PublisherChannels.Add(1);
+        MessagingTelemetry.AddChannel(MessagingChannelRole.Publisher, 1);
 
         try
         {
@@ -121,7 +130,7 @@ internal sealed class RabbitMqPublisherChannelPool : IRabbitMqPublisherChannelPo
         }
         finally
         {
-            RabbitMqClientDiagnostics.PublisherChannels.Add(-1);
+            MessagingTelemetry.AddChannel(MessagingChannelRole.Publisher, -1);
             channel.Dispose();
         }
     }

@@ -1,11 +1,15 @@
+using System.Diagnostics;
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Messaging;
 using ImagingPipeline.Common.Dtos.Rules.Models;
+using ImagingPipeline.Observability;
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbConsumer.Application;
 using Microsoft.Extensions.Time.Testing;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using OpenTelemetry;
 
 namespace ImagingPipeline.TbConsumer.Tests;
 
@@ -25,7 +29,8 @@ public class TbMessageHandlerTests
         _handler = new TbMessageHandler(
             _projectionMapperMock.Object,
             _publisherMock.Object,
-            _timeProvider);
+            _timeProvider,
+            NullLogger<TbMessageHandler>.Instance);
     }
 
     private static TbConsumerInputDto CreateValidInput(int tileCount = 1) => new()
@@ -82,7 +87,15 @@ public class TbMessageHandlerTests
     {
         // Arrange
         var input = CreateValidInput(1);
-        var envelope = ToEnvelope(input);
+        var envelope = ToEnvelope(input) with
+        {
+            CorrelationId = "correlation-1",
+            Headers = new Dictionary<string, object?>
+            {
+                ["x-pipeline-start-unix-ms"] = _timeProvider.GetUtcNow().AddSeconds(-1).ToUnixTimeMilliseconds(),
+                ["business-header"] = "preserved"
+            }
+        };
         SetupProjectionMapperPassthrough();
 
         // Act
@@ -95,7 +108,10 @@ public class TbMessageHandlerTests
                 It.Is<RabbitMqMessageEnvelope>(e =>
                     e.Headers != null &&
                     e.Headers.ContainsKey("algorithm_name") &&
-                    (string)e.Headers["algorithm_name"]! == "FindAir"),
+                    (string)e.Headers["algorithm_name"]! == "FindAir" &&
+                    e.Headers.ContainsKey("x-pipeline-start-unix-ms") &&
+                    (string)e.Headers["business-header"]! == "preserved" &&
+                    e.CorrelationId == "correlation-1"),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -119,6 +135,68 @@ public class TbMessageHandlerTests
         _publisherMock.Verify(
             p => p.PublishToOutputAsync(It.IsAny<RabbitMqMessageEnvelope>(), It.IsAny<CancellationToken>()),
             Times.Exactly(3));
+    }
+
+    [Fact]
+    public async Task HandleAsync_PublishesAuthoritativeCorrelationBaggageAndRestoresAmbientState()
+    {
+        var previous = Baggage.Current;
+        try
+        {
+            Baggage.Current = Baggage.Create(new Dictionary<string, string>
+            {
+                [TelemetryAttributeNames.PipelineTaskId] = "spoofed-task",
+                [TelemetryAttributeNames.PipelineRequestId] = "spoofed-request",
+                ["secret"] = "do-not-forward"
+            });
+            var input = CreateValidInput();
+            SetupProjectionMapperPassthrough();
+            IReadOnlyDictionary<string, string>? publishedBaggage = null;
+            _publisherMock
+                .Setup(p => p.PublishToOutputAsync(
+                    It.IsAny<RabbitMqMessageEnvelope>(),
+                    It.IsAny<CancellationToken>()))
+                .Callback(() => publishedBaggage = Baggage.Current.GetBaggage().ToDictionary(
+                    static item => item.Key,
+                    static item => item.Value,
+                    StringComparer.Ordinal))
+                .Returns(Task.CompletedTask);
+
+            var result = await _handler.HandleAsync(ToEnvelope(input));
+
+            Assert.True(result.IsSuccess);
+            Assert.NotNull(publishedBaggage);
+            Assert.Equal("task-001", publishedBaggage[TelemetryAttributeNames.PipelineTaskId]);
+            Assert.Equal("req-001", publishedBaggage[TelemetryAttributeNames.PipelineRequestId]);
+            Assert.Equal("img-001", publishedBaggage[TelemetryAttributeNames.PipelineImageId]);
+            Assert.Equal("rule-1", publishedBaggage[TelemetryAttributeNames.PipelineRuleId]);
+            Assert.Equal("tenant-1", publishedBaggage[TelemetryAttributeNames.PipelineTenantId]);
+            Assert.Equal("FindAir", publishedBaggage[TelemetryAttributeNames.PipelineAlgorithmName]);
+            Assert.DoesNotContain("secret", publishedBaggage.Keys);
+            Assert.Equal("spoofed-task", Baggage.Current.GetBaggage(TelemetryAttributeNames.PipelineTaskId));
+            Assert.Equal("do-not-forward", Baggage.Current.GetBaggage("secret"));
+        }
+        finally
+        {
+            Baggage.Current = previous;
+        }
+    }
+
+    [Fact]
+    public async Task HandleAsync_CreatesAggregateValidationProjectionAndBuildSpans()
+    {
+        var input = CreateValidInput(2);
+        SetupProjectionMapperPassthrough();
+        using var activities = new TelemetryActivityCollector(TelemetrySourceNames.TbConsumer);
+
+        var result = await _handler.HandleAsync(ToEnvelope(input));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(
+            ["tb_consumer.validate", "tb_consumer.projection", "tb_consumer.build"],
+            activities.Activities.Select(activity => activity.DisplayName).ToArray());
+        Assert.All(activities.Activities, activity => Assert.Equal(ActivityKind.Internal, activity.Kind));
+        Assert.All(activities.Activities, activity => Assert.Equal(ActivityStatusCode.Ok, activity.Status));
     }
 
     [Fact]
@@ -217,6 +295,43 @@ public class TbMessageHandlerTests
         _publisherMock.Verify(
             p => p.PublishToOutputAsync(It.IsAny<RabbitMqMessageEnvelope>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Fact]
+    public async Task HandleAsync_ProjectionCancellation_MarksProjectionSpanCancelled()
+    {
+        var input = CreateValidInput();
+        _projectionMapperMock
+            .Setup(m => m.ProcessBatchAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<IReadOnlyList<double>>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException("Projection cancelled."));
+        using var activities = new TelemetryActivityCollector(TelemetrySourceNames.TbConsumer);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => _handler.HandleAsync(ToEnvelope(input)));
+
+        var activity = Assert.Single(
+            activities.Activities,
+            activity => activity.DisplayName == "tb_consumer.projection");
+        Assert.Equal(ActivityStatusCode.Error, activity.Status);
+        Assert.Equal("cancelled", activity.GetTagItem(TelemetryAttributeNames.ErrorCategory));
+    }
+
+    [Fact]
+    public async Task HandleAsync_PublishCancellation_MarksBuildSpanCancelled()
+    {
+        var input = CreateValidInput();
+        SetupProjectionMapperPassthrough();
+        _publisherMock
+            .Setup(p => p.PublishToOutputAsync(It.IsAny<RabbitMqMessageEnvelope>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException("Publish cancelled."));
+        using var activities = new TelemetryActivityCollector(TelemetrySourceNames.TbConsumer);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => _handler.HandleAsync(ToEnvelope(input)));
+
+        var activity = Assert.Single(
+            activities.Activities,
+            activity => activity.DisplayName == "tb_consumer.build");
+        Assert.Equal(ActivityStatusCode.Error, activity.Status);
+        Assert.Equal("cancelled", activity.GetTagItem(TelemetryAttributeNames.ErrorCategory));
     }
 
     [Fact]

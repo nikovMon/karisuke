@@ -1,3 +1,4 @@
+using ImagingPipeline.Observability;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
@@ -16,6 +17,7 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
     private readonly ILogger<RabbitMqConnectionManager> _logger;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private IConnection? _connection;
+    private int _connectionCounted;
     private bool _disposed;
 
     public RabbitMqConnectionManager(IOptions<RabbitMqClientOptions> options, ILogger<RabbitMqConnectionManager> logger)
@@ -26,14 +28,26 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
 
     public async Task<IConnection> GetConnectionAsync(CancellationToken cancellationToken = default)
     {
-        if (_disposed) throw new ObjectDisposedException(nameof(RabbitMqConnectionManager));
-        if (_connection is { IsOpen: true }) return _connection;
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_connection is { IsOpen: true })
+        {
+            return _connection;
+        }
 
         await _connectionLock.WaitAsync(cancellationToken);
         try
         {
-            if (_connection is { IsOpen: true }) return _connection;
-            if (_connection is not null) await DisposeConnectionAsync(_connection);
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_connection is { IsOpen: true })
+            {
+                return _connection;
+            }
+
+            if (_connection is not null)
+            {
+                await DisposeConnectionAsync(_connection);
+                _connection = null;
+            }
 
             try
             {
@@ -49,21 +63,27 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
                     NetworkRecoveryInterval = TimeSpan.FromSeconds(_options.ReconnectDelaySeconds),
                     // Parallelism is provided by multiple consumer channels, not concurrent callbacks on one channel.
                     ConsumerDispatchConcurrency = 1,
-                    ClientProvidedName = $"imagingpipeline-{Environment.ProcessId}"
+                    ClientProvidedName =
+                        $"imagingpipeline-{Environment.MachineName}-{Environment.ProcessId}"
                 };
 
-                _connection = await factory.CreateConnectionAsync(cancellationToken);
-                _connection.ConnectionShutdownAsync += OnConnectionShutdownAsync;
-                _connection.CallbackExceptionAsync += OnCallbackExceptionAsync;
-                RabbitMqClientDiagnostics.ConnectionRecoveries.Add(1, RabbitMqClientDiagnostics.Tag("host", _options.Host));
-                _logger.LogInformation("Connected to RabbitMQ at {Host}:{Port} vhost {VirtualHost}",
-                    _options.Host, _options.Port, _options.VirtualHost);
-                return _connection;
+                var connection = await factory.CreateConnectionAsync(cancellationToken);
+                connection.ConnectionShutdownAsync += OnConnectionShutdownAsync;
+                connection.CallbackExceptionAsync += OnCallbackExceptionAsync;
+                connection.RecoverySucceededAsync += OnRecoverySucceededAsync;
+                connection.ConnectionRecoveryErrorAsync += OnConnectionRecoveryErrorAsync;
+                _connection = connection;
+                MarkConnectionOpen();
+                MessagingTelemetry.RecordConnectionEvent(RabbitMqConnectionEvent.ConnectSuccess);
+                RabbitMqLog.ConnectionEstablished(_logger, _options.Host, _options.Port, _options.VirtualHost);
+                return connection;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                RabbitMqClientDiagnostics.ConnectionFailures.Add(1, RabbitMqClientDiagnostics.Tag("host", _options.Host));
-                _logger.LogWarning(ex, "RabbitMQ connection failed");
+                MessagingTelemetry.RecordConnectionEvent(
+                    RabbitMqConnectionEvent.ConnectFailure,
+                    TelemetryErrorCategory.Connection);
+                RabbitMqLog.ConnectionFailed(_logger, ex);
                 throw;
             }
         }
@@ -75,32 +95,98 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
 
     private Task OnConnectionShutdownAsync(object sender, ShutdownEventArgs args)
     {
+        MarkConnectionClosed();
+        MessagingTelemetry.RecordConnectionEvent(RabbitMqConnectionEvent.Shutdown);
         if (!_disposed)
         {
-            _logger.LogWarning("RabbitMQ connection shut down. Initiator: {Initiator}; code: {ReplyCode}; reason: {ReplyText}",
-                args.Initiator, args.ReplyCode, args.ReplyText);
+            RabbitMqLog.ConnectionShutdown(_logger, args.Initiator, args.ReplyCode, args.ReplyText);
         }
+
         return Task.CompletedTask;
     }
 
     private Task OnCallbackExceptionAsync(object sender, CallbackExceptionEventArgs args)
     {
-        _logger.LogError(args.Exception, "RabbitMQ connection callback failed");
+        RabbitMqLog.CallbackFailed(_logger, args.Exception);
         return Task.CompletedTask;
     }
 
-    private static async Task DisposeConnectionAsync(IConnection connection)
+    private Task OnRecoverySucceededAsync(object sender, AsyncEventArgs args)
     {
-        try { await connection.CloseAsync(); }
-        catch { /* The connection is already unavailable. */ }
-        connection.Dispose();
+        MarkConnectionOpen();
+        MessagingTelemetry.RecordConnectionEvent(RabbitMqConnectionEvent.RecoverySuccess);
+        RabbitMqLog.RecoverySucceeded(_logger);
+        return Task.CompletedTask;
+    }
+
+    private Task OnConnectionRecoveryErrorAsync(object sender, ConnectionRecoveryErrorEventArgs args)
+    {
+        MarkConnectionClosed();
+        MessagingTelemetry.RecordConnectionEvent(
+            RabbitMqConnectionEvent.RecoveryFailure,
+            TelemetryErrorCategory.Connection);
+        RabbitMqLog.RecoveryFailed(_logger, args.Exception);
+        return Task.CompletedTask;
+    }
+
+    private void MarkConnectionOpen()
+    {
+        if (Interlocked.Exchange(ref _connectionCounted, 1) == 0)
+        {
+            MessagingTelemetry.AddConnection(1);
+        }
+    }
+
+    private void MarkConnectionClosed()
+    {
+        if (Interlocked.Exchange(ref _connectionCounted, 0) == 1)
+        {
+            MessagingTelemetry.AddConnection(-1);
+        }
+    }
+
+    private async Task DisposeConnectionAsync(IConnection connection)
+    {
+        try
+        {
+            await connection.CloseAsync();
+        }
+        catch
+        {
+            // The connection is already unavailable.
+        }
+        finally
+        {
+            MarkConnectionClosed();
+            connection.ConnectionShutdownAsync -= OnConnectionShutdownAsync;
+            connection.CallbackExceptionAsync -= OnCallbackExceptionAsync;
+            connection.RecoverySucceededAsync -= OnRecoverySucceededAsync;
+            connection.ConnectionRecoveryErrorAsync -= OnConnectionRecoveryErrorAsync;
+            connection.Dispose();
+        }
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_disposed) return;
+        if (_disposed)
+        {
+            return;
+        }
+
         _disposed = true;
-        if (_connection is not null) await DisposeConnectionAsync(_connection);
-        _connectionLock.Dispose();
+        await _connectionLock.WaitAsync();
+        try
+        {
+            if (_connection is not null)
+            {
+                await DisposeConnectionAsync(_connection);
+                _connection = null;
+            }
+        }
+        finally
+        {
+            _connectionLock.Release();
+            _connectionLock.Dispose();
+        }
     }
 }
