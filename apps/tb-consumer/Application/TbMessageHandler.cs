@@ -32,7 +32,8 @@ public sealed class TbMessageHandler(
         var matchedAlgorithm = input.MissionMetadata.Overlay.AlgorithmName;
         if (!Enum.IsDefined(typeof(AlgorithmName), matchedAlgorithm))
         {
-            throw new InvalidOperationException($"Invalid algorithm: {matchedAlgorithm}. Valid algorithms are: {string.Join(", ", Enum.GetNames<AlgorithmName>())}");
+            return RabbitMqMessageProcessingResult.Failure(
+                $"Validation failed: invalid algorithm '{matchedAlgorithm}'. Valid algorithms are: {string.Join(", ", Enum.GetNames<AlgorithmName>())}");
         }
 
         var headers = new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>
@@ -49,6 +50,12 @@ public sealed class TbMessageHandler(
         var batchMapped = await projectionMapper.ProcessBatchAsync(
             overlay.ImageId, tilesRois, cancellationToken);
 
+        if (batchMapped.Count != input.Tiles.Count)
+        {
+            return RabbitMqMessageProcessingResult.RetryableFailure(
+                $"Projection mapper returned {batchMapped.Count} results for {input.Tiles.Count} requested tiles.");
+        }
+
         for (var i = 0; i < input.Tiles.Count; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -59,9 +66,8 @@ public sealed class TbMessageHandler(
             double? lat = null;
             var coordsList = new List<double[]>();
 
-            if (i < batchMapped.Count && batchMapped[i] is { Count: >= 2 })
+            if (batchMapped[i] is { Count: >= 2 } mapped)
             {
-                var mapped = batchMapped[i];
                 lon = mapped[0];
                 lat = mapped[1];
 
