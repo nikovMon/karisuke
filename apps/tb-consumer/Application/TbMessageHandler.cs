@@ -114,13 +114,13 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                     var matchedAlgorithm = input.MissionMetadata.Overlay.AlgorithmName;
                     if (!Enum.IsDefined(typeof(AlgorithmName), matchedAlgorithm))
                     {
-                        var exception = new InvalidOperationException(
-                            $"Invalid algorithm: {matchedAlgorithm}. Valid algorithms are: {string.Join(", ", Enum.GetNames<AlgorithmName>())}");
-                        outcome = TelemetryOutcome.Retry;
+                        var invalidAlgorithmError =
+                            $"Validation failed: invalid algorithm '{matchedAlgorithm}'. Valid algorithms are: {string.Join(", ", Enum.GetNames<AlgorithmName>())}";
+                        outcome = TelemetryOutcome.Rejected;
                         error = TelemetryErrorCategory.Validation;
-                        validationActivity.SetTelemetryError(error, exception);
-                        _logger.InvalidAlgorithmScheduledForRetry(matchedAlgorithm.ToString());
-                        throw exception;
+                        validationActivity.SetTelemetryError(error);
+                        _logger.MessageRejected(invalidAlgorithmError);
+                        return RabbitMqMessageProcessingResult.Failure(invalidAlgorithmError);
                     }
 
                     if (validationActivity?.IsAllDataRequested == true)
@@ -257,6 +257,19 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                     overlay.ImageId,
                     tilesRois,
                     cancellationToken);
+
+                if (batchMapped.Count != input.Tiles.Count)
+                {
+                    var failureReason =
+                        $"Projection mapper returned {batchMapped.Count} results for {input.Tiles.Count} requested tiles.";
+                    telemetryState.SetOutcome(TelemetryOutcome.Retry, TelemetryErrorCategory.Dependency);
+                    projectionActivity.SetTelemetryError(TelemetryErrorCategory.Dependency);
+                    _logger.ProjectionResultCountMismatchScheduledForRetry(
+                        input.Tiles.Count,
+                        batchMapped.Count);
+                    return RabbitMqMessageProcessingResult.RetryableFailure(failureReason);
+                }
+
                 if (projectionActivity?.IsAllDataRequested == true)
                 {
                     projectionActivity.SetTag(
@@ -315,9 +328,8 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                 double? lat = null;
                 var coordsList = new List<double[]>();
 
-                if (i < batchMapped.Count && batchMapped[i] is { Count: >= 2 })
+                if (batchMapped[i] is { Count: >= 2 } mapped)
                 {
-                    var mapped = batchMapped[i];
                     lon = mapped[0];
                     lat = mapped[1];
 

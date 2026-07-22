@@ -10,16 +10,17 @@ internal static partial class TbConsumerLog
     [LoggerMessage(4001, LogLevel.Information, "TB Consumer RabbitMQ consumer has stopped.")]
     public static partial void ConsumerStopped(this ILogger logger);
 
+    [LoggerMessage(4002, LogLevel.Warning, "TB Consumer RabbitMQ consumer failed; restarting in {RestartDelaySeconds} seconds.")]
+    public static partial void ConsumerRestartAfterFailure(
+        this ILogger logger,
+        Exception exception,
+        double restartDelaySeconds);
+
     [LoggerMessage(4010, LogLevel.Warning, "TB Consumer rejected an input message because JSON deserialization failed: {ValidationError}")]
     public static partial void DeserializationRejected(this ILogger logger, string validationError);
 
     [LoggerMessage(4011, LogLevel.Warning, "TB Consumer rejected an input message because validation failed: {ValidationError}")]
     public static partial void MessageRejected(this ILogger logger, string validationError);
-
-    [LoggerMessage(4012, LogLevel.Warning, "TB Consumer encountered an invalid algorithm value and RabbitMQ will retry the message: {AlgorithmValue}")]
-    public static partial void InvalidAlgorithmScheduledForRetry(
-        this ILogger logger,
-        string algorithmValue);
 
     [LoggerMessage(4013, LogLevel.Warning, "TB Consumer Projection Mapper processing failed for a batch of {TileCount} tiles; RabbitMQ will retry the message.")]
     public static partial void ProjectionScheduledForRetry(
@@ -38,4 +39,10 @@ internal static partial class TbConsumerLog
         int tileCount,
         int mappedCoordinateCount,
         int outputCount);
+
+    [LoggerMessage(4016, LogLevel.Warning, "TB Consumer Projection Mapper returned {ActualResultCount} results for {ExpectedResultCount} tiles; RabbitMQ will retry the message.")]
+    public static partial void ProjectionResultCountMismatchScheduledForRetry(
+        this ILogger logger,
+        int expectedResultCount,
+        int actualResultCount);
 }
