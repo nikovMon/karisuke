@@ -3,10 +3,10 @@ namespace ImagingPipeline.Common.Dtos.Gateway.Messages;
 public static class GatewayInputMessageSchema
 {
     public const string ImageId = "overlay.id";
-    public const string SensorName = "sensorName";
-    public const string SensorType = "sensorType";
-    public const string Resolution = "bestResolution";
-    public const string PhotoTime = "photoTime";
+    public const string SensorName = "overlay.sensorName";
+    public const string RegistrationQuality = "overlay.registrationQuality";
+    public const string Resolution = "overlay.bestResolution";
+    public const string PhotoTime = "overlay.photoTime";
     public const string GeometryWkt = "intersectionArea";
-    public const string GeometryGeoJson = "roiFootprint";
+    public const string GeometryGeoJson = "overlay.roiFootprint";
 }

@@ -42,18 +42,8 @@ public sealed class RuleMatcher
             return true;
         }
 
-        if (!string.IsNullOrWhiteSpace(input.SensorType) &&
-            rule.Sensors.TryGetValue(input.SensorType, out var typedSensors))
-        {
-            return typedSensors.Contains(input.SensorName);
-        }
-
-        if (!string.IsNullOrWhiteSpace(input.SensorType))
-        {
-            return false;
-        }
-
-        return rule.Sensors.Values.Any(values => values.Contains(input.SensorName));
+        return rule.Sensors.TryGetValue(input.SensorName, out var allowedRegistrationQualities) &&
+            allowedRegistrationQualities.Contains(input.RegistrationQuality);
     }
 
     private static bool MatchesResolution(GatewayInputMessage input, ActiveRule rule) =>

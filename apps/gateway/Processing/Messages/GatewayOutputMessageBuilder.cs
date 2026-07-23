@@ -60,8 +60,7 @@ public sealed class GatewayOutputMessageBuilder
             TilingConfigs = tenant.TilingConfigs,
             ImageId = input.ImageId,
             RoiFootprint = roiFootprint,
-            PhotoTime = input.PhotoTime,
-            SensorType = input.SensorType
+            PhotoTime = input.PhotoTime
         };
 
         return JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);

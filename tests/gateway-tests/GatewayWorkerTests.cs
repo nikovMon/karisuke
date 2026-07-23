@@ -39,7 +39,6 @@ public sealed class GatewayWorkerTests
         Assert.Single(first.RootElement.GetProperty("tilingConfigs").EnumerateArray());
         Assert.Equal("image-1", first.RootElement.GetProperty("imageId").GetString());
         Assert.Equal("2026-06-30T06:54:07+00:00", first.RootElement.GetProperty("photoTime").GetString());
-        Assert.Equal("camera", first.RootElement.GetProperty("sensorType").GetString());
         Assert.Equal("Polygon", first.RootElement.GetProperty("roiFootprint").GetProperty("type").GetString());
         Assert.Equal("message-1:gateway-task:rule-1:findair:1", second.RootElement.GetProperty("taskId").GetString());
         Assert.Equal("findair", second.RootElement.GetProperty("tenantId").GetString());
@@ -53,8 +52,7 @@ public sealed class GatewayWorkerTests
                 "tilingConfigs",
                 "imageId",
                 "roiFootprint",
-                "photoTime",
-                "sensorType"
+                "photoTime"
             ],
             first.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
         Assert.All(outputs, output =>
@@ -84,7 +82,8 @@ public sealed class GatewayWorkerTests
     public async Task HandleAsyncAcknowledgesWithoutPublishingWhenNoRulesMatch()
     {
         var rule = MatchingRule();
-        rule.Sensors["camera"] = ["other-camera"];
+        rule.Sensors.Clear();
+        rule.Sensors["other-camera"] = ["accurate"];
         await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
 
         var result = await harness.GatewayWorker.HandleAsync(InputMessage());
@@ -177,16 +176,31 @@ public sealed class GatewayWorkerTests
     }
 
     [Fact]
-    public async Task HandleAsyncDoesNotFallbackToOtherSensorTypesWhenInputHasSensorType()
+    public async Task HandleAsyncRequiresMatchingRegistrationQualityForSensorName()
     {
         var rule = MatchingRule();
-        rule.Sensors["camera"] = ["cam-001"];
+        rule.Sensors["cam-001"] = ["sensor"];
         await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
 
-        var result = await harness.GatewayWorker.HandleAsync(InputMessage(sensorType: "radar"));
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage(registrationQuality: "accurate"));
 
         Assert.True(result.IsSuccess);
         Assert.Empty(OutputMessages(result));
+    }
+
+    [Fact]
+    public async Task HandleAsyncMatchesAnySensorWhenRuleSensorsAreEmpty()
+    {
+        var rule = MatchingRule();
+        rule.Sensors.Clear();
+        await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
+
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage(
+            sensorName: "unknown-sensor",
+            registrationQuality: "sensor"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(OutputMessages(result));
     }
 
     [Fact]
@@ -203,29 +217,59 @@ public sealed class GatewayWorkerTests
         Assert.Empty(OutputMessages(result));
     }
 
-    private static RabbitMqMessageEnvelope InputMessage(string sensorType = "camera", string messageId = "message-1") =>
+    [Fact]
+    public async Task HandleAsyncReturnsFailureWhenRegistrationQualityIsMissing()
+    {
+        await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
+        var invalid = RabbitMqMessageEnvelope.FromUtf8(
+            """
+            {
+              "overlay": {
+                "id": "image-1",
+                "sensorName": "cam-001",
+                "bestResolution": 25.9
+              },
+              "intersectionArea": "POLYGON((34.7800 32.0800, 34.7900 32.0800, 34.7900 32.0900, 34.7800 32.0900, 34.7800 32.0800))"
+            }
+            """,
+            "message-1");
+
+        var result = await harness.GatewayWorker.HandleAsync(invalid);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("gateway.missing_registration_quality", result.Error, StringComparison.Ordinal);
+        Assert.Equal(RabbitMqMessageFailureAction.DeadLetter, result.FailureAction);
+        Assert.Empty(OutputMessages(result));
+    }
+
+    [Fact]
+    public async Task HandleAsyncReturnsFailureWhenRegistrationQualityIsInvalid()
+    {
+        await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
+
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage(registrationQuality: "Accurate"));
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("gateway.invalid_registration_quality", result.Error, StringComparison.Ordinal);
+        Assert.Equal(RabbitMqMessageFailureAction.DeadLetter, result.FailureAction);
+        Assert.Empty(OutputMessages(result));
+    }
+
+    private static RabbitMqMessageEnvelope InputMessage(
+        string sensorName = "cam-001",
+        string registrationQuality = "accurate",
+        string messageId = "message-1") =>
         RabbitMqMessageEnvelope.FromUtf8(
             $$"""
             {
               "overlay": {
-                "id": "image-1"
+                "id": "image-1",
+                "sensorName": "{{sensorName}}",
+                "registrationQuality": "{{registrationQuality}}",
+                "bestResolution": 25.9,
+                "photoTime": "2026-06-30T06:54:07Z"
               },
-              "sensorName": "cam-001",
-              "sensorType": "{{sensorType}}",
-              "bestResolution": 25.9,
-              "photoTime": "2026-06-30T06:54:07Z",
-              "roiFootprint": {
-                "type": "Polygon",
-                "coordinates": [
-                  [
-                    [34.7800, 32.0800],
-                    [34.7900, 32.0800],
-                    [34.7900, 32.0900],
-                    [34.7800, 32.0900],
-                    [34.7800, 32.0800]
-                  ]
-                ]
-              }
+              "intersectionArea": "POLYGON((34.7800 32.0800, 34.7900 32.0800, 34.7900 32.0900, 34.7800 32.0900, 34.7800 32.0800))"
             }
             """,
             messageId);
@@ -239,7 +283,7 @@ public sealed class GatewayWorkerTests
             AlgorithmName = AlgorithmName.FindAir,
             Sensors = new Dictionary<string, List<string>>(StringComparer.Ordinal)
             {
-                ["camera"] = ["cam-001"]
+                ["cam-001"] = ["accurate"]
             },
             IsActive = true,
             TenantsInfo = [Tenant("der", Tiling(5, 5))],

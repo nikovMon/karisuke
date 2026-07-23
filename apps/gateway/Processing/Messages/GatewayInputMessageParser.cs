@@ -8,6 +8,9 @@ namespace ImagingPipeline.Gateway.Processing.Messages;
 
 public sealed class GatewayInputMessageParser
 {
+    private const string AccurateRegistrationQuality = "accurate";
+    private const string SensorRegistrationQuality = "sensor";
+
     private readonly JsonPathReader _json;
     private readonly GatewayGeometryConverter _geometry;
 
@@ -47,9 +50,18 @@ public sealed class GatewayInputMessageParser
             throw new GatewayValidationException("Input sensor name is required and must be a non-empty string.", "gateway.missing_sensor_name");
         }
 
-        if (!_json.TryReadOptionalString(root, GatewayInputMessageSchema.SensorType, out var sensorType))
+        if (!_json.TryReadNonEmptyString(root, GatewayInputMessageSchema.RegistrationQuality, out var registrationQuality))
         {
-            throw new GatewayValidationException("Input sensor type must be a string when provided.", "gateway.invalid_sensor_type");
+            throw new GatewayValidationException(
+                "Input registration quality is required and must be a non-empty string.",
+                "gateway.missing_registration_quality");
+        }
+
+        if (registrationQuality is not AccurateRegistrationQuality and not SensorRegistrationQuality)
+        {
+            throw new GatewayValidationException(
+                "Input registration quality must be either 'accurate' or 'sensor'.",
+                "gateway.invalid_registration_quality");
         }
 
         if (!_json.TryReadPositiveDouble(root, GatewayInputMessageSchema.Resolution, out var resolution))
@@ -63,7 +75,7 @@ public sealed class GatewayInputMessageParser
         return new GatewayInputMessage(
             imageId,
             sensorName,
-            sensorType,
+            registrationQuality,
             resolution,
             photoTime,
             geometry);

@@ -30,7 +30,4 @@ public sealed class GatewayOutputPayload
 
     [JsonPropertyName("photoTime")]
     public DateTimeOffset? PhotoTime { get; init; }
-
-    [JsonPropertyName("sensorType")]
-    public string? SensorType { get; init; }
 }
