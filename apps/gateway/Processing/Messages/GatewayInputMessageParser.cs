@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Gateway.Messages;
+using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Gateway.Contracts.Messages;
 using ImagingPipeline.Gateway.Errors;
 using NetTopologySuite.Geometries;
@@ -8,9 +9,6 @@ namespace ImagingPipeline.Gateway.Processing.Messages;
 
 public sealed class GatewayInputMessageParser
 {
-    private const string AccurateRegistrationQuality = "accurate";
-    private const string SensorRegistrationQuality = "sensor";
-
     private readonly JsonPathReader _json;
     private readonly GatewayGeometryConverter _geometry;
 
@@ -57,10 +55,10 @@ public sealed class GatewayInputMessageParser
                 "gateway.missing_registration_quality");
         }
 
-        if (registrationQuality is not AccurateRegistrationQuality and not SensorRegistrationQuality)
+        if (!RegistrationQualityExtensions.TryParseJsonValue(registrationQuality, out var parsedRegistrationQuality))
         {
             throw new GatewayValidationException(
-                "Input registration quality must be either 'accurate' or 'sensor'.",
+                "Input registration quality must be either 'Accurate' or 'Sensor'.",
                 "gateway.invalid_registration_quality");
         }
 
@@ -75,7 +73,7 @@ public sealed class GatewayInputMessageParser
         return new GatewayInputMessage(
             imageId,
             sensorName,
-            registrationQuality,
+            parsedRegistrationQuality,
             resolution,
             photoTime,
             geometry);

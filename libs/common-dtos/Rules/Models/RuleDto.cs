@@ -23,7 +23,7 @@ public sealed class RuleDto : IValidatableObject
     public required AlgorithmName AlgorithmName { get; set; }
 
     [JsonPropertyName("sensors")]
-    public Dictionary<string, List<string>> Sensors { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, List<RegistrationQuality>> Sensors { get; set; } = new(StringComparer.Ordinal);
 
     [JsonPropertyName("isActive")]
     public bool IsActive { get; set; } = true;
@@ -92,6 +92,18 @@ public sealed class RuleDto : IValidatableObject
         else if (Sensors.Any(sensor => sensor.Value is null))
         {
             yield return new ValidationResult("sensor value lists cannot be null", [nameof(Sensors)]);
+        }
+        else if (Sensors.Any(sensor => sensor.Value.Count == 0))
+        {
+            yield return new ValidationResult(
+                "sensor value lists cannot be empty",
+                [nameof(Sensors)]);
+        }
+        else if (Sensors.Any(sensor => sensor.Value.Any(value => !Enum.IsDefined(value))))
+        {
+            yield return new ValidationResult(
+                "sensor values must be valid registration qualities",
+                [nameof(Sensors)]);
         }
 
         if (TenantsInfo is null || TenantsInfo.Count == 0)

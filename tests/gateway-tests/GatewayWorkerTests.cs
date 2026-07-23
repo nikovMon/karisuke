@@ -83,7 +83,7 @@ public sealed class GatewayWorkerTests
     {
         var rule = MatchingRule();
         rule.Sensors.Clear();
-        rule.Sensors["other-camera"] = ["accurate"];
+        rule.Sensors["other-camera"] = [RegistrationQuality.Accurate];
         await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
 
         var result = await harness.GatewayWorker.HandleAsync(InputMessage());
@@ -179,10 +179,10 @@ public sealed class GatewayWorkerTests
     public async Task HandleAsyncRequiresMatchingRegistrationQualityForSensorName()
     {
         var rule = MatchingRule();
-        rule.Sensors["cam-001"] = ["sensor"];
+        rule.Sensors["cam-001"] = [RegistrationQuality.Sensor];
         await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
 
-        var result = await harness.GatewayWorker.HandleAsync(InputMessage(registrationQuality: "accurate"));
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage(registrationQuality: "Accurate"));
 
         Assert.True(result.IsSuccess);
         Assert.Empty(OutputMessages(result));
@@ -197,7 +197,7 @@ public sealed class GatewayWorkerTests
 
         var result = await harness.GatewayWorker.HandleAsync(InputMessage(
             sensorName: "unknown-sensor",
-            registrationQuality: "sensor"));
+            registrationQuality: "Sensor"));
 
         Assert.True(result.IsSuccess);
         Assert.Single(OutputMessages(result));
@@ -247,7 +247,7 @@ public sealed class GatewayWorkerTests
     {
         await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
 
-        var result = await harness.GatewayWorker.HandleAsync(InputMessage(registrationQuality: "Accurate"));
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage(registrationQuality: "accurate"));
 
         Assert.False(result.IsSuccess);
         Assert.Contains("gateway.invalid_registration_quality", result.Error, StringComparison.Ordinal);
@@ -257,7 +257,7 @@ public sealed class GatewayWorkerTests
 
     private static RabbitMqMessageEnvelope InputMessage(
         string sensorName = "cam-001",
-        string registrationQuality = "accurate",
+        string registrationQuality = "Accurate",
         string messageId = "message-1") =>
         RabbitMqMessageEnvelope.FromUtf8(
             $$"""
@@ -281,9 +281,9 @@ public sealed class GatewayWorkerTests
             RuleName = "FindSuspiciousAreaRule",
             Description = "Rule that detects suspicious activity in a configured geographic area",
             AlgorithmName = AlgorithmName.FindAir,
-            Sensors = new Dictionary<string, List<string>>(StringComparer.Ordinal)
+            Sensors = new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal)
             {
-                ["cam-001"] = ["accurate"]
+                ["cam-001"] = [RegistrationQuality.Accurate]
             },
             IsActive = true,
             TenantsInfo = [Tenant("der", Tiling(5, 5))],

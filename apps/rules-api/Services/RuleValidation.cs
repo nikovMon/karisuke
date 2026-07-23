@@ -84,13 +84,18 @@ public static class RuleValidation
             errors.Add("sensorName cannot be empty.");
         }
 
-        if (request.Values is null || request.Values.Count == 0 || request.Values.Any(string.IsNullOrWhiteSpace))
+        if (request.Values is null || request.Values.Count == 0)
         {
             errors.Add("sensor values cannot be empty.");
         }
 
+        if (request.Values is not null && request.Values.Any(value => !Enum.IsDefined(value)))
+        {
+            errors.Add("sensor values must be valid registration qualities.");
+        }
+
         if (request.Values is not null &&
-            request.Values.Count != request.Values.Distinct(StringComparer.Ordinal).Count())
+            request.Values.Count != request.Values.Distinct().Count())
         {
             errors.Add("sensor values must be unique.");
         }
@@ -114,7 +119,7 @@ public static class RuleValidation
     }
 
     private static void AddSensorCollectionErrors(
-        IReadOnlyDictionary<string, List<string>>? sensors,
+        IReadOnlyDictionary<string, List<RegistrationQuality>>? sensors,
         ICollection<string> errors)
     {
         if (sensors is null)
@@ -126,6 +131,16 @@ public static class RuleValidation
         if (sensors.Any(sensor => sensor.Value is null))
         {
             errors.Add("sensor value lists cannot be null.");
+        }
+
+        if (sensors.Any(sensor => sensor.Value is not null && sensor.Value.Count == 0))
+        {
+            errors.Add("sensor value lists cannot be empty.");
+        }
+
+        if (sensors.Any(sensor => sensor.Value is not null && sensor.Value.Any(value => !Enum.IsDefined(value))))
+        {
+            errors.Add("sensor values must be valid registration qualities.");
         }
     }
 }

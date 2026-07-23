@@ -43,7 +43,7 @@ public sealed class RuleMatcher
         }
 
         return rule.Sensors.TryGetValue(input.SensorName, out var allowedRegistrationQualities) &&
-            allowedRegistrationQualities.Contains(input.RegistrationQuality);
+            (allowedRegistrationQualities & RegistrationQualityMask.From(input.RegistrationQuality)) != 0;
     }
 
     private static bool MatchesResolution(GatewayInputMessage input, ActiveRule rule) =>

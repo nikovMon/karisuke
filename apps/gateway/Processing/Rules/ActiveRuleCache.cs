@@ -132,18 +132,18 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
             rule.MaximumResolution,
             _geometry.ReadRuleGeometry(rule));
 
-    private static IReadOnlyDictionary<string, IReadOnlySet<string>> BuildSensorSnapshot(
-        IReadOnlyDictionary<string, List<string>>? sensors)
+    private static IReadOnlyDictionary<string, int> BuildSensorSnapshot(
+        IReadOnlyDictionary<string, List<RegistrationQuality>>? sensors)
     {
         if (sensors is null || sensors.Count == 0)
         {
-            return new Dictionary<string, IReadOnlySet<string>>(0, StringComparer.Ordinal);
+            return new Dictionary<string, int>(0, StringComparer.Ordinal);
         }
 
-        var snapshot = new Dictionary<string, IReadOnlySet<string>>(sensors.Count, StringComparer.Ordinal);
+        var snapshot = new Dictionary<string, int>(sensors.Count, StringComparer.Ordinal);
         foreach (var sensor in sensors)
         {
-            snapshot[sensor.Key] = sensor.Value.ToHashSet(StringComparer.Ordinal);
+            snapshot[sensor.Key] = RegistrationQualityMask.From(sensor.Value);
         }
 
         return snapshot;
