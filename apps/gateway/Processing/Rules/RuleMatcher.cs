@@ -9,10 +9,11 @@ public sealed class RuleMatcher
         IReadOnlyList<ActiveRule> activeRules)
     {
         var matches = new List<RuleMatchResult>();
+        var registrationQualityMask = RegistrationQualityMask.From(input.RegistrationQuality);
 
         foreach (var activeRule in activeRules)
         {
-            if (!MatchesSensor(input, activeRule) ||
+            if (!MatchesSensor(input.SensorName, registrationQualityMask, activeRule) ||
                 !MatchesResolution(input, activeRule))
             {
                 continue;
@@ -35,15 +36,18 @@ public sealed class RuleMatcher
         return matches;
     }
 
-    private static bool MatchesSensor(GatewayInputMessage input, ActiveRule rule)
+    private static bool MatchesSensor(
+        string sensorName,
+        int registrationQualityMask,
+        ActiveRule rule)
     {
         if (rule.Sensors.Count == 0)
         {
             return true;
         }
 
-        return rule.Sensors.TryGetValue(input.SensorName, out var allowedRegistrationQualities) &&
-            (allowedRegistrationQualities & RegistrationQualityMask.From(input.RegistrationQuality)) != 0;
+        return rule.Sensors.TryGetValue(sensorName, out var allowedRegistrationQualities) &&
+            (allowedRegistrationQualities & registrationQualityMask) != 0;
     }
 
     private static bool MatchesResolution(GatewayInputMessage input, ActiveRule rule) =>

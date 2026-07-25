@@ -5,15 +5,7 @@ namespace ImagingPipeline.Gateway.Processing.Rules;
 internal static class RegistrationQualityMask
 {
     public static int From(RegistrationQuality quality) =>
-        quality switch
-        {
-            RegistrationQuality.Accurate => 1,
-            RegistrationQuality.Sensor => 2,
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(quality),
-                quality,
-                "Unsupported registration quality.")
-        };
+        1 << RegistrationQualityContract.GetValidatedOrdinal(quality);
 
     public static int From(IEnumerable<RegistrationQuality> qualities)
     {

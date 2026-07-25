@@ -200,4 +200,89 @@ public sealed class ElasticsearchQueryJsonBuilderTests
             ]
         }));
     }
+
+    [Fact]
+    public void BuildPointInTimeSearchBodyUsesStableShardDocumentCursor()
+    {
+        var json = ElasticsearchQueryJsonBuilder.BuildPointInTimeSearchBody(
+            new ElasticsearchPointInTimeSearchRequest
+            {
+                Search = new ElasticsearchSearchRequest
+                {
+                    IndexName = "rules",
+                    Size = 500,
+                    TermFilters =
+                    [
+                        new ElasticsearchTermFilter { Field = "isActive", Value = true }
+                    ]
+                },
+                PointInTimeId = "pit-1",
+                KeepAlive = "1m",
+                SearchAfter = [JsonSerializer.SerializeToElement(499L)]
+            });
+
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+
+        Assert.False(root.TryGetProperty("from", out _));
+        Assert.Equal(500, root.GetProperty("size").GetInt32());
+        Assert.True(root.GetProperty("track_total_hits").GetBoolean());
+        Assert.Equal("pit-1", root.GetProperty("pit").GetProperty("id").GetString());
+        Assert.Equal("1m", root.GetProperty("pit").GetProperty("keep_alive").GetString());
+        Assert.Equal("_shard_doc", root.GetProperty("sort")[0].GetString());
+        Assert.Equal(499, root.GetProperty("search_after")[0].GetInt64());
+        Assert.True(root
+            .GetProperty("query")
+            .GetProperty("bool")
+            .GetProperty("filter")[0]
+            .GetProperty("term")
+            .GetProperty("isActive")
+            .GetBoolean());
+    }
+
+    [Fact]
+    public void BuildPointInTimeSearchBodyCanDisableExactTotalTrackingAfterFirstPage()
+    {
+        var json = ElasticsearchQueryJsonBuilder.BuildPointInTimeSearchBody(
+            new ElasticsearchPointInTimeSearchRequest
+            {
+                Search = new ElasticsearchSearchRequest
+                {
+                    IndexName = "rules"
+                },
+                PointInTimeId = "pit-1",
+                TrackTotalHits = false
+            });
+
+        using var document = JsonDocument.Parse(json);
+
+        Assert.False(document.RootElement.GetProperty("track_total_hits").GetBoolean());
+    }
+
+    [Fact]
+    public void BuildPointInTimeSearchBodyRejectsOffsetPagingAndBlankPit()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            ElasticsearchQueryJsonBuilder.BuildPointInTimeSearchBody(
+                new ElasticsearchPointInTimeSearchRequest
+                {
+                    Search = new ElasticsearchSearchRequest
+                    {
+                        IndexName = "rules",
+                        From = 1
+                    },
+                    PointInTimeId = "pit-1"
+                }));
+
+        Assert.Throws<ArgumentException>(() =>
+            ElasticsearchQueryJsonBuilder.BuildPointInTimeSearchBody(
+                new ElasticsearchPointInTimeSearchRequest
+                {
+                    Search = new ElasticsearchSearchRequest
+                    {
+                        IndexName = "rules"
+                    },
+                    PointInTimeId = " "
+                }));
+    }
 }

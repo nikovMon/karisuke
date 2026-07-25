@@ -58,7 +58,7 @@ public sealed class GatewayInputMessageParser
         if (!RegistrationQualityExtensions.TryParseJsonValue(registrationQuality, out var parsedRegistrationQuality))
         {
             throw new GatewayValidationException(
-                "Input registration quality must be either 'Accurate' or 'Sensor'.",
+                $"Input registration quality must be either {RegistrationQualityContract.AllowedJsonValues}.",
                 "gateway.invalid_registration_quality");
         }
 
