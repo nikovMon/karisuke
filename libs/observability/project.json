@@ -1,0 +1,7 @@
+{
+  "name": "observability",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "libs/observability",
+  "tags": ["type:lib", "scope:observability"]
+}

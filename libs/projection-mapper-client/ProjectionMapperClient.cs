@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Json;
-using Microsoft.Extensions.Logging;
+using System.Text.Json;
+using ImagingPipeline.Observability;
 using Microsoft.Extensions.Options;
 
 namespace ImagingPipeline.ProjectionMapperClient;
@@ -9,149 +11,218 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
 {
     private readonly HttpClient _httpClient;
     private readonly ProjectionMapperOptions _options;
-    private readonly ILogger<ProjectionMapperClient> _logger;
 
     public ProjectionMapperClient(
         HttpClient httpClient,
-        IOptions<ProjectionMapperOptions> options,
-        ILogger<ProjectionMapperClient> logger)
+        IOptions<ProjectionMapperOptions> options)
     {
         _httpClient = httpClient;
         _options = options.Value;
-        _logger = logger;
     }
 
-    public async Task<IReadOnlyList<IReadOnlyList<double>>> MapAsync(
+    public Task<IReadOnlyList<IReadOnlyList<double>>> MapAsync(
         string overlayId,
         ProjectionMapperRequestDto request,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ProjectionMapperClientDiagnostics.ActivitySource.StartActivity(
-            "projection-mapper map", ActivityKind.Client);
-        activity?.SetTag("projection_mapper.overlay_id", overlayId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(overlayId);
+        ArgumentNullException.ThrowIfNull(request);
 
-        if (!_options.Endpoints.TryGetValue(ProjectionMapperEndpointKeys.G2IMultiPoints, out var endpoint))
-        {
-            throw new ProjectionMapperClientException(
-                $"ProjectionMapper endpoint '{ProjectionMapperEndpointKeys.G2IMultiPoints}' is not configured.");
-        }
-
-        var requestUri = $"{endpoint}?overlayId={Uri.EscapeDataString(overlayId)}&useCache={(_options.UseCache ? "true" : "false")}";
-
-        var started = Stopwatch.GetTimestamp();
-        try
-        {
-            HttpResponseMessage response;
-            try
-            {
-                response = await _httpClient.PostAsJsonAsync(requestUri, request, cancellationToken);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                ProjectionMapperClientDiagnostics.Failures.Add(1);
-                activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-                _logger.LogError(ex, "Projection mapper call failed for overlay {OverlayId}.", overlayId);
-                throw new ProjectionMapperClientException("Projection mapper request failed.", ex);
-            }
-
-            using (response)
-            {
-                if (!response.IsSuccessStatusCode)
-                {
-                    ProjectionMapperClientDiagnostics.Failures.Add(1);
-                    activity?.SetStatus(ActivityStatusCode.Error, $"HTTP {(int)response.StatusCode}");
-                    _logger.LogWarning(
-                        "Projection mapper returned {StatusCode} for overlay {OverlayId}.",
-                        (int)response.StatusCode,
-                        overlayId);
-                    throw new ProjectionMapperClientException(
-                        $"Projection mapper returned HTTP {(int)response.StatusCode}.");
-                }
-
-                var payload = await response.Content.ReadFromJsonAsync<ProjectionMapperResponseDto>(cancellationToken);
-                if (payload is null)
-                {
-                    ProjectionMapperClientDiagnostics.Failures.Add(1);
-                    activity?.SetStatus(ActivityStatusCode.Error, "empty response");
-                    _logger.LogWarning("Projection mapper returned an empty response for overlay {OverlayId}.", overlayId);
-                    throw new ProjectionMapperClientException("Projection mapper returned an empty response.");
-                }
-
-                ProjectionMapperClientDiagnostics.Calls.Add(1);
-                return payload.Coordinates;
-            }
-        }
-        finally
-        {
-            ProjectionMapperClientDiagnostics.DurationMs.Record(
-                Stopwatch.GetElapsedTime(started).TotalMilliseconds,
-                new KeyValuePair<string, object?>("overlay_id", overlayId));
-        }
+        return ExecuteAsync(
+            overlayId,
+            ProjectionMapperEndpointKeys.G2IMultiPoints,
+            DependencyOperation.GroundToImage,
+            PipelineItem.GroundPoint,
+            request.GroundPoints.Count,
+            request,
+            cancellationToken);
     }
 
-    public async Task<IReadOnlyList<IReadOnlyList<double>>> ProcessBatchAsync(
+    public Task<IReadOnlyList<IReadOnlyList<double>>> ProcessBatchAsync(
         string overlayId,
         IReadOnlyList<IReadOnlyList<double>> coordinates,
         CancellationToken cancellationToken = default)
     {
-        using var activity = ProjectionMapperClientDiagnostics.ActivitySource.StartActivity(
-            "projection-mapper i2g-by-id", ActivityKind.Client);
-        activity?.SetTag("projection_mapper.overlay_id", overlayId);
-        activity?.SetTag("projection_mapper.coordinate_count", coordinates.Count);
+        ArgumentException.ThrowIfNullOrWhiteSpace(overlayId);
+        ArgumentNullException.ThrowIfNull(coordinates);
 
-        if (!_options.Endpoints.TryGetValue(ProjectionMapperEndpointKeys.I2GById, out var endpoint))
+        return ExecuteAsync(
+            overlayId,
+            ProjectionMapperEndpointKeys.I2GById,
+            DependencyOperation.ImageToGround,
+            PipelineItem.Coordinate,
+            coordinates.Count,
+            new I2GByIdRequestDto { Coordinates = coordinates },
+            cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<IReadOnlyList<double>>> ExecuteAsync<TRequest>(
+        string overlayId,
+        string endpointKey,
+        DependencyOperation operation,
+        PipelineItem batchItem,
+        int batchSize,
+        TRequest request,
+        CancellationToken cancellationToken)
+    {
+        var spanName = operation == DependencyOperation.GroundToImage
+            ? "projection_mapper ground_to_image"
+            : "projection_mapper image_to_ground";
+        using var activity = TelemetrySources.ProjectionMapper.StartActivity(spanName, ActivityKind.Internal);
+        activity.AddPipelineContext(imageId: overlayId);
+        if (activity?.IsAllDataRequested == true)
         {
-            throw new ProjectionMapperClientException(
-                $"ProjectionMapper endpoint '{ProjectionMapperEndpointKeys.I2GById}' is not configured.");
+            activity.SetTag(TelemetryAttributeNames.DependencyName, "projection_mapper");
+            activity.SetTag(
+                TelemetryAttributeNames.DependencyOperation,
+                operation == DependencyOperation.GroundToImage ? "ground_to_image" : "image_to_ground");
+            activity.SetTag("projection_mapper.use_cache", _options.UseCache);
+            activity.SetTag("projection_mapper.batch.size", batchSize);
         }
 
-        var requestUri = $"{endpoint}?overlayId={Uri.EscapeDataString(overlayId)}&useCache={(_options.UseCache ? "true" : "false")}";
+        DependencyTelemetry.RecordBatchSize(
+            DependencyName.ProjectionMapper,
+            operation,
+            batchItem,
+            batchSize);
 
-        var request = new I2GByIdRequestDto { Coordinates = coordinates };
+        var started = TelemetryTiming.StartTimestamp();
+        var outcome = TelemetryOutcome.Success;
+        var error = TelemetryErrorCategory.None;
 
-        var started = Stopwatch.GetTimestamp();
         try
         {
-            HttpResponseMessage response;
-            try
+            if (!_options.Endpoints.TryGetValue(endpointKey, out var endpoint) ||
+                string.IsNullOrWhiteSpace(endpoint))
             {
-                response = await _httpClient.PostAsJsonAsync(requestUri, request, cancellationToken);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                ProjectionMapperClientDiagnostics.Failures.Add(1);
-                activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-                _logger.LogError(ex, "Projection mapper i2g-by-id request failed for overlay {OverlayId}.", overlayId);
-                throw new ProjectionMapperClientException("Projection mapper i2g-by-id request failed.", ex);
+                error = TelemetryErrorCategory.Validation;
+                throw new ProjectionMapperClientException(
+                    $"ProjectionMapper endpoint '{endpointKey}' is not configured.");
             }
 
-            using (response)
+            var requestUri =
+                $"{endpoint}?overlayId={Uri.EscapeDataString(overlayId)}&useCache={(_options.UseCache ? "true" : "false")}";
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Post, requestUri)
             {
-                if (!response.IsSuccessStatusCode)
-                {
-                    ProjectionMapperClientDiagnostics.Failures.Add(1);
-                    activity?.SetStatus(ActivityStatusCode.Error, $"HTTP {(int)response.StatusCode}");
-                    throw new ProjectionMapperClientException(
-                        $"Projection mapper i2g-by-id returned HTTP {(int)response.StatusCode}.");
-                }
-
-                var payload = await response.Content.ReadFromJsonAsync<ProjectionMapperResponseDto>(cancellationToken);
-                if (payload is null)
-                {
-                    ProjectionMapperClientDiagnostics.Failures.Add(1);
-                    activity?.SetStatus(ActivityStatusCode.Error, "empty response");
-                    throw new ProjectionMapperClientException("Projection mapper i2g-by-id returned an empty response.");
-                }
-
-                ProjectionMapperClientDiagnostics.Calls.Add(1);
-                return payload.Coordinates;
+                Content = JsonContent.Create(request)
+            };
+            RecordKnownContentLength(operation, PipelineDirection.Egress, requestMessage.Content);
+            using var response = await _httpClient.SendAsync(requestMessage, cancellationToken);
+            RecordKnownContentLength(operation, PipelineDirection.Ingress, response.Content);
+            if (!response.IsSuccessStatusCode)
+            {
+                error = ClassifyStatusCode(response.StatusCode);
+                throw new ProjectionMapperClientException(
+                    $"Projection mapper returned HTTP {(int)response.StatusCode} for endpoint '{endpointKey}'.");
             }
+
+            var payload = await response.Content.ReadFromJsonAsync<ProjectionMapperResponseDto>(cancellationToken);
+            if (payload is null)
+            {
+                error = TelemetryErrorCategory.Serialization;
+                throw new ProjectionMapperClientException("Projection mapper returned an empty response.");
+            }
+
+            activity.SetTelemetrySuccess();
+            return payload.Coordinates;
+        }
+        catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
+        {
+            outcome = TelemetryOutcome.Cancelled;
+            error = TelemetryErrorCategory.Cancelled;
+            activity.SetTelemetryError(error, ex, recordException: false);
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            outcome = TelemetryOutcome.Failure;
+            error = TelemetryErrorCategory.Timeout;
+            var wrapped = new ProjectionMapperClientException("Projection mapper request timed out.", ex);
+            activity.SetTelemetryError(error, wrapped);
+            throw wrapped;
+        }
+        catch (HttpRequestException ex)
+        {
+            outcome = TelemetryOutcome.Failure;
+            error = TelemetryErrorCategory.Unavailable;
+            var wrapped = new ProjectionMapperClientException("Projection mapper request failed.", ex);
+            activity.SetTelemetryError(error, wrapped);
+            throw wrapped;
+        }
+        catch (JsonException ex)
+        {
+            outcome = TelemetryOutcome.Failure;
+            error = TelemetryErrorCategory.Serialization;
+            var wrapped = new ProjectionMapperClientException(
+                "Projection mapper response could not be deserialized.",
+                ex);
+            activity.SetTelemetryError(error, wrapped);
+            throw wrapped;
+        }
+        catch (NotSupportedException ex)
+        {
+            outcome = TelemetryOutcome.Failure;
+            error = TelemetryErrorCategory.Serialization;
+            var wrapped = new ProjectionMapperClientException(
+                "Projection mapper payload could not be serialized or deserialized.",
+                ex);
+            activity.SetTelemetryError(error, wrapped);
+            throw wrapped;
+        }
+        catch (ProjectionMapperClientException ex)
+        {
+            outcome = TelemetryOutcome.Failure;
+            if (error == TelemetryErrorCategory.None)
+            {
+                error = TelemetryErrorCategory.Dependency;
+            }
+
+            activity.SetTelemetryError(error, ex);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            outcome = TelemetryOutcome.Failure;
+            error = TelemetryErrorCategory.Unknown;
+            var wrapped = new ProjectionMapperClientException("Projection mapper operation failed.", ex);
+            activity.SetTelemetryError(error, wrapped);
+            throw wrapped;
         }
         finally
         {
-            ProjectionMapperClientDiagnostics.DurationMs.Record(
-                Stopwatch.GetElapsedTime(started).TotalMilliseconds,
-                new KeyValuePair<string, object?>("overlay_id", overlayId));
+            DependencyTelemetry.RecordOperation(
+                DependencyName.ProjectionMapper,
+                operation,
+                TelemetryTiming.ElapsedSeconds(started),
+                outcome,
+                error);
+        }
+    }
+
+    private static TelemetryErrorCategory ClassifyStatusCode(HttpStatusCode statusCode)
+    {
+        if (statusCode == HttpStatusCode.RequestTimeout)
+        {
+            return TelemetryErrorCategory.Timeout;
+        }
+
+        return statusCode == HttpStatusCode.TooManyRequests || (int)statusCode >= 500
+            ? TelemetryErrorCategory.Unavailable
+            : TelemetryErrorCategory.Dependency;
+    }
+
+    private static void RecordKnownContentLength(
+        DependencyOperation operation,
+        PipelineDirection direction,
+        HttpContent content)
+    {
+        if (content.Headers.ContentLength is { } contentLength && contentLength >= 0)
+        {
+            DependencyTelemetry.RecordPayloadSize(
+                DependencyName.ProjectionMapper,
+                operation,
+                direction,
+                contentLength);
         }
     }
 }

@@ -1,4 +1,5 @@
 using ImagingPipeline.RabbitMqClient;
+using OpenTelemetry;
 
 namespace ImagingPipeline.TbPublisher.Tests.Fakes;
 
@@ -18,6 +19,8 @@ public sealed class FakeRabbitMqPublisher : IRabbitMqPublisher
     }
 
     public List<RabbitMqMessageEnvelope> PublishedToOutput { get; } = [];
+
+    public List<IReadOnlyDictionary<string, string>> BaggageSnapshots { get; } = [];
 
     public CancellationToken LastCancellationToken { get; private set; }
 
@@ -41,6 +44,10 @@ public sealed class FakeRabbitMqPublisher : IRabbitMqPublisher
     public Task PublishToOutputAsync(RabbitMqMessageEnvelope message, CancellationToken cancellationToken = default)
     {
         LastCancellationToken = cancellationToken;
+        BaggageSnapshots.Add(Baggage.Current.GetBaggage().ToDictionary(
+            static item => item.Key,
+            static item => item.Value,
+            StringComparer.Ordinal));
 
         if (_failAfterCount is not null && PublishedToOutput.Count >= _failAfterCount)
         {

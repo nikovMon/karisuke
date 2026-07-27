@@ -272,6 +272,38 @@ public sealed class RuleServiceTests
     }
 
     [Fact]
+    public async Task BulkUpdateLogsOneWarningWithAtMostTenFailedIds()
+    {
+        var repository = new InMemoryRuleRepository();
+        repository.Add(ValidRule("rule-1", "one"));
+        var logger = new RecordingLogger<RuleService>();
+        var service = new RuleService(
+            repository,
+            Options.Create(new RulesElasticsearchOptions { IndexName = "rules" }),
+            logger);
+        var missingIds = Enumerable.Range(1, 12).Select(index => $"missing-{index}").ToArray();
+        var ids = new[] { "rule-1" }.Concat(missingIds).ToArray();
+        var request = new UpdateRuleRequest { IsActive = false };
+        request.ProvidedFields.Add("isActive");
+
+        var result = await service.UpdateBulkAsync(ids, request);
+
+        Assert.Equal(RuleOperationStatus.PartialSuccess, result.Status);
+        var warning = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Warning);
+        Assert.Equal(5025, warning.EventId.Id);
+        Assert.Equal("bulk_update", warning.Properties["Operation"]);
+        Assert.Equal(13, warning.Properties["RequestedCount"]);
+        Assert.Equal(1, warning.Properties["SuccessCount"]);
+        Assert.Equal(12, warning.Properties["FailureCount"]);
+        Assert.Null(warning.Properties["SensorName"]);
+        Assert.Equal(2, warning.Properties["OmittedFailureCount"]);
+        Assert.Equal(
+            missingIds.Take(10),
+            warning.Properties["FailedIdSample"]?.ToString()?.Split(", ", StringSplitOptions.None));
+        Assert.DoesNotContain(logger.Entries, entry => entry.EventId.Id == 5011);
+    }
+
+    [Fact]
     public async Task BulkUpdateAllowsRuleNameChangeForSingleRule()
     {
         var repository = new InMemoryRuleRepository();
@@ -335,6 +367,36 @@ public sealed class RuleServiceTests
         Assert.Equal(RuleOperationStatus.Success, result.Status);
         var updated = await repository.GetByIdAsync("rule-1");
         Assert.Equal([Accurate, Sensor], updated?.Sensors["camera"]);
+    }
+
+    [Fact]
+    public async Task SensorBulkFailureLogsOneBoundedWarningWithSensorMetadata()
+    {
+        var logger = new RecordingLogger<RuleService>();
+        var service = new RuleService(
+            new InMemoryRuleRepository(),
+            Options.Create(new RulesElasticsearchOptions { IndexName = "rules" }),
+            logger);
+        var missingIds = Enumerable.Range(1, 12).Select(index => $"missing-{index}").ToArray();
+
+        var result = await service.AddSensorsAsync(missingIds, new RuleSensorUpdateRequest
+        {
+            SensorName = "camera",
+            Values = [Accurate]
+        });
+
+        Assert.Equal(12, result.Value?.FailedIds.Count);
+        var warning = Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Warning);
+        Assert.Equal(5025, warning.EventId.Id);
+        Assert.Equal("add_sensors", warning.Properties["Operation"]);
+        Assert.Equal(12, warning.Properties["RequestedCount"]);
+        Assert.Equal(0, warning.Properties["SuccessCount"]);
+        Assert.Equal(12, warning.Properties["FailureCount"]);
+        Assert.Equal("camera", warning.Properties["SensorName"]);
+        Assert.Equal(2, warning.Properties["OmittedFailureCount"]);
+        Assert.Equal(
+            missingIds.Take(10),
+            warning.Properties["FailedIdSample"]?.ToString()?.Split(", ", StringSplitOptions.None));
     }
 
     [Fact]
@@ -441,6 +503,27 @@ public sealed class RuleServiceTests
         Assert.Equal("rule-1", entry.Properties["RuleId"]);
         Assert.Equal(1, entry.Properties["ErrorCount"]);
         Assert.Contains("At least one field", entry.Properties["ValidationErrors"]?.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SuccessfulCreateWritesStructuredDebugSuccessWithoutInformationLog()
+    {
+        var logger = new RecordingLogger<RuleService>();
+        var service = new RuleService(
+            new InMemoryRuleRepository(),
+            Options.Create(new RulesElasticsearchOptions { IndexName = "rules" }),
+            logger);
+
+        var result = await service.CreateAsync(ValidCreateRequest("observed-rule"));
+
+        Assert.Equal(RuleOperationStatus.Success, result.Status);
+        var entry = Assert.Single(
+            logger.Entries,
+            item => item.EventId.Id == 5020 && item.Level == LogLevel.Debug);
+        Assert.Equal("create", entry.Properties["Operation"]);
+        Assert.Equal(result.Value?.Id, entry.Properties["RuleId"]);
+        Assert.Equal("observed-rule", entry.Properties["RuleName"]);
+        Assert.DoesNotContain(logger.Entries, item => item.Level == LogLevel.Information);
     }
 
     private static RuleService CreateService(InMemoryRuleRepository repository) =>

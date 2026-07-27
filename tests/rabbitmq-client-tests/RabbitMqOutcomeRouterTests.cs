@@ -22,7 +22,9 @@ public sealed class RabbitMqOutcomeRouterTests
             NullLogger<RabbitMqOutcomeRouter>.Instance);
         var delivery = new RabbitMqDelivery(
             42,
-            RabbitMqMessageEnvelope.FromUtf8("input", "message-1"));
+            RabbitMqMessageEnvelope.FromUtf8("input", "message-1"),
+            Redelivered: false,
+            PublishedToDeliverySeconds: null);
 
         var exception = await Assert.ThrowsAsync<RabbitMqMessageCompletionException>(
             () => router.CompleteAsync(

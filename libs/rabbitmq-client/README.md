@@ -275,12 +275,52 @@ thrown by handlers are treated as retryable failures.
 - `ConsumerConcurrency` controls how many consumer channels process messages in
   parallel inside one process. Prefer modest values when the service also scales
   horizontally across pods.
-- The library emits metrics through the `ImagingPipeline.RabbitMqClient` meter and traces
-  through the `ImagingPipeline.RabbitMqClient` activity source. Configure OpenTelemetry in
-  the hosting app to export them.
-- Metrics include publish counts/failures/duration, consumed counts, handler
-  failures, processing duration, ack/nack counts, retry/DLQ routing,
-  publisher channel count, and connection failures/recoveries.
+- RabbitMQ.Client's native `RabbitMQ.Client.Publisher` and
+  `RabbitMQ.Client.Subscriber` activity sources own transport spans. Their operation
+  names are stable and do not contain routing keys. The library adds only internal
+  handler/batch spans through `ImagingPipeline.RabbitMq`, avoiding duplicate
+  producer or consumer spans.
+- The native RabbitMQ context injector/extractor uses the common W3C propagator.
+  `traceparent`, `tracestate`, and bounded allowlisted OpenTelemetry `baggage`
+  therefore cross every publish/consume boundary, including retry and output
+  publishing. Handler logs run
+  inside the processing span and include trace correlation plus message metadata via
+  structured scopes.
+- `x-pipeline-start-unix-ms` is created only when missing and is preserved across
+  services for end-to-end latency. `x-pipeline-published-unix-ms` is replaced
+  immediately before every publish made by this library. It normally measures one
+  RabbitMQ broker hop. If an external processor forwards that timestamp unchanged,
+  configure `RabbitMq:ForwardedInputStage` on its downstream consumer. The first
+  delivery is then recorded as `imaging_pipeline.pipeline.external_stage.duration`
+  for that bounded stage and is omitted from the RabbitMQ-only delivery histogram.
+  Retry publishes refresh the timestamp and continue to report normal broker delay.
+  Neither header is used as a metric dimension. A timestamp up to five seconds ahead
+  is accepted and clamped to zero to tolerate small cross-node clock skew. Malformed,
+  farther-future, or older-than-24-hour values are rejected and counted rather than
+  allowed to corrupt latency histograms.
+- Retry and output messages pass through the same publisher and therefore receive a
+  fresh per-hop timestamp. Broker-side dead-letter routing is not an application
+  publish, so RabbitMQ preserves the timestamp from the publish that originally
+  delivered the rejected message.
+- Broker redeliveries do not produce delivery-delay observations because their
+  unchanged timestamp also includes prior handler/requeue time. Retry headers are
+  read case-insensitively; conflicting variants are rejected rather than allowed to
+  grant additional attempts. Successful output publishes reset the retry count to
+  one canonical zero-valued header for the next service.
+- The `ImagingPipeline.RabbitMq` meter records bounded send/consume/process rates and
+  durations, body sizes, broker delivery delay, in-flight messages, ack/nack outcomes,
+  retries, publisher-channel lease wait, open connections/channels, and connection
+  lifecycle events. Known paths use their configured exchange, or the queue/routing
+  key when publishing through the default exchange; arbitrary `PublishAsync` paths
+  collapse to `other`. Message IDs, correlation IDs, payload content, and arbitrary
+  routing keys never become metric labels.
+
+For the current black-box Tile Builder boundary, TB Consumer sets
+`RabbitMq:ForwardedInputStage` to `TileBuilder`. Its external-stage duration measures
+TB Publisher handoff through both surrounding queues and Tile Builder processing up
+to the first TB Consumer delivery. It is not a pure Tile Builder CPU-time metric and
+is emitted only for completed deliveries, so use queue depth, DLQ, and error metrics
+alongside it.
 
 ## Success, failure, and delivery behavior
 

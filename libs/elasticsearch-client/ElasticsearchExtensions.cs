@@ -26,8 +26,7 @@ public static class ElasticsearchExtensions
                     sourceSerializer: (_, _) => new SystemTextJsonSourceSerializer())
                 .DefaultIndex(options.Index)
                 .RequestTimeout(TimeSpan.FromSeconds(options.TimeoutSeconds))
-                .EnableApiVersioningHeader()
-                .DisableDirectStreaming();
+                .EnableApiVersioningHeader();
 
             if (!string.IsNullOrEmpty(options.Username) && !string.IsNullOrEmpty(options.Password))
             {

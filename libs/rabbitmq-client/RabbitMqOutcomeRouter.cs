@@ -1,8 +1,13 @@
+using ImagingPipeline.Observability;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
 
 namespace ImagingPipeline.RabbitMqClient;
+
+internal readonly record struct RabbitMqCompletionResult(
+    TelemetryOutcome Outcome,
+    TelemetryErrorCategory Error);
 
 internal sealed class RabbitMqMessageCompletionException : Exception
 {
@@ -28,7 +33,7 @@ internal sealed class RabbitMqOutcomeRouter
         _logger = logger;
     }
 
-    public async Task CompleteAsync(
+    public async Task<RabbitMqCompletionResult> CompleteAsync(
         IChannel channel,
         RabbitMqDelivery delivery,
         RabbitMqMessageProcessingResult result,
@@ -45,45 +50,49 @@ internal sealed class RabbitMqOutcomeRouter
                 else if (result.OutputBody is not null)
                 {
                     var output = delivery.Message with { Body = result.OutputBody };
-                    await _publisher.PublishToOutputAsync(ResetRetryCountHeader(output), cancellationToken);
+                    await _publisher.PublishToOutputAsync(output, cancellationToken);
                 }
 
-                await channel.BasicAckAsync(delivery.DeliveryTag, multiple: false, cancellationToken);
-                RabbitMqClientDiagnostics.AckedMessages.Add(1,
-                    RabbitMqClientDiagnostics.Tag("queue", _options.InputQueue),
-                    RabbitMqClientDiagnostics.Tag("outcome", "success"));
-                _logger.LogDebug("Processed RabbitMQ message {MessageId}", delivery.Message.MessageId);
-                return;
+                await AckAsync(channel, delivery.DeliveryTag, TelemetryOutcome.Success, cancellationToken);
+                return new RabbitMqCompletionResult(TelemetryOutcome.Success, TelemetryErrorCategory.None);
             }
 
             if (result.FailureAction == RabbitMqMessageFailureAction.Retry)
             {
-                await RetryOrDeadLetterAsync(channel, delivery, result, cancellationToken);
-                return;
+                return await RetryOrDeadLetterAsync(channel, delivery, cancellationToken);
             }
 
-            await DeadLetterAsync(channel, delivery, result, "non-retryable failure", cancellationToken);
+            return await DeadLetterAsync(
+                channel,
+                delivery,
+                "non-retryable failure",
+                TelemetryErrorCategory.Handler,
+                cancellationToken);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException)
         {
-            _logger.LogError(
-                ex,
-                "Could not safely complete RabbitMQ message {MessageId}; the consumer channel will close and the broker will requeue any unacknowledged delivery",
-                delivery.Message.MessageId);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            RabbitMqLog.CompletionFailed(_logger, ex, delivery.Message.MessageId);
             throw new RabbitMqMessageCompletionException(delivery.Message.MessageId, ex);
         }
     }
 
-    private async Task RetryOrDeadLetterAsync(
+    private async Task<RabbitMqCompletionResult> RetryOrDeadLetterAsync(
         IChannel channel,
         RabbitMqDelivery delivery,
-        RabbitMqMessageProcessingResult result,
         CancellationToken cancellationToken)
     {
         if (_options.MaxRetryAttempts == 0)
         {
-            await DeadLetterAsync(channel, delivery, result, "retry disabled", cancellationToken);
-            return;
+            return await DeadLetterAsync(
+                channel,
+                delivery,
+                "retry disabled",
+                TelemetryErrorCategory.Handler,
+                cancellationToken);
         }
 
         var retry = RabbitMqRetryMessageBuilder.Build(
@@ -93,16 +102,27 @@ internal sealed class RabbitMqOutcomeRouter
 
         if (retry.Status == RabbitMqRetryBuildStatus.InvalidMessage)
         {
-            await DeadLetterAsync(channel, delivery, result, retry.Error ?? "retry count header could not be updated", cancellationToken);
-            return;
+            return await DeadLetterAsync(
+                channel,
+                delivery,
+                retry.Error ?? "retry count header could not be updated",
+                TelemetryErrorCategory.Validation,
+                cancellationToken);
         }
 
         if (retry.Status == RabbitMqRetryBuildStatus.AttemptsExhausted)
         {
-            RabbitMqClientDiagnostics.RetryExhaustedMessages.Add(1,
-                RabbitMqClientDiagnostics.Tag("queue", _options.InputQueue));
-            await DeadLetterAsync(channel, delivery, result, "retry attempts exhausted", cancellationToken);
-            return;
+            MessagingTelemetry.RecordRetry(
+                _options.InputQueue,
+                retry.CurrentRetryCount,
+                TelemetryOutcome.Exhausted,
+                TelemetryErrorCategory.Handler);
+            return await DeadLetterAsync(
+                channel,
+                delivery,
+                "retry attempts exhausted",
+                TelemetryErrorCategory.Handler,
+                cancellationToken);
         }
 
         await _publisher.PublishAsync(
@@ -110,43 +130,113 @@ internal sealed class RabbitMqOutcomeRouter
             _options.EffectiveRetryRoutingKey,
             retry.Message!,
             cancellationToken);
-        await channel.BasicAckAsync(delivery.DeliveryTag, multiple: false, cancellationToken);
-        RabbitMqClientDiagnostics.RetriedMessages.Add(1,
-            RabbitMqClientDiagnostics.Tag("queue", _options.InputQueue),
-            RabbitMqClientDiagnostics.Tag("retry_exchange", _options.RetryExchange));
-        RabbitMqClientDiagnostics.AckedMessages.Add(1,
-            RabbitMqClientDiagnostics.Tag("queue", _options.InputQueue),
-            RabbitMqClientDiagnostics.Tag("outcome", "retry"));
-        _logger.LogWarning(
-            "Retried RabbitMQ message {MessageId} through retry exchange {RetryExchange}; attempt {RetryAttempt}/{MaxRetryAttempts}. Error: {Error}",
+        await AckAsync(channel, delivery.DeliveryTag, TelemetryOutcome.Retry, cancellationToken);
+        MessagingTelemetry.RecordRetry(
+            _options.InputQueue,
+            retry.NextRetryCount,
+            TelemetryOutcome.Retry,
+            TelemetryErrorCategory.Handler);
+        RabbitMqLog.RetryScheduled(
+            _logger,
             delivery.Message.MessageId,
-            _options.RetryExchange,
             retry.NextRetryCount,
             _options.MaxRetryAttempts,
-            result.Error ?? "Message processing failed");
+            _options.RetryExchange);
+        return new RabbitMqCompletionResult(TelemetryOutcome.Retry, TelemetryErrorCategory.Handler);
     }
 
-    private async Task DeadLetterAsync(
+    private async Task<RabbitMqCompletionResult> DeadLetterAsync(
         IChannel channel,
         RabbitMqDelivery delivery,
-        RabbitMqMessageProcessingResult result,
         string reason,
+        TelemetryErrorCategory error,
         CancellationToken cancellationToken)
     {
-        await channel.BasicNackAsync(delivery.DeliveryTag, multiple: false, requeue: false, cancellationToken);
-        RabbitMqClientDiagnostics.DeadLetteredMessages.Add(1,
-            RabbitMqClientDiagnostics.Tag("queue", _options.InputQueue),
-            RabbitMqClientDiagnostics.Tag("dead_letter_queue", _options.EffectiveDeadLetterQueue));
-        RabbitMqClientDiagnostics.NackedMessages.Add(1,
-            RabbitMqClientDiagnostics.Tag("queue", _options.InputQueue),
-            RabbitMqClientDiagnostics.Tag("requeue", false));
-        _logger.LogWarning(
-            "Rejected RabbitMQ message {MessageId}; reason {Reason}; broker will route it through DLX {DeadLetterExchange} to {DeadLetterQueue}. Error: {Error}",
+        await NackAsync(
+            channel,
+            delivery.DeliveryTag,
+            requeue: false,
+            TelemetryOutcome.DeadLetter,
+            cancellationToken);
+        RabbitMqLog.DeadLettered(
+            _logger,
             delivery.Message.MessageId,
-            reason,
-            _options.EffectiveDeadLetterExchange,
             _options.EffectiveDeadLetterQueue,
-            result.Error ?? "Message processing failed");
+            reason);
+        return new RabbitMqCompletionResult(TelemetryOutcome.DeadLetter, error);
+    }
+
+    private async Task AckAsync(
+        IChannel channel,
+        ulong deliveryTag,
+        TelemetryOutcome outcome,
+        CancellationToken cancellationToken)
+    {
+        var started = TelemetryTiming.StartTimestamp();
+        var metricOutcome = outcome;
+        var error = TelemetryErrorCategory.None;
+        try
+        {
+            await channel.BasicAckAsync(deliveryTag, multiple: false, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            metricOutcome = TelemetryOutcome.Cancelled;
+            error = TelemetryErrorCategory.Cancelled;
+            throw;
+        }
+        catch
+        {
+            metricOutcome = TelemetryOutcome.Failure;
+            error = TelemetryErrorCategory.Unknown;
+            throw;
+        }
+        finally
+        {
+            MessagingTelemetry.RecordSettlement(
+                _options.InputQueue,
+                MessagingOperation.Ack,
+                metricOutcome,
+                TelemetryTiming.ElapsedSeconds(started),
+                error);
+        }
+    }
+
+    private async Task NackAsync(
+        IChannel channel,
+        ulong deliveryTag,
+        bool requeue,
+        TelemetryOutcome outcome,
+        CancellationToken cancellationToken)
+    {
+        var started = TelemetryTiming.StartTimestamp();
+        var metricOutcome = outcome;
+        var error = TelemetryErrorCategory.None;
+        try
+        {
+            await channel.BasicNackAsync(deliveryTag, multiple: false, requeue, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            metricOutcome = TelemetryOutcome.Cancelled;
+            error = TelemetryErrorCategory.Cancelled;
+            throw;
+        }
+        catch
+        {
+            metricOutcome = TelemetryOutcome.Failure;
+            error = TelemetryErrorCategory.Unknown;
+            throw;
+        }
+        finally
+        {
+            MessagingTelemetry.RecordSettlement(
+                _options.InputQueue,
+                MessagingOperation.Nack,
+                metricOutcome,
+                TelemetryTiming.ElapsedSeconds(started),
+                error);
+        }
     }
 
     private async Task PublishOutputMessagesAsync(
@@ -162,7 +252,7 @@ internal sealed class RabbitMqOutcomeRouter
         {
             foreach (var output in outputMessages)
             {
-                await _publisher.PublishToOutputAsync(ResetRetryCountHeader(output), cancellationToken);
+                await _publisher.PublishToOutputAsync(output, cancellationToken);
             }
 
             return;
@@ -177,19 +267,7 @@ internal sealed class RabbitMqOutcomeRouter
             },
             async (output, token) =>
             {
-                await _publisher.PublishToOutputAsync(ResetRetryCountHeader(output), token);
+                await _publisher.PublishToOutputAsync(output, token);
             });
-    }
-
-    private RabbitMqMessageEnvelope ResetRetryCountHeader(RabbitMqMessageEnvelope message)
-    {
-        if (string.IsNullOrWhiteSpace(_options.RetryCountHeader))
-        {
-            return message;
-        }
-
-        var headers = RabbitMqHeaders.Clone(message.Headers);
-        headers[_options.RetryCountHeader] = 0;
-        return message with { Headers = headers };
     }
 }

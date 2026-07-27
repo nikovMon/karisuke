@@ -6,6 +6,7 @@ using ImagingPipeline.Gateway.Configuration;
 using ImagingPipeline.Gateway.Health;
 using ImagingPipeline.Gateway.Processing.Messages;
 using ImagingPipeline.Gateway.Processing.Rules;
+using ImagingPipeline.Observability;
 using ImagingPipeline.RabbitMqClient;
 
 public static class Program
@@ -15,6 +16,7 @@ public static class Program
         RegistrationQualityContract.EnsureValid();
 
         var builder = Host.CreateApplicationBuilder(args);
+        builder.AddImagingPipelineObservability(ObservabilityServiceNames.Gateway);
 
         var shutdownTimeoutSeconds = 30;
         var configuredShutdownTimeout = builder.Configuration["Gateway:ShutdownTimeoutSeconds"];

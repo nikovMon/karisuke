@@ -245,7 +245,22 @@ Returns `false` when the document is already missing.
 
 Invalid request objects throw normal .NET exceptions such as `ArgumentException` and `ArgumentOutOfRangeException`.
 
-Elasticsearch failures throw `ElasticsearchClientException` with the operation name and response/debug details.
+Elasticsearch failures throw `ElasticsearchClientException` with the operation name, response status when available, and a server reason capped at 512 characters. Raw response bodies and NEST debug dumps are never copied into exceptions; an underlying transport exception is retained as `InnerException` when available.
+
+## Observability
+
+Get, search, index, and delete calls emit `ImagingPipeline.Elasticsearch` client spans plus centralized dependency metrics. The spans follow the [OpenTelemetry Elasticsearch semantic conventions](https://opentelemetry.io/docs/specs/semconv/db/elasticsearch/):
+
+- span kind is `CLIENT`, with display name `{operation} {index}` when the index is known;
+- `db.system.name` is `elasticsearch`, `db.operation.name` identifies the operation, and `db.collection.name` contains the index;
+- `http.request.method`, a scrubbed absolute `url.full`, and `db.response.status_code` are populated from the Elasticsearch response metadata;
+- 4xx/5xx responses use their status code as `error.type` on both spans and operation/duration metrics.
+
+The safe `url.full` omits the query string and redacts URL credentials. Query text, request/response bodies, authentication data, and arbitrary headers are never added to telemetry. Production registration leaves direct streaming enabled, so observability does not require NEST to buffer payload bodies.
+
+Document IDs are attached only to spans; metric dimensions remain bounded to dependency, operation, outcome, error type, and item type. Payload-size and batch-size histograms intentionally omit outcome and error dimensions because those measurements can be recorded before the operation completes. Elasticsearch byte sizes are recorded only when the client transport already exposes buffered byte arrays; direct streaming remains enabled, so bodies are never buffered solely for metrics.
+
+Cancellation requested by the caller is reported as `cancelled`; transport timeouts and dependency failures are recorded separately. The host application must register `ImagingPipeline.Observability` for OTLP export.
 
 ## Testing
 

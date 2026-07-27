@@ -57,7 +57,11 @@ public sealed class ProjectionMapperOptionsTests
     private static ProjectionMapperOptions CreateValidOptions() => new()
     {
         Host = "http://projection-mapper:8080",
-        Endpoints = new Dictionary<string, string> { [ProjectionMapperEndpointKeys.G2IMultiPoints] = "/flare/g2i-by-id" },
+        Endpoints = new Dictionary<string, string>
+        {
+            [ProjectionMapperEndpointKeys.G2IMultiPoints] = "/flare/g2i-by-id",
+            [ProjectionMapperEndpointKeys.I2GById] = "/flare/i2g-by-id"
+        },
         SendingSystem = "flare",
         TimeoutSeconds = 10
     };

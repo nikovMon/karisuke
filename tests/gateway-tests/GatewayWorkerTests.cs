@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Gateway.Messages;
 using ImagingPipeline.Common.Dtos.Rules.Models;
@@ -7,6 +8,7 @@ using ImagingPipeline.Gateway.Configuration;
 using ImagingPipeline.Gateway.Health;
 using ImagingPipeline.Gateway.Processing.Messages;
 using ImagingPipeline.Gateway.Processing.Rules;
+using ImagingPipeline.Observability;
 using ImagingPipeline.RabbitMqClient;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -27,7 +29,17 @@ public sealed class GatewayWorkerTests
         ];
         await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
 
-        var result = await harness.GatewayWorker.HandleAsync(InputMessage());
+        var inputEnvelope = InputMessage() with
+        {
+            Headers = new Dictionary<string, object?>
+            {
+                ["x-pipeline-start-unix-ms"] =
+                    DateTimeOffset.UtcNow.AddSeconds(-1).ToUnixTimeMilliseconds(),
+                ["business-header"] = "preserved"
+            }
+        };
+
+        var result = await harness.GatewayWorker.HandleAsync(inputEnvelope);
 
         Assert.True(result.IsSuccess);
         Assert.Null(result.OutputBody);
@@ -79,6 +91,9 @@ public sealed class GatewayWorkerTests
         Assert.All(outputs, output =>
         {
             Assert.Equal("message-1", output.CorrelationId);
+            Assert.NotNull(output.Headers);
+            Assert.Equal("preserved", output.Headers["business-header"]);
+            Assert.True(output.Headers.ContainsKey("x-pipeline-start-unix-ms"));
         });
         Assert.Equal("message-1:gateway-output:rule-1:der:0", outputs[0].MessageId);
         Assert.Equal("message-1:gateway-output:rule-1:findair:1", outputs[1].MessageId);
@@ -110,6 +125,27 @@ public sealed class GatewayWorkerTests
         Assert.Equal("message-1:gateway-task:rule-1:der:0", firstTaskId);
         Assert.Equal("message-2:gateway-task:rule-1:der:0", secondTaskId);
         Assert.NotEqual(firstTaskId, secondTaskId);
+    }
+
+    [Fact]
+    public async Task HandleAsyncCreatesAggregateParseMatchAndBuildSpans()
+    {
+        await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
+        using var activities = new TelemetryActivityCollector(TelemetrySourceNames.Gateway);
+
+        var result = await harness.GatewayWorker.HandleAsync(
+            InputMessage(messageId: "telemetry-message"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(
+            ["gateway.parse", "gateway.match", "gateway.build"],
+            activities.Activities.Select(activity => activity.DisplayName).ToArray());
+        Assert.All(
+            activities.Activities,
+            activity => Assert.Equal(ActivityKind.Internal, activity.Kind));
+        Assert.All(
+            activities.Activities,
+            activity => Assert.Equal(ActivityStatusCode.Ok, activity.Status));
     }
 
     [Fact]
@@ -462,6 +498,31 @@ public sealed class GatewayWorkerTests
         Assert.Empty(cache.Current);
         Assert.False(health.RulesLoaded);
         cache.Dispose();
+    }
+
+    [Fact]
+    public async Task ActiveRuleCacheMarksInitialRefreshCancellationOnSpan()
+    {
+        using var activities = new TelemetryActivityCollector(TelemetrySourceNames.Gateway);
+        using var cache = new ActiveRuleCache(
+            new CancellingRuleRepository(),
+            new GatewayGeometryConverter(),
+            Options.Create(new GatewaySettings
+            {
+                RuleRefreshIntervalSeconds = 3600
+            }),
+            new GatewayHealthState(),
+            NullLogger<ActiveRuleCache>.Instance);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => cache.StartAsync(CancellationToken.None));
+
+        var activity = Assert.Single(activities.Activities);
+        Assert.Equal("gateway.rule_cache.refresh", activity.DisplayName);
+        Assert.Equal(ActivityStatusCode.Error, activity.Status);
+        Assert.Equal(
+            "cancelled",
+            activity.GetTagItem(TelemetryAttributeNames.ErrorCategory));
     }
 
     [Fact]
@@ -881,6 +942,14 @@ public sealed class GatewayWorkerTests
                     return RuleLoadResult.FromRules(_validRefreshRules);
             }
         }
+    }
+
+    private sealed class CancellingRuleRepository : IRuleRepository
+    {
+        public Task<RuleLoadResult> GetActiveRulesAsync(
+            CancellationToken cancellationToken) =>
+            Task.FromCanceled<RuleLoadResult>(
+                new CancellationToken(canceled: true));
     }
 
     private sealed class FailingThenBlockingConsumer : IRabbitMqConsumer

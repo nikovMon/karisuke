@@ -1,6 +1,9 @@
 using System.Text;
+using System.Diagnostics;
 using System.Text.Json;
+using ImagingPipeline.Common.Dtos.Gateway.Messages;
 using ImagingPipeline.Common.Dtos.Messaging;
+using ImagingPipeline.Observability;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
@@ -8,6 +11,7 @@ using ImagingPipeline.TbPublisher.MessageHandling;
 using ImagingPipeline.TbPublisher.Processing;
 using ImagingPipeline.TbPublisher.Tests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
+using OpenTelemetry;
 
 namespace ImagingPipeline.TbPublisher.Tests;
 
@@ -45,7 +49,17 @@ public sealed class TbPublisherMessageHandlerTests
         var publisher = new FakeRabbitMqPublisher();
         var handler = CreateHandler(projectionClient, publisher);
 
-        var result = await handler.HandleAsync(RabbitMqMessageEnvelope.FromUtf8(Encoding.UTF8.GetString(ValidBody), "msg-1"));
+        var input = RabbitMqMessageEnvelope.FromUtf8(Encoding.UTF8.GetString(ValidBody), "msg-1") with
+        {
+            CorrelationId = "correlation-1",
+            Headers = new Dictionary<string, object?>
+            {
+                ["x-pipeline-start-unix-ms"] = DateTimeOffset.UtcNow.AddSeconds(-1).ToUnixTimeMilliseconds(),
+                ["business-header"] = "preserved"
+            }
+        };
+
+        var result = await handler.HandleAsync(input);
 
         Assert.True(result.IsSuccess);
         Assert.Null(result.OutputBody);
@@ -76,6 +90,13 @@ public sealed class TbPublisherMessageHandlerTests
         Assert.Equal(outputs[0].TaskId, outputs[1].TaskId);
         Assert.StartsWith("POLYGON", outputs[0].FocusedPxWkt);
         Assert.Equal("image-1", projectionClient.LastOverlayId);
+        Assert.All(publisher.PublishedToOutput, envelope =>
+        {
+            Assert.Equal("correlation-1", envelope.CorrelationId);
+            Assert.NotNull(envelope.Headers);
+            Assert.Equal("preserved", envelope.Headers["business-header"]);
+            Assert.True(envelope.Headers.ContainsKey("x-pipeline-start-unix-ms"));
+        });
     }
 
     [Fact]
@@ -91,6 +112,29 @@ public sealed class TbPublisherMessageHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsyncCreatesAggregateValidationGeometryProjectionAndBuildSpans()
+    {
+        var handler = CreateHandler(
+            FakeProjectionMapperClient.ReturningSuccess(Coordinates),
+            new FakeRabbitMqPublisher());
+        using var activities = new TelemetryActivityCollector(TelemetrySourceNames.TbPublisher);
+        using var testRoot = new Activity("tb-publisher-test").Start();
+
+        var result = await handler.HandleAsync(
+            RabbitMqMessageEnvelope.FromUtf8(Encoding.UTF8.GetString(ValidBody), "telemetry-message"));
+
+        var testActivities = activities.Activities
+            .Where(activity => activity.TraceId == testRoot.TraceId)
+            .ToArray();
+        Assert.True(result.IsSuccess);
+        Assert.Equal(
+            ["tb_publisher.validate", "tb_publisher.geometry", "tb_publisher.projection", "tb_publisher.build"],
+            testActivities.Select(activity => activity.DisplayName).ToArray());
+        Assert.All(testActivities, activity => Assert.Equal(ActivityKind.Internal, activity.Kind));
+        Assert.All(testActivities, activity => Assert.Equal(ActivityStatusCode.Ok, activity.Status));
+    }
+
+    [Fact]
     public async Task HandleAsyncReturnsFailureWhenProjectionMapperFails()
     {
         var handler = CreateHandler(
@@ -101,6 +145,27 @@ public sealed class TbPublisherMessageHandlerTests
 
         Assert.False(result.IsSuccess);
         Assert.Contains("mapper down", result.Error);
+    }
+
+    [Fact]
+    public async Task HandleAsyncMarksBuildSerializationFailureOnSpan()
+    {
+        var handler = CreateHandler(
+            FakeProjectionMapperClient.ReturningSuccess(Coordinates),
+            new FakeRabbitMqPublisher(),
+            new ThrowingOutputMessageBuilder());
+        using var activities = new TelemetryActivityCollector(TelemetrySourceNames.TbPublisher);
+        using var testRoot = new Activity("tb-publisher-test").Start();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => handler.HandleAsync(
+            RabbitMqMessageEnvelope.FromUtf8(Encoding.UTF8.GetString(ValidBody), "msg-1")));
+
+        var activity = Assert.Single(
+            activities.Activities,
+            activity => activity.TraceId == testRoot.TraceId
+                        && activity.DisplayName == "tb_publisher.build");
+        Assert.Equal(ActivityStatusCode.Error, activity.Status);
+        Assert.Equal("serialization", activity.GetTagItem(TelemetryAttributeNames.ErrorCategory));
     }
 
     [Fact]
@@ -152,6 +217,45 @@ public sealed class TbPublisherMessageHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsyncPublishesAuthoritativeBoundedCorrelationBaggageAndRestoresAmbientState()
+    {
+        var previous = Baggage.Current;
+        try
+        {
+            Baggage.Current = Baggage.Create(new Dictionary<string, string>
+            {
+                [TelemetryAttributeNames.PipelineTaskId] = "spoofed-task",
+                [TelemetryAttributeNames.PipelineRequestId] = "upstream-request",
+                ["secret"] = "do-not-forward"
+            });
+            var publisher = new FakeRabbitMqPublisher();
+            var handler = CreateHandler(FakeProjectionMapperClient.ReturningSuccess(Coordinates), publisher);
+
+            var result = await handler.HandleAsync(
+                RabbitMqMessageEnvelope.FromUtf8(Encoding.UTF8.GetString(ValidBody), "msg-1"));
+
+            Assert.True(result.IsSuccess);
+            Assert.Equal(2, publisher.BaggageSnapshots.Count);
+            Assert.All(publisher.BaggageSnapshots, baggage =>
+            {
+                Assert.Equal("msg-1", baggage[TelemetryAttributeNames.PipelineTaskId]);
+                Assert.Equal("upstream-request", baggage[TelemetryAttributeNames.PipelineRequestId]);
+                Assert.Equal("image-1", baggage[TelemetryAttributeNames.PipelineImageId]);
+                Assert.Equal("rule-1", baggage[TelemetryAttributeNames.PipelineRuleId]);
+                Assert.Equal("tenant-1", baggage[TelemetryAttributeNames.PipelineTenantId]);
+                Assert.Equal("FindAir,Rpn", baggage[TelemetryAttributeNames.PipelineAlgorithmName]);
+                Assert.DoesNotContain("secret", baggage.Keys);
+            });
+            Assert.Equal("spoofed-task", Baggage.Current.GetBaggage(TelemetryAttributeNames.PipelineTaskId));
+            Assert.Equal("do-not-forward", Baggage.Current.GetBaggage("secret"));
+        }
+        finally
+        {
+            Baggage.Current = previous;
+        }
+    }
+
+    [Fact]
     public async Task HandleAsyncThrowsAndLeavesEarlierTilingConfigsPublishedWhenAPublishFailsPartway()
     {
         var projectionClient = FakeProjectionMapperClient.ReturningSuccess(Coordinates);
@@ -166,12 +270,21 @@ public sealed class TbPublisherMessageHandlerTests
 
     private static TbPublisherMessageHandler CreateHandler(
         IProjectionMapperClient projectionMapperClient,
-        IRabbitMqPublisher publisher) =>
+        IRabbitMqPublisher publisher,
+        ITbPublisherOutputMessageBuilder? outputMessageBuilder = null) =>
         new(
             new InputMessageValidator(),
             new TbPublisherGeometryConverter(),
             projectionMapperClient,
-            new TbPublisherOutputMessageBuilder(),
+            outputMessageBuilder ?? new TbPublisherOutputMessageBuilder(),
             publisher,
             NullLogger<TbPublisherMessageHandler>.Instance);
+
+    private sealed class ThrowingOutputMessageBuilder : ITbPublisherOutputMessageBuilder
+    {
+        public IReadOnlyList<TbPublisherOutputMessageDto> Map(
+            GatewayOutputMessageDto message,
+            string focusedPxWkt) =>
+            throw new InvalidOperationException("Output serialization preparation failed.");
+    }
 }

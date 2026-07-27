@@ -1,3 +1,4 @@
+using ImagingPipeline.Observability;
 using ImagingPipeline.RabbitMqClient;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -27,56 +28,61 @@ public sealed class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
+        _logger.ConsumerStarting();
+        try
         {
-            var shouldRestart = false;
-            var restartDelay = TimeSpan.Zero;
-            var consumerStarted = Stopwatch.GetTimestamp();
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                var shouldRestart = false;
+                var restartDelay = TimeSpan.Zero;
+                var consumerStarted = Stopwatch.GetTimestamp();
 
-            try
-            {
-                await _consumer.ConsumeAsync(_handler, stoppingToken);
-                shouldRestart = !stoppingToken.IsCancellationRequested;
-                if (shouldRestart)
-                {
-                    restartDelay = _restartBackoff.NextDelay(
-                        Stopwatch.GetElapsedTime(consumerStarted));
-                    _logger.LogWarning(
-                        "TBPublisher RabbitMQ consumer exited unexpectedly; restarting in {RestartDelay}.",
-                        restartDelay);
-                }
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                shouldRestart = !stoppingToken.IsCancellationRequested;
-                if (!shouldRestart)
-                {
-                    break;
-                }
-
-                restartDelay = _restartBackoff.NextDelay(
-                    Stopwatch.GetElapsedTime(consumerStarted));
-                _logger.LogError(
-                    ex,
-                    "TBPublisher RabbitMQ consumer loop failed; restarting in {RestartDelay}.",
-                    restartDelay);
-            }
-
-            if (shouldRestart)
-            {
                 try
                 {
-                    await Task.Delay(restartDelay, stoppingToken);
+                    await _consumer.ConsumeAsync(_handler, stoppingToken);
+                    shouldRestart = !stoppingToken.IsCancellationRequested;
+                    if (shouldRestart)
+                    {
+                        restartDelay = _restartBackoff.NextDelay(
+                            Stopwatch.GetElapsedTime(consumerStarted));
+                        MessagingTelemetry.RecordConsumerRestart(TelemetryErrorCategory.Unknown);
+                        _logger.ConsumerRestartScheduled(restartDelay.TotalSeconds);
+                    }
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
                     break;
                 }
+                catch (Exception ex)
+                {
+                    shouldRestart = !stoppingToken.IsCancellationRequested;
+                    if (!shouldRestart)
+                    {
+                        break;
+                    }
+
+                    restartDelay = _restartBackoff.NextDelay(
+                        Stopwatch.GetElapsedTime(consumerStarted));
+                    MessagingTelemetry.RecordConsumerRestart(TelemetryErrorCategory.Connection);
+                    _logger.ConsumerRestartAfterFailure(ex, restartDelay.TotalSeconds);
+                }
+
+                if (shouldRestart)
+                {
+                    try
+                    {
+                        await Task.Delay(restartDelay, stoppingToken);
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                }
             }
+        }
+        finally
+        {
+            _logger.ConsumerStopped();
         }
     }
 }

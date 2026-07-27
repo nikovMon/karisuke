@@ -5,6 +5,7 @@ using ImagingPipeline.Gateway.Contracts.Messages;
 using ImagingPipeline.Gateway.Health;
 using ImagingPipeline.Gateway.Processing.Messages;
 using ImagingPipeline.Gateway.Processing.Rules;
+using ImagingPipeline.Observability;
 using ImagingPipeline.RabbitMqClient;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -64,6 +65,8 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _logger.ConsumerStarting();
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var shouldRestart = false;
@@ -79,9 +82,8 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
                 {
                     restartDelay = _consumerRestartBackoff.NextDelay(
                         Stopwatch.GetElapsedTime(consumerStarted));
-                    _logger.LogWarning(
-                        "RabbitMQ consumer exited unexpectedly; restarting in {RestartDelay}.",
-                        restartDelay);
+                    MessagingTelemetry.RecordConsumerRestart(TelemetryErrorCategory.Unknown);
+                    _logger.ConsumerRestartScheduled(restartDelay.TotalSeconds);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -95,10 +97,8 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
                 {
                     restartDelay = _consumerRestartBackoff.NextDelay(
                         Stopwatch.GetElapsedTime(consumerStarted));
-                    _logger.LogWarning(
-                        ex,
-                        "RabbitMQ consumer failed; restarting in {RestartDelay}.",
-                        restartDelay);
+                    MessagingTelemetry.RecordConsumerRestart(TelemetryErrorCategory.Connection);
+                    _logger.ConsumerRestartAfterFailure(ex, restartDelay.TotalSeconds);
                 }
             }
             finally
@@ -111,6 +111,8 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
                 await DelayBeforeRestartAsync(restartDelay, stoppingToken);
             }
         }
+
+        _logger.ConsumerStopped();
     }
 
     private static async Task DelayBeforeRestartAsync(TimeSpan restartDelay, CancellationToken stoppingToken)
@@ -128,12 +130,120 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
         RabbitMqMessageEnvelope message,
         CancellationToken cancellationToken = default)
     {
+        var started = TelemetryTiming.StartTimestamp();
+        var outcome = TelemetryOutcome.Failure;
+        var error = TelemetryErrorCategory.Unknown;
+        var rulesEvaluated = 0;
+        var rulesMatched = 0;
+        var outputCount = 0;
+
+        PipelineTelemetry.RecordPayloadSize(PipelineStage.Gateway, PipelineDirection.Ingress, message.Body.LongLength);
+        if (PipelineTimingHeaders.TryGetElapsedSeconds(message.Headers, out var elapsedSeconds))
+        {
+            PipelineTelemetry.RecordEndToEndDuration(PipelineStage.Gateway, elapsedSeconds);
+        }
+
         try
         {
             var rules = _ruleCache.Current;
-            var input = _inputParser.Parse(message.Body);
-            var matches = _ruleMatcher.Match(input, rules);
-            var outputs = _outputBuilder.BuildOutputs(message.MessageId, input, matches);
+            rulesEvaluated = rules.Count;
+            PipelineTelemetry.RecordBatchSize(PipelineStage.Gateway, PipelineItem.Rule, rulesEvaluated);
+
+            GatewayInputMessage input;
+            using (var parseActivity = StartStageActivity("parse"))
+            {
+                try
+                {
+                    input = _inputParser.Parse(message.Body);
+                    parseActivity
+                        .AddPipelineContext(imageId: input.ImageId)
+                        .SetTelemetrySuccess();
+                }
+                catch (GatewayValidationException ex)
+                {
+                    parseActivity.SetTelemetryError(TelemetryErrorCategory.Validation, ex);
+                    throw;
+                }
+                catch (OperationCanceledException ex)
+                {
+                    parseActivity.SetTelemetryError(
+                        TelemetryErrorCategory.Cancelled,
+                        ex,
+                        recordException: false);
+                    throw;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    parseActivity.SetTelemetryError(TelemetryErrorCategory.Serialization, ex);
+                    throw;
+                }
+            }
+
+            using var pipelineScope = _logger.BeginTelemetryScope(new TelemetryLogContext(
+                ImageId: input.ImageId));
+
+            IReadOnlyList<RuleMatchResult> matches;
+            using (var matchActivity = StartStageActivity("match"))
+            {
+                try
+                {
+                    matches = _ruleMatcher.Match(input, rules);
+                    rulesMatched = matches.Count;
+                    matchActivity.AddPipelineContext(imageId: input.ImageId);
+                    if (matchActivity?.IsAllDataRequested == true)
+                    {
+                        matchActivity.SetTag("imaging_pipeline.gateway.rules.evaluated", rulesEvaluated);
+                        matchActivity.SetTag("imaging_pipeline.gateway.rules.matched", rulesMatched);
+                    }
+                    matchActivity.SetTelemetrySuccess();
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    matchActivity.SetTelemetryError(TelemetryErrorCategory.Handler, ex);
+                    throw;
+                }
+                catch (OperationCanceledException ex)
+                {
+                    matchActivity.SetTelemetryError(
+                        TelemetryErrorCategory.Cancelled,
+                        ex,
+                        recordException: false);
+                    throw;
+                }
+            }
+
+            GatewayTelemetry.RecordRuleMatching(rulesEvaluated, rulesMatched);
+            PipelineTelemetry.RecordBatchSize(PipelineStage.Gateway, PipelineItem.Match, rulesMatched);
+
+            IReadOnlyList<GatewayOutputMessage> outputs;
+            using (var buildActivity = StartStageActivity("build"))
+            {
+                try
+                {
+                    outputs = _outputBuilder.BuildOutputs(message.MessageId, input, matches);
+                    outputCount = outputs.Count;
+                    buildActivity.AddPipelineContext(imageId: input.ImageId);
+                    if (buildActivity?.IsAllDataRequested == true)
+                    {
+                        buildActivity.SetTag("imaging_pipeline.pipeline.output.count", outputCount);
+                    }
+                    buildActivity.SetTelemetrySuccess();
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    buildActivity.SetTelemetryError(TelemetryErrorCategory.Serialization, ex);
+                    throw;
+                }
+                catch (OperationCanceledException ex)
+                {
+                    buildActivity.SetTelemetryError(
+                        TelemetryErrorCategory.Cancelled,
+                        ex,
+                        recordException: false);
+                    throw;
+                }
+            }
+
             var correlationId = message.CorrelationId ?? message.MessageId;
             var outputMessages = new RabbitMqMessageEnvelope[outputs.Count];
 
@@ -147,18 +257,77 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
                         ContentType = "application/json",
                         CorrelationId = correlationId
                     };
+
+                PipelineTelemetry.RecordPayloadSize(
+                    PipelineStage.Gateway,
+                    PipelineDirection.Egress,
+                    outputMessages[outputIndex].Body.LongLength);
             }
 
+            outcome = TelemetryOutcome.Success;
+            error = TelemetryErrorCategory.None;
+            PipelineTelemetry.RecordFanOut(PipelineStage.Gateway, outputCount);
+            // Output publication happens after the handler returns. Generated-output size
+            // and fan-out are recorded here; confirmed transport outcomes come from the
+            // RabbitMQ client metrics in RabbitMqOutcomeRouter.
+            _logger.MessageProcessed(rulesEvaluated, rulesMatched, outputCount);
             return Task.FromResult(RabbitMqMessageProcessingResult.Success(outputMessages));
         }
         catch (GatewayValidationException ex)
         {
+            outcome = TelemetryOutcome.Rejected;
+            error = TelemetryErrorCategory.Validation;
+            _logger.MessageRejected(ex.ErrorCode, ex.Message);
             return Task.FromResult(RabbitMqMessageProcessingResult.NonRetryableFailure($"{ex.ErrorCode}: {ex.Message}"));
         }
         catch (GatewayProcessingException ex)
         {
+            outcome = TelemetryOutcome.Retry;
+            error = ex is GatewayDependencyException
+                ? TelemetryErrorCategory.Dependency
+                : TelemetryErrorCategory.Handler;
+            _logger.MessageScheduledForRetry(ex, error.ToString());
             return Task.FromResult(RabbitMqMessageProcessingResult.RetryableFailure(ex.Message));
         }
+        catch (OperationCanceledException)
+        {
+            outcome = TelemetryOutcome.Cancelled;
+            error = TelemetryErrorCategory.Cancelled;
+            throw;
+        }
+        catch
+        {
+            outcome = TelemetryOutcome.Retry;
+            error = TelemetryErrorCategory.Handler;
+            throw;
+        }
+        finally
+        {
+            PipelineTelemetry.RecordMessage(PipelineStage.Gateway, PipelineDirection.Ingress, outcome, error);
+            PipelineTelemetry.RecordStageDuration(
+                PipelineStage.Gateway,
+                TelemetryTiming.ElapsedSeconds(started),
+                outcome,
+                error);
+        }
+    }
+
+    private static Activity? StartStageActivity(string operation)
+    {
+        var spanName = operation switch
+        {
+            "parse" => "gateway.parse",
+            "match" => "gateway.match",
+            "build" => "gateway.build",
+            _ => "gateway.stage"
+        };
+        var activity = TelemetrySources.Gateway.StartActivity(spanName, ActivityKind.Internal);
+        if (activity?.IsAllDataRequested == true)
+        {
+            activity.SetTag(TelemetryAttributeNames.PipelineStage, "gateway");
+            activity.SetTag("imaging_pipeline.pipeline.operation", operation);
+        }
+        return activity;
     }
 
     private static string CreateOutputMessageId(

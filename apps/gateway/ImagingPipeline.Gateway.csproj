@@ -14,6 +14,7 @@
     <ProjectReference Include="..\..\libs\common-dtos\ImagingPipeline.Common.Dtos.csproj" />
     <ProjectReference Include="..\..\libs\elasticsearch-client\ElasticsearchClient.csproj" />
     <ProjectReference Include="..\..\libs\geometry-utils\GeometryUtils.csproj" />
+    <ProjectReference Include="..\..\libs\observability\ImagingPipeline.Observability.csproj" />
     <ProjectReference Include="..\..\libs\rabbitmq-client\RabbitMqClient.csproj" />
   </ItemGroup>
 </Project>

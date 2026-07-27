@@ -2,6 +2,7 @@ using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Common.Dtos.Rules.Requests;
 using ImagingPipeline.Common.Dtos.Rules.Responses;
 using ImagingPipeline.ElasticsearchClient;
+using ImagingPipeline.Rules.Api;
 using ImagingPipeline.Rules.Api.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -12,6 +13,7 @@ namespace ImagingPipeline.Rules.Api.Services;
 
 public sealed class RuleService : IRuleService
 {
+    private const int FailedIdLogSampleLimit = 10;
     private const string RuleNameKeywordField = "ruleName.keyword";
     private const string IsActiveField = "isActive";
     private const string RuleNameField = "ruleName";
@@ -97,8 +99,7 @@ public sealed class RuleService : IRuleService
     {
         var rule = request.ToRuleDto();
         rule.Id = string.Empty;
-        _logger.LogDebug(
-            "Starting rule operation {Operation}. RuleId: {RuleId}; RuleName: {RuleName}",
+        _logger.RuleOperationStartingWithName(
             "create",
             rule.Id,
             rule.RuleName);
@@ -124,8 +125,7 @@ public sealed class RuleService : IRuleService
 
         if (await ExistsByNameAsync(rule.RuleName, cancellationToken: cancellationToken))
         {
-            _logger.LogWarning(
-                "Rule operation {Operation} failed because ruleName {RuleName} already exists. RuleId: {RuleId}",
+            _logger.RuleNameConflict(
                 "create",
                 rule.RuleName,
                 rule.Id);
@@ -138,8 +138,7 @@ public sealed class RuleService : IRuleService
         NormalizeRuleCollections(rule);
 
         await SaveAsync(rule, cancellationToken);
-        _logger.LogInformation(
-            "Rule operation {Operation} succeeded. RuleId: {RuleId}; RuleName: {RuleName}",
+        _logger.RuleCreated(
             "create",
             rule.Id,
             rule.RuleName);
@@ -156,13 +155,16 @@ public sealed class RuleService : IRuleService
         string id,
         UpdateRuleRequest request,
         string operation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool logMissingRule = true)
     {
-        _logger.LogDebug(
-            "Starting rule operation {Operation}. RuleId: {RuleId}; UpdatedFields: {UpdatedFields}",
-            operation,
-            id,
-            string.Join(", ", request.ProvidedFields.Order(StringComparer.Ordinal)));
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.RuleOperationStartingWithFields(
+                operation,
+                id,
+                string.Join(", ", request.ProvidedFields.Order(StringComparer.Ordinal)));
+        }
 
         var validationErrors = RuleValidation.ValidateUpdate(request);
         if (validationErrors.Count > 0)
@@ -186,10 +188,11 @@ public sealed class RuleService : IRuleService
         var rule = await GetByIdAsync(id, cancellationToken);
         if (rule is null)
         {
-            _logger.LogWarning(
-                "Rule operation {Operation} failed because the rule was not found. RuleId: {RuleId}",
-                operation,
-                id);
+            if (logMissingRule)
+            {
+                _logger.RuleNotFound(operation, id);
+            }
+
             return RuleOperationResult<RuleDto>.NotFound($"Rule '{id}' was not found.");
         }
 
@@ -197,10 +200,9 @@ public sealed class RuleService : IRuleService
             !string.Equals(rule.RuleName, request.RuleName, StringComparison.Ordinal) &&
             await ExistsByNameAsync(request.RuleName!, id, cancellationToken))
         {
-            _logger.LogWarning(
-                "Rule operation {Operation} failed because ruleName {RuleName} already exists. RuleId: {RuleId}",
+            _logger.RuleNameConflict(
                 operation,
-                request.RuleName,
+                request.RuleName!,
                 id);
             return RuleOperationResult<RuleDto>.Conflict($"Rule with ruleName '{request.RuleName}' already exists.");
         }
@@ -218,8 +220,7 @@ public sealed class RuleService : IRuleService
         }
 
         await SaveAsync(rule, cancellationToken);
-        _logger.LogInformation(
-            "Rule operation {Operation} succeeded. RuleId: {RuleId}; UpdatedFieldCount: {UpdatedFieldCount}",
+        _logger.RuleUpdated(
             operation,
             id,
             request.ProvidedFields.Count);
@@ -231,11 +232,13 @@ public sealed class RuleService : IRuleService
         UpdateRuleRequest request,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug(
-            "Starting rule operation {Operation}. RequestedCount: {RequestedCount}; UpdatedFields: {UpdatedFields}",
-            "bulk_update",
-            ids.Count,
-            string.Join(", ", request.ProvidedFields.Order(StringComparer.Ordinal)));
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            _logger.BulkRuleOperationStarting(
+                "bulk_update",
+                ids.Count,
+                string.Join(", ", request.ProvidedFields.Order(StringComparer.Ordinal)));
+        }
 
         var errors = RuleValidation.ValidateIds(ids)
             .Concat(RuleValidation.ValidateUpdate(request))
@@ -249,17 +252,19 @@ public sealed class RuleService : IRuleService
 
         if (request.HasField("ruleName") && ids.Count > 1)
         {
-            _logger.LogWarning(
-                "Rule operation {Operation} failed because one ruleName cannot be assigned to multiple rules. RuleCount: {RuleCount}",
-                "bulk_update",
-                ids.Count);
+            _logger.BulkRuleNameConflict("bulk_update", ids.Count);
             return RuleOperationResult<BulkOperationResult>.Conflict("Cannot set the same ruleName on multiple rules.");
         }
 
         var result = new BulkOperationResult();
         foreach (var id in ids)
         {
-            var updated = await UpdateExistingRuleAsync(id, request, "bulk_update_item", cancellationToken);
+            var updated = await UpdateExistingRuleAsync(
+                id,
+                request,
+                "bulk_update_item",
+                cancellationToken,
+                logMissingRule: false);
             AddBulkResult(result, id, updated.Status, updated.Error);
         }
 
@@ -271,25 +276,16 @@ public sealed class RuleService : IRuleService
         string id,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug(
-            "Starting rule operation {Operation}. RuleId: {RuleId}",
-            "delete",
-            id);
+        _logger.RuleOperationStarting("delete", id);
 
         var deleted = await DeleteRuleAsync(id, cancellationToken);
         if (deleted)
         {
-            _logger.LogInformation(
-                "Rule operation {Operation} succeeded. RuleId: {RuleId}",
-                "delete",
-                id);
+            _logger.RuleDeleted("delete", id);
             return RuleOperationResult.Success();
         }
 
-        _logger.LogWarning(
-            "Rule operation {Operation} failed because the rule was not found. RuleId: {RuleId}",
-            "delete",
-            id);
+        _logger.RuleNotFound("delete", id);
         return RuleOperationResult.NotFound($"Rule '{id}' was not found.");
     }
 
@@ -298,8 +294,7 @@ public sealed class RuleService : IRuleService
         ChangeRuleActivationStatusRequest request,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogDebug(
-            "Starting rule operation {Operation}. RuleId: {RuleId}; IsActive: {IsActive}",
+        _logger.RuleActivityOperationStarting(
             "change_activity",
             id,
             request.IsActive);
@@ -335,8 +330,7 @@ public sealed class RuleService : IRuleService
         CancellationToken cancellationToken)
     {
         var operation = add ? "add_sensors" : "remove_sensors";
-        _logger.LogDebug(
-            "Starting rule operation {Operation}. RequestedCount: {RequestedCount}; SensorName: {SensorName}; SensorValueCount: {SensorValueCount}",
+        _logger.RuleSensorOperationStarting(
             operation,
             ids.Count,
             request.SensorName,
@@ -358,11 +352,6 @@ public sealed class RuleService : IRuleService
             var rule = await GetByIdAsync(id, cancellationToken);
             if (rule is null)
             {
-                _logger.LogWarning(
-                    "Rule operation {Operation} skipped a missing rule. RuleId: {RuleId}; SensorName: {SensorName}",
-                    operation,
-                    id,
-                    request.SensorName);
                 result.FailedIds.Add(new BulkOperationFailure(id, "Rule not found"));
                 continue;
             }
@@ -480,7 +469,9 @@ public sealed class RuleService : IRuleService
         }
         catch (ElasticsearchClientException exception)
         {
-            throw new RulePersistenceException($"Elasticsearch failed to {description}: {exception.Message}");
+            throw new RulePersistenceException(
+                $"Elasticsearch failed to {description}: {exception.Message}",
+                exception);
         }
     }
 
@@ -600,8 +591,7 @@ public sealed class RuleService : IRuleService
         string? ruleId,
         IReadOnlyCollection<string> errors)
     {
-        _logger.LogWarning(
-            "Rule operation {Operation} failed validation. RuleId: {RuleId}; ErrorCount: {ErrorCount}; ValidationErrors: {ValidationErrors}",
+        _logger.RuleValidationFailed(
             operation,
             ruleId,
             errors.Count,
@@ -614,10 +604,29 @@ public sealed class RuleService : IRuleService
         BulkOperationResult result,
         string? sensorName = null)
     {
-        var level = result.FailedIds.Count > 0 ? LogLevel.Warning : LogLevel.Information;
-        _logger.Log(
-            level,
-            "Rule operation {Operation} completed. RequestedCount: {RequestedCount}; SuccessCount: {SuccessCount}; FailureCount: {FailureCount}; SensorName: {SensorName}",
+        if (result.FailedIds.Count > 0)
+        {
+            if (_logger.IsEnabled(LogLevel.Warning))
+            {
+                var failedIdSample = string.Join(
+                    ", ",
+                    result.FailedIds
+                        .Take(FailedIdLogSampleLimit)
+                        .Select(static failure => failure.Id));
+                _logger.BulkRuleOperationCompletedWithFailures(
+                    operation,
+                    requestedCount,
+                    result.SuccessIds.Count,
+                    result.FailedIds.Count,
+                    sensorName,
+                    failedIdSample,
+                    Math.Max(0, result.FailedIds.Count - FailedIdLogSampleLimit));
+            }
+
+            return;
+        }
+
+        _logger.BulkRuleOperationSucceeded(
             operation,
             requestedCount,
             result.SuccessIds.Count,

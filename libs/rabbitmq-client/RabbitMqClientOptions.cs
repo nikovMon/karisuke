@@ -1,3 +1,5 @@
+using ImagingPipeline.Observability;
+
 namespace ImagingPipeline.RabbitMqClient;
 
 public sealed class RabbitMqClientOptions
@@ -44,6 +46,13 @@ public sealed class RabbitMqClientOptions
     public int RetryDelayMilliseconds { get; set; } = 10000;
     public int MaxRetryAttempts { get; set; } = 3;
     public string RetryCountHeader { get; set; } = "x-retry-count";
+    /// <summary>
+    /// Identifies an external processor that forwards the upstream publication timestamp
+    /// unchanged. On the first delivery, its elapsed time is recorded as external-stage
+    /// transit rather than as RabbitMQ-only delivery delay. Retry publishes are still
+    /// measured as normal RabbitMQ hops because this client refreshes their timestamp.
+    /// </summary>
+    public PipelineStage? ForwardedInputStage { get; set; }
     public List<RabbitMqRetryQueueOptions> RetryQueues { get; set; } = [];
     public int ReconnectDelaySeconds { get; set; } = 5;
 
@@ -118,6 +127,12 @@ public sealed class RabbitMqClientOptions
             string.IsNullOrWhiteSpace(RetryCountHeader))
         {
             error = "RabbitMq retry delay, retry attempts, and retry count header are outside their valid ranges.";
+            return false;
+        }
+
+        if (ForwardedInputStage is { } stage && !Enum.IsDefined(stage))
+        {
+            error = "RabbitMq ForwardedInputStage must be a known pipeline stage.";
             return false;
         }
 

@@ -1,3 +1,4 @@
+using ImagingPipeline.Observability;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbConsumer.Application;
 using Microsoft.Extensions.Logging;
@@ -17,56 +18,61 @@ public sealed class Worker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        while (!stoppingToken.IsCancellationRequested)
+        logger.ConsumerStarting();
+        try
         {
-            var shouldRestart = false;
-            var restartDelay = TimeSpan.Zero;
-            var consumerStarted = Stopwatch.GetTimestamp();
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                var shouldRestart = false;
+                var restartDelay = TimeSpan.Zero;
+                var consumerStarted = Stopwatch.GetTimestamp();
 
-            try
-            {
-                await consumer.ConsumeAsync(handler, stoppingToken);
-                shouldRestart = !stoppingToken.IsCancellationRequested;
-                if (shouldRestart)
-                {
-                    restartDelay = _restartBackoff.NextDelay(
-                        Stopwatch.GetElapsedTime(consumerStarted));
-                    logger.LogWarning(
-                        "TBConsumer RabbitMQ consumer exited unexpectedly; restarting in {RestartDelay}.",
-                        restartDelay);
-                }
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                shouldRestart = !stoppingToken.IsCancellationRequested;
-                if (!shouldRestart)
-                {
-                    break;
-                }
-
-                restartDelay = _restartBackoff.NextDelay(
-                    Stopwatch.GetElapsedTime(consumerStarted));
-                logger.LogError(
-                    ex,
-                    "TBConsumer RabbitMQ consumer loop failed; restarting in {RestartDelay}.",
-                    restartDelay);
-            }
-
-            if (shouldRestart)
-            {
                 try
                 {
-                    await Task.Delay(restartDelay, stoppingToken);
+                    await consumer.ConsumeAsync(handler, stoppingToken);
+                    shouldRestart = !stoppingToken.IsCancellationRequested;
+                    if (shouldRestart)
+                    {
+                        restartDelay = _restartBackoff.NextDelay(
+                            Stopwatch.GetElapsedTime(consumerStarted));
+                        MessagingTelemetry.RecordConsumerRestart(TelemetryErrorCategory.Unknown);
+                        logger.ConsumerRestartScheduled(restartDelay.TotalSeconds);
+                    }
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
                     break;
                 }
+                catch (Exception ex)
+                {
+                    shouldRestart = !stoppingToken.IsCancellationRequested;
+                    if (!shouldRestart)
+                    {
+                        break;
+                    }
+
+                    restartDelay = _restartBackoff.NextDelay(
+                        Stopwatch.GetElapsedTime(consumerStarted));
+                    MessagingTelemetry.RecordConsumerRestart(TelemetryErrorCategory.Connection);
+                    logger.ConsumerRestartAfterFailure(ex, restartDelay.TotalSeconds);
+                }
+
+                if (shouldRestart)
+                {
+                    try
+                    {
+                        await Task.Delay(restartDelay, stoppingToken);
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                }
             }
+        }
+        finally
+        {
+            logger.ConsumerStopped();
         }
     }
 }

@@ -5,11 +5,13 @@ using ImagingPipeline.Gateway.Errors;
 using ImagingPipeline.Gateway.Health;
 using ImagingPipeline.Gateway.Processing.Messages;
 using ImagingPipeline.GeometryUtils;
+using ImagingPipeline.Observability;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
+using System.Diagnostics;
 
 namespace ImagingPipeline.Gateway.Processing.Rules;
 
@@ -48,12 +50,57 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var initialRules = BuildSnapshot(
-            await _repository.GetActiveRulesAsync(cancellationToken),
-            cancellationToken);
-        cancellationToken.ThrowIfCancellationRequested();
-        Volatile.Write(ref _current, initialRules);
-        _healthState.MarkRulesRefreshSucceeded();
+        var started = TelemetryTiming.StartTimestamp();
+        using var activity = StartRefreshActivity("initial");
+        try
+        {
+            var initialRules = BuildSnapshot(
+                await _repository.GetActiveRulesAsync(cancellationToken),
+                cancellationToken,
+                out var skippedCount);
+            cancellationToken.ThrowIfCancellationRequested();
+            Volatile.Write(ref _current, initialRules);
+            _healthState.MarkRulesRefreshSucceeded();
+            GatewayTelemetry.RecordCacheRefresh(
+                TelemetryTiming.ElapsedSeconds(started),
+                TelemetryOutcome.Success,
+                initialRules.Length);
+            if (activity?.IsAllDataRequested == true)
+            {
+                activity.SetTag("imaging_pipeline.gateway.rule_cache.entries", initialRules.Length);
+                activity.SetTag("imaging_pipeline.gateway.rule_cache.skipped", skippedCount);
+            }
+
+            activity.SetTelemetrySuccess();
+            _logger.RuleCacheInitialized(initialRules.Length, skippedCount);
+        }
+        catch (OperationCanceledException ex)
+        {
+            GatewayTelemetry.RecordCacheRefresh(
+                TelemetryTiming.ElapsedSeconds(started),
+                TelemetryOutcome.Cancelled,
+                Current.Count,
+                TelemetryErrorCategory.Cancelled);
+            activity.SetTelemetryError(
+                TelemetryErrorCategory.Cancelled,
+                ex,
+                recordException: false);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            GatewayTelemetry.RecordCacheRefresh(
+                TelemetryTiming.ElapsedSeconds(started),
+                TelemetryOutcome.Failure,
+                Current.Count,
+                TelemetryErrorCategory.Dependency);
+            activity.SetTelemetryError(
+                TelemetryErrorCategory.Dependency,
+                ex,
+                recordException: false);
+            _logger.RuleCacheRefreshFailed(ex, Current.Count);
+            throw;
+        }
 
         _refreshCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _refreshTask = Task.Run(() => RefreshLoopAsync(_refreshCancellation.Token), CancellationToken.None);
@@ -88,26 +135,57 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
 
     private async Task RefreshAsync(CancellationToken cancellationToken)
     {
+        var started = TelemetryTiming.StartTimestamp();
+        using var activity = StartRefreshActivity("scheduled");
         try
         {
             var rules = BuildSnapshot(
                 await _repository.GetActiveRulesAsync(cancellationToken),
-                cancellationToken);
+                cancellationToken,
+                out var skippedCount);
             cancellationToken.ThrowIfCancellationRequested();
             Volatile.Write(ref _current, rules);
             _healthState.MarkRulesRefreshSucceeded();
+            GatewayTelemetry.RecordCacheRefresh(
+                TelemetryTiming.ElapsedSeconds(started),
+                TelemetryOutcome.Success,
+                rules.Length);
+            if (activity?.IsAllDataRequested == true)
+            {
+                activity.SetTag("imaging_pipeline.gateway.rule_cache.entries", rules.Length);
+                activity.SetTag("imaging_pipeline.gateway.rule_cache.skipped", skippedCount);
+            }
+
+            activity.SetTelemetrySuccess();
+            _logger.RuleCacheRefreshed(rules.Length, skippedCount);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
         {
+            GatewayTelemetry.RecordCacheRefresh(
+                TelemetryTiming.ElapsedSeconds(started),
+                TelemetryOutcome.Cancelled,
+                Current.Count,
+                TelemetryErrorCategory.Cancelled);
+            activity.SetTelemetryError(
+                TelemetryErrorCategory.Cancelled,
+                ex,
+                recordException: false);
             throw;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // Keep the last valid snapshot when a refresh fails.
             _healthState.MarkRulesRefreshFailed();
-            _logger.LogWarning(
+            GatewayTelemetry.RecordCacheRefresh(
+                TelemetryTiming.ElapsedSeconds(started),
+                TelemetryOutcome.Failure,
+                Current.Count,
+                TelemetryErrorCategory.Dependency);
+            activity.SetTelemetryError(
+                TelemetryErrorCategory.Dependency,
                 ex,
-                "Active-rule refresh failed; retaining the previous snapshot.");
+                recordException: false);
+            _logger.RuleCacheRefreshFailed(ex, Current.Count);
         }
     }
 
@@ -124,7 +202,8 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
 
     private ActiveRule[] BuildSnapshot(
         RuleLoadResult load,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        out int skippedCount)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var rules = load.Rules;
@@ -192,6 +271,7 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
         }
 
         cancellationToken.ThrowIfCancellationRequested();
+        skippedCount = rejectedRuleCount;
         return snapshot.ToArray();
     }
 
@@ -307,6 +387,20 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
             : !string.IsNullOrWhiteSpace(rule.RuleName)
                 ? rule.RuleName
                 : "<unknown>";
+
+    private static Activity? StartRefreshActivity(string refreshType)
+    {
+        var activity = TelemetrySources.Gateway.StartActivity(
+            "gateway.rule_cache.refresh",
+            ActivityKind.Internal);
+        if (activity?.IsAllDataRequested == true)
+        {
+            activity.SetTag(TelemetryAttributeNames.PipelineStage, "gateway");
+            activity.SetTag("imaging_pipeline.gateway.rule_cache.refresh.type", refreshType);
+        }
+
+        return activity;
+    }
 
     private static ActiveRule BuildRuleSnapshot(
         RuleDto rule,
