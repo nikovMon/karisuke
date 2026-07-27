@@ -5,6 +5,8 @@ artifacts/
 publish/
 out/
 dist/
+*.log
+*_output.txt
 
 # Test output
 TestResults/
