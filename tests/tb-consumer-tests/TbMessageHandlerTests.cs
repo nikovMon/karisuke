@@ -48,7 +48,7 @@ public class TbMessageHandlerTests
                 ImageId = "img-001",
                 ImageUrl = "/images/test.tiff",
                 RuleId = "rule-1",
-                AlgorithmName = AlgorithmName.FindAir,
+                AlgorithmNames = [AlgorithmName.FindAir, AlgorithmName.Rpn],
                 ResolutionMPerPx = 0.5,
                 ImageWidth = 1024,
                 ImageHeight = 1024,
@@ -110,7 +110,7 @@ public class TbMessageHandlerTests
                 It.Is<RabbitMqMessageEnvelope>(e =>
                     e.Headers != null &&
                     e.Headers.ContainsKey("algorithm_name") &&
-                    (string)e.Headers["algorithm_name"]! == "FindAir" &&
+                    (string)e.Headers["algorithm_name"]! == "FindAir,Rpn" &&
                     e.Headers.ContainsKey("x-pipeline-start-unix-ms") &&
                     (string)e.Headers["business-header"]! == "preserved" &&
                     e.CorrelationId == "correlation-1"),
@@ -173,7 +173,7 @@ public class TbMessageHandlerTests
             Assert.Equal("img-001", publishedBaggage[TelemetryAttributeNames.PipelineImageId]);
             Assert.Equal("rule-1", publishedBaggage[TelemetryAttributeNames.PipelineRuleId]);
             Assert.Equal("tenant-1", publishedBaggage[TelemetryAttributeNames.PipelineTenantId]);
-            Assert.Equal("FindAir", publishedBaggage[TelemetryAttributeNames.PipelineAlgorithmName]);
+            Assert.Equal("FindAir,Rpn", publishedBaggage[TelemetryAttributeNames.PipelineAlgorithmName]);
             Assert.DoesNotContain("secret", publishedBaggage.Keys);
             Assert.Equal("spoofed-task", Baggage.Current.GetBaggage(TelemetryAttributeNames.PipelineTaskId));
             Assert.Equal("do-not-forward", Baggage.Current.GetBaggage("secret"));
@@ -237,8 +237,7 @@ public class TbMessageHandlerTests
         Assert.Equal(0.0, embedder.Lon);
         Assert.Equal(0.0, embedder.Lat);
         Assert.NotNull(embedder.ImagingTime);
-        Assert.Single(embedder.Algorithms);
-        Assert.Equal("FindAir", embedder.Algorithms[0]);
+        Assert.Equal(["FindAir", "Rpn"], embedder.Algorithms);
         Assert.NotNull(embedder.TileCoordinates);
         Assert.NotEmpty(embedder.TileCoordinates.Coordinates);
 

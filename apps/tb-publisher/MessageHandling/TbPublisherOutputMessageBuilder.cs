@@ -1,3 +1,4 @@
+using ImagingPipeline.Common.Dtos.Gateway.Messages;
 using ImagingPipeline.Common.Dtos.Messaging;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.TbPublisher.Identity;
@@ -47,7 +48,7 @@ public sealed class TbPublisherOutputMessageBuilder : ITbPublisherOutputMessageB
                     ImageUrl = message.ImageUrl,
                     RuleId = message.RuleId,
                     ResolutionMPerPx = message.ResolutionMPerPx,
-                    AlgorithmName = message.AlgorithmName,
+                    AlgorithmNames = message.AlgorithmNames,
                     ImageWidth = message.ImageWidth,
                     ImageHeight = message.ImageHeight,
                     RoiFootprint = message.RoiFootprint,

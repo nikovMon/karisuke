@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Diagnostics;
-using ImagingPipeline.Common.Dtos.Messaging;
+using ImagingPipeline.Common.Dtos.Gateway.Messages;
 using ImagingPipeline.Observability;
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
@@ -56,6 +56,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
         try
         {
             GatewayOutputMessageDto inputMessage;
+            string algorithmNameText;
             using (var validationActivity = StartStageActivity("validate"))
             {
                 try
@@ -78,13 +79,14 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                     }
 
                     inputMessage = validation.Message!;
+                    algorithmNameText = string.Join(",", inputMessage.AlgorithmNames);
                     validationActivity
                         .AddPipelineContext(
                             taskId: inputMessage.TaskId,
                             imageId: inputMessage.ImageId,
                             ruleId: inputMessage.RuleId,
                             tenantId: inputMessage.TenantId,
-                            algorithmName: inputMessage.AlgorithmName.ToString())
+                            algorithmName: algorithmNameText)
                         .SetTelemetrySuccess();
                 }
                 catch (OperationCanceledException ex)
@@ -107,14 +109,14 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                 ImageId: inputMessage.ImageId,
                 RuleId: inputMessage.RuleId,
                 TenantId: inputMessage.TenantId,
-                AlgorithmName: inputMessage.AlgorithmName.ToString()));
+                AlgorithmName: algorithmNameText));
             using var correlationBaggage = PipelineCorrelationBaggage.Push(
                 new PipelineCorrelationContext(
                     TaskId: inputMessage.TaskId,
                     ImageId: inputMessage.ImageId,
                     RuleId: inputMessage.RuleId,
                     TenantId: inputMessage.TenantId,
-                    AlgorithmName: inputMessage.AlgorithmName.ToString()),
+                    AlgorithmName: algorithmNameText),
                 includeExistingCanonicalValues: true);
 
             PipelineTelemetry.RecordBatchSize(
@@ -132,7 +134,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                         imageId: inputMessage.ImageId,
                         ruleId: inputMessage.RuleId,
                         tenantId: inputMessage.TenantId,
-                        algorithmName: inputMessage.AlgorithmName.ToString());
+                        algorithmName: algorithmNameText);
                     groundPoints = _geometryConverter.ExtractGroundPoints(inputMessage.RoiFootprint);
                     if (geometryActivity?.IsAllDataRequested == true)
                     {
@@ -178,7 +180,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                         imageId: inputMessage.ImageId,
                         ruleId: inputMessage.RuleId,
                         tenantId: inputMessage.TenantId,
-                        algorithmName: inputMessage.AlgorithmName.ToString());
+                        algorithmName: algorithmNameText);
                     var request = new ProjectionMapperRequestDto { GroundPoints = groundPoints };
                     coordinates = await _projectionMapperClient.MapAsync(inputMessage.ImageId, request, cancellationToken);
                     if (projectionActivity?.IsAllDataRequested == true)
@@ -233,7 +235,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                     imageId: inputMessage.ImageId,
                     ruleId: inputMessage.RuleId,
                     tenantId: inputMessage.TenantId,
-                    algorithmName: inputMessage.AlgorithmName.ToString());
+                    algorithmName: algorithmNameText);
                 var outputMessages = _outputMessageBuilder.Map(inputMessage, focusedPxWkt);
                 outputCount = outputMessages.Count;
                 if (buildActivity?.IsAllDataRequested == true)

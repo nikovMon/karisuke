@@ -123,6 +123,21 @@ public sealed class RabbitMqServiceCollectionTests
     }
 
     [Fact]
+    public async Task AddRabbitMqConsumerUsesSeparatePublisherAndConsumerConnectionManagers()
+    {
+        await using var provider = new ServiceCollection()
+            .AddSingleton<IConfiguration>(Configuration())
+            .AddLogging()
+            .AddRabbitMqConsumer(Configuration())
+            .BuildServiceProvider(validateScopes: true);
+
+        var publisherConnections = provider.GetRequiredService<IRabbitMqPublisherConnectionManager>();
+        var consumerConnections = provider.GetRequiredService<IRabbitMqConsumerConnectionManager>();
+
+        Assert.NotSame(publisherConnections, consumerConnections);
+    }
+
+    [Fact]
     public async Task AddRabbitMqClientRegistersFullClientServices()
     {
         await using var provider = new ServiceCollection()
@@ -188,6 +203,38 @@ public sealed class RabbitMqServiceCollectionTests
         Assert.Equal(ImagingPipeline.Observability.PipelineStage.TileBuilder, options.ForwardedInputStage);
         Assert.Equal("retry.1", options.RetryQueues[0].Queue);
         Assert.Equal("retry.1.key", options.RetryQueues[0].RoutingKey);
+    }
+
+    [Fact]
+    public async Task AddRabbitMqConsumerBindsCollectionOptionsOnlyOnce()
+    {
+        var configuration = Configuration(new Dictionary<string, string?>
+        {
+            ["RabbitMq:RetryExchange"] = "retry.exchange",
+            ["RabbitMq:RetryExchangeType"] = "headers",
+            ["RabbitMq:RetryRoutingKey"] = "retry",
+            ["RabbitMq:MaxRetryAttempts"] = "2",
+            ["RabbitMq:RetryQueues:0:RetryCount"] = "1",
+            ["RabbitMq:RetryQueues:0:Queue"] = "retry.1",
+            ["RabbitMq:RetryQueues:0:DelayMilliseconds"] = "1000",
+            ["RabbitMq:RetryQueues:1:RetryCount"] = "2",
+            ["RabbitMq:RetryQueues:1:Queue"] = "retry.2",
+            ["RabbitMq:RetryQueues:1:DelayMilliseconds"] = "2000"
+        });
+
+        await using var provider = new ServiceCollection()
+            .AddSingleton<IConfiguration>(configuration)
+            .AddLogging()
+            .AddRabbitMqConsumer(configuration)
+            .BuildServiceProvider(validateScopes: true);
+
+        var options = provider.GetRequiredService<IOptions<RabbitMqClientOptions>>().Value;
+
+        Assert.Collection(
+            options.RetryQueues,
+            retry => Assert.Equal(1, retry.RetryCount),
+            retry => Assert.Equal(2, retry.RetryCount));
+        Assert.True(options.IsConsumerValid(out var error), error);
     }
 
     [Fact]

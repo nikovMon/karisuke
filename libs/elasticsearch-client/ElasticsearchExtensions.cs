@@ -25,7 +25,8 @@ public static class ElasticsearchExtensions
                     pool,
                     sourceSerializer: (_, _) => new SystemTextJsonSourceSerializer())
                 .DefaultIndex(options.Index)
-                .RequestTimeout(TimeSpan.FromSeconds(options.TimeoutSeconds));
+                .RequestTimeout(TimeSpan.FromSeconds(options.TimeoutSeconds))
+                .EnableApiVersioningHeader();
 
             if (!string.IsNullOrEmpty(options.Username) && !string.IsNullOrEmpty(options.Password))
             {
@@ -34,7 +35,11 @@ public static class ElasticsearchExtensions
 
             return new ElasticClient(settings);
         });
-        services.AddSingleton<IElasticsearchDocumentClient, ElasticsearchDocumentClient>();
+        services.AddSingleton<ElasticsearchDocumentClient>();
+        services.AddSingleton<IElasticsearchDocumentClient>(
+            provider => provider.GetRequiredService<ElasticsearchDocumentClient>());
+        services.AddSingleton<IElasticsearchPointInTimeClient>(
+            provider => provider.GetRequiredService<ElasticsearchDocumentClient>());
 
         return services;
     }

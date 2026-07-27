@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using ImagingPipeline.Common.Dtos.Rules.Models;
 
 namespace ImagingPipeline.Common.Dtos.Rules.Requests;
 
@@ -8,5 +9,5 @@ public sealed class RuleSensorUpdateRequest
     public string SensorName { get; set; } = string.Empty;
 
     [JsonPropertyName("values")]
-    public List<string> Values { get; set; } = [];
+    public List<RegistrationQuality> Values { get; set; } = [];
 }

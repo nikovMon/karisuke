@@ -48,34 +48,52 @@ internal static partial class RabbitMqLog
         string reason);
 
     [LoggerMessage(107, LogLevel.Error,
-        "RabbitMQ completion routing failed for message {MessageId}; the delivery will be requeued")]
+        "RabbitMQ completion routing failed for message {MessageId}; the consumer channel will close and the broker will requeue the unacknowledged delivery")]
     public static partial void CompletionFailed(ILogger logger, Exception exception, string messageId);
 
     [LoggerMessage(108, LogLevel.Information,
-        "Connected to RabbitMQ at {Host}:{Port} vhost {VirtualHost}")]
-    public static partial void ConnectionEstablished(ILogger logger, string host, int port, string virtualHost);
+        "Connected RabbitMQ {ConnectionRole} connection to {Host}:{Port} vhost {VirtualHost}")]
+    public static partial void ConnectionEstablished(
+        ILogger logger,
+        string connectionRole,
+        string host,
+        int port,
+        string virtualHost);
 
-    [LoggerMessage(109, LogLevel.Warning, "RabbitMQ connection attempt failed")]
-    public static partial void ConnectionFailed(ILogger logger, Exception exception);
+    [LoggerMessage(109, LogLevel.Warning, "RabbitMQ {ConnectionRole} connection attempt failed")]
+    public static partial void ConnectionFailed(
+        ILogger logger,
+        Exception exception,
+        string connectionRole);
 
     [LoggerMessage(110, LogLevel.Warning,
-        "RabbitMQ connection shut down; initiator {Initiator}, code {ReplyCode}, reason {ReplyText}")]
+        "RabbitMQ {ConnectionRole} connection shut down; initiator {Initiator}, code {ReplyCode}, reason {ReplyText}")]
     public static partial void ConnectionShutdown(
         ILogger logger,
+        string connectionRole,
         object initiator,
         ushort replyCode,
         string replyText);
 
-    [LoggerMessage(111, LogLevel.Error, "RabbitMQ connection callback failed")]
-    public static partial void CallbackFailed(ILogger logger, Exception exception);
+    [LoggerMessage(111, LogLevel.Error, "RabbitMQ {ConnectionRole} connection callback failed")]
+    public static partial void CallbackFailed(
+        ILogger logger,
+        Exception exception,
+        string connectionRole);
 
-    [LoggerMessage(112, LogLevel.Information, "RabbitMQ connection recovery succeeded")]
-    public static partial void RecoverySucceeded(ILogger logger);
+    [LoggerMessage(112, LogLevel.Information, "RabbitMQ {ConnectionRole} connection recovery succeeded")]
+    public static partial void RecoverySucceeded(ILogger logger, string connectionRole);
 
-    [LoggerMessage(113, LogLevel.Warning, "RabbitMQ connection recovery failed")]
-    public static partial void RecoveryFailed(ILogger logger, Exception exception);
+    [LoggerMessage(113, LogLevel.Warning, "RabbitMQ {ConnectionRole} connection recovery failed")]
+    public static partial void RecoveryFailed(
+        ILogger logger,
+        Exception exception,
+        string connectionRole);
 
     [LoggerMessage(114, LogLevel.Warning,
-        "Timed out after {TimeoutSeconds} seconds waiting for RabbitMQ connection acquisition to stop during disposal; any late connection will be closed")]
-    public static partial void ConnectionDisposalTimedOut(ILogger logger, double timeoutSeconds);
+        "Timed out after {TimeoutSeconds} seconds waiting for RabbitMQ {ConnectionRole} connection acquisition to stop during disposal; any late connection will be closed")]
+    public static partial void ConnectionDisposalTimedOut(
+        ILogger logger,
+        double timeoutSeconds,
+        string connectionRole);
 }

@@ -19,7 +19,7 @@ public class OverlayDto
     public double ResolutionMPerPx { get; set; }
     
     [JsonPropertyName("algorithm_name")] 
-    public AlgorithmName AlgorithmName { get; set; }
+    public IReadOnlyList<AlgorithmName> AlgorithmNames { get; set; } = [];
     
     [JsonPropertyName("image_width")] 
     public int ImageWidth { get; set; }
@@ -31,11 +31,11 @@ public class OverlayDto
     public JsonElement RoiFootprint { get; set; }
     
     [JsonPropertyName("image_time")] 
-    public DateTimeOffset? ImageTime { get; set; }
+    public DateTimeOffset ImageTime { get; set; }
     
     [JsonPropertyName("sensor_name")] 
-    public string? SensorName { get; set; }
+    public string SensorName { get; set; } = string.Empty;
     
     [JsonPropertyName("sensor_type")] 
-    public string? SensorType { get; set; }
+    public string SensorType { get; set; } = string.Empty;
 }

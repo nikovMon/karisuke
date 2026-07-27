@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json.Serialization;
+using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.ElasticsearchClient;
 using ImagingPipeline.Observability;
 using ImagingPipeline.Rules.Api.Configuration;
@@ -16,6 +17,8 @@ public sealed partial class Program
 {
     public static async Task Main(string[] args)
     {
+        RegistrationQualityContract.EnsureValid();
+
         var builder = WebApplication.CreateBuilder(args);
         builder.AddImagingPipelineObservability(
             ObservabilityServiceNames.RulesApi,
@@ -23,6 +26,8 @@ public sealed partial class Program
         builder.Services.AddControllers(options => options.Filters.Add<RulesOperationFilter>())
             .AddJsonOptions(options =>
             {
+                options.JsonSerializerOptions.Converters.Add(new RegistrationQualityJsonConverter());
+                options.JsonSerializerOptions.Converters.Add(new AlgorithmNameJsonConverter());
                 options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
             });
         builder.Services.Configure<ApiBehaviorOptions>(options =>

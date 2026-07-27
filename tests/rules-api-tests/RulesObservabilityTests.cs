@@ -47,7 +47,7 @@ public sealed class RulesObservabilityTests
         {
             Id = ruleId,
             RuleName = "observed-rule",
-            AlgorithmName = AlgorithmName.FindAir,
+            AlgorithmNames = [AlgorithmName.FindAir],
             MinimumResolution = 1,
             MaximumResolution = 2,
             Area = "test",

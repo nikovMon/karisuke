@@ -338,7 +338,9 @@ alongside it.
   `x-retry-count` header. If retry is disabled, exhausted, or the retry count
   header is invalid, they are routed to the DLQ instead.
 - If output publishing or acknowledgement fails, the input is negatively
-  acknowledged with requeue enabled to avoid silently losing it.
+  left unacknowledged and the consumer channel is closed. RabbitMQ requeues the
+  delivery when the channel closes; this avoids an immediate `requeue: true`
+  hot loop that would bypass the delayed retry policy.
 
 This provides **at-least-once delivery**, not exactly-once delivery. A process
 failure between publishing output and acknowledging input can create a duplicate.
@@ -349,7 +351,12 @@ message id, the client derives a stable `body-sha256:...` id from the body.
 ## Connection recovery
 
 RabbitMQ automatic connection and topology recovery handle unexpected
-shutdowns, using `ReconnectDelaySeconds` as the network recovery interval. The
-application-level consumer worker should also restart `ConsumeAsync` if it
-exits. Failures are structured-log events; credentials and message bodies are
-never logged by the library.
+shutdowns, using `ReconnectDelaySeconds` as the network recovery interval.
+Publisher channels and consumer channels use separate connections so publisher
+recovery or replacement cannot strand consumers. Broker cancellation,
+non-recoverable channel shutdown, and completion failures fault `ConsumeAsync`;
+the application-level consumer worker restarts it with exponential, jittered,
+failure-only delay. `ReconnectDelaySeconds` is the base delay, the default cap
+is 30 seconds, and a consumer that remains active for at least the cap resets
+the sequence. Failures are structured-log events; credentials and message
+bodies are never logged by the library.

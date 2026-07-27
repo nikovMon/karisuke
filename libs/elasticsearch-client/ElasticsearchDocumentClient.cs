@@ -56,10 +56,29 @@ public interface IElasticsearchDocumentClient
         where TDocument : class;
 }
 
+public interface IElasticsearchPointInTimeClient
+{
+    Task<string> OpenPointInTimeAsync(
+        string indexName,
+        string keepAlive,
+        CancellationToken cancellationToken = default);
+
+    Task<ElasticsearchSearchPage<TDocument>> SearchPointInTimeAsync<TDocument>(
+        ElasticsearchPointInTimeSearchRequest request,
+        CancellationToken cancellationToken = default)
+        where TDocument : class;
+
+    Task ClosePointInTimeAsync(
+        string pointInTimeId,
+        CancellationToken cancellationToken = default);
+}
+
 public sealed record ElasticsearchDocument<TDocument>(string Id, TDocument Source)
     where TDocument : class;
 
-public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
+public sealed class ElasticsearchDocumentClient :
+    IElasticsearchDocumentClient,
+    IElasticsearchPointInTimeClient
 {
     private const int MaximumErrorResponseInspectionLength = 32 * 1024;
     private const int MaximumServerReasonLength = 512;
@@ -238,6 +257,97 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
         }
     }
 
+    public async Task<string> OpenPointInTimeAsync(
+        string indexName,
+        string keepAlive,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateIndex(indexName);
+        ValidateKeepAlive(keepAlive);
+
+        var parameters = new OpenPointInTimeRequestParameters
+        {
+            KeepAlive = keepAlive
+        };
+
+        var response = await _client.LowLevel.OpenPointInTimeAsync<StringResponse>(
+            indexName,
+            parameters,
+            cancellationToken);
+
+        EnsureValid(response, $"open point in time for index '{indexName}'");
+        var body = DeserializeRequired<ElasticsearchOpenPointInTimeResponse>(
+            response.Body,
+            $"open point in time for index '{indexName}'");
+        if (string.IsNullOrWhiteSpace(body.Id))
+        {
+            throw MalformedResponse($"open point in time for index '{indexName}'", "the id is missing");
+        }
+
+        return body.Id;
+    }
+
+    public async Task<ElasticsearchSearchPage<TDocument>> SearchPointInTimeAsync<TDocument>(
+        ElasticsearchPointInTimeSearchRequest request,
+        CancellationToken cancellationToken = default)
+        where TDocument : class
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var body = ElasticsearchQueryJsonBuilder.BuildPointInTimeSearchBody(request);
+        using var telemetry = ElasticsearchOperationTelemetry.Start(
+            DependencyOperation.Search,
+            request.Search.IndexName,
+            requestedDocumentCount: request.Search.Size);
+
+        try
+        {
+            var response = await _client.LowLevel.SearchAsync<StringResponse>(
+                PostData.String(body),
+                new SearchRequestParameters
+                {
+                    AllowPartialSearchResults = false
+                },
+                cancellationToken);
+            telemetry.SetResponseMetadata(response.ApiCall);
+
+            EnsureValid(response, "search point in time");
+            var page = DeserializePointInTimeSearchResponse<TDocument>(
+                response.Body,
+                request.Search.Size,
+                request.TrackTotalHits);
+            telemetry.Complete(page.Hits.Count);
+            return page;
+        }
+        catch (Exception exception)
+        {
+            telemetry.Fail(exception, cancellationToken);
+            throw;
+        }
+    }
+
+    public async Task ClosePointInTimeAsync(
+        string pointInTimeId,
+        CancellationToken cancellationToken = default)
+    {
+        ValidatePointInTimeId(pointInTimeId);
+
+        var body = JsonSerializer.Serialize(new { id = pointInTimeId }, JsonOptions);
+        var response = await _client.LowLevel.ClosePointInTimeAsync<StringResponse>(
+            PostData.String(body),
+            new ClosePointInTimeRequestParameters(),
+            cancellationToken);
+
+        EnsureValid(response, "close point in time");
+        var closeResponse = DeserializeRequired<ElasticsearchClosePointInTimeResponse>(
+            response.Body,
+            "close point in time");
+        if (!closeResponse.Succeeded)
+        {
+            throw MalformedResponse("close point in time", "Elasticsearch reported that it did not succeed");
+        }
+    }
+
     public async Task<string> IndexAsync<TDocument>(
         string indexName,
         string? id,
@@ -359,6 +469,128 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
             .ToArray() ?? [];
     }
 
+    private static ElasticsearchSearchPage<TDocument> DeserializePointInTimeSearchResponse<TDocument>(
+        string body,
+        int requestedSize,
+        bool trackTotalHits)
+        where TDocument : class
+    {
+        var response = DeserializeRequired<ElasticsearchPointInTimeSearchResponse<TDocument>>(
+            body,
+            "search point in time");
+        if (string.IsNullOrWhiteSpace(response.PointInTimeId))
+        {
+            throw MalformedResponse("search point in time", "the pit_id is missing");
+        }
+
+        if (response.TimedOut is not false)
+        {
+            throw MalformedResponse("search point in time", "timed_out is missing or true");
+        }
+
+        if (response.Shards is null ||
+            response.Shards.Total is null ||
+            response.Shards.Successful is null ||
+            response.Shards.Failed is null ||
+            response.Shards.Total.Value <= 0 ||
+            response.Shards.Successful != response.Shards.Total ||
+            response.Shards.Failed != 0)
+        {
+            throw MalformedResponse("search point in time", "the shard summary is missing or incomplete");
+        }
+
+        if (response.Hits?.Items is null)
+        {
+            throw MalformedResponse("search point in time", "hits.hits is missing");
+        }
+
+        long? total = null;
+        if (response.Hits.Total is not null)
+        {
+            if (response.Hits.Total.Value is null ||
+                response.Hits.Total.Value.Value < 0 ||
+                !string.Equals(response.Hits.Total.Relation, "eq", StringComparison.Ordinal))
+            {
+                throw MalformedResponse("search point in time", "hits.total is not an exact non-negative count");
+            }
+
+            total = response.Hits.Total.Value.Value;
+        }
+
+        if (trackTotalHits && total is null)
+        {
+            throw MalformedResponse("search point in time", "hits.total is missing while exact totals are requested");
+        }
+
+        if (response.Hits.Items.Count > requestedSize ||
+            (total is not null && response.Hits.Items.Count > total.Value))
+        {
+            throw MalformedResponse("search point in time", "the page contains more hits than expected");
+        }
+
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        var hits = new ElasticsearchSearchHit<TDocument>[response.Hits.Items.Count];
+        for (var index = 0; index < response.Hits.Items.Count; index++)
+        {
+            var hit = response.Hits.Items[index];
+            if (string.IsNullOrWhiteSpace(hit.Id))
+            {
+                throw MalformedResponse("search point in time", "a hit has no _id");
+            }
+
+            if (!ids.Add(hit.Id))
+            {
+                throw MalformedResponse("search point in time", $"the page contains duplicate _id '{hit.Id}'");
+            }
+
+            if (hit.Source is null)
+            {
+                throw MalformedResponse("search point in time", $"hit '{hit.Id}' has a null _source");
+            }
+
+            if (hit.SortValues is null ||
+                hit.SortValues.Count != 1 ||
+                hit.SortValues[0].ValueKind != JsonValueKind.Number)
+            {
+                throw MalformedResponse(
+                    "search point in time",
+                    $"hit '{hit.Id}' does not have one numeric _shard_doc sort value");
+            }
+
+            HydrateSourceId(hit.Source, hit.Id);
+            hits[index] = new ElasticsearchSearchHit<TDocument>(
+                hit.Id,
+                hit.Source,
+                hit.SortValues);
+        }
+
+        return new ElasticsearchSearchPage<TDocument>(
+            response.PointInTimeId,
+            total,
+            hits);
+    }
+
+    private static TResponse DeserializeRequired<TResponse>(string body, string operation)
+        where TResponse : class
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            throw MalformedResponse(operation, "the response body is blank");
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<TResponse>(body, JsonOptions) ??
+                throw MalformedResponse(operation, "the response body is null");
+        }
+        catch (JsonException ex)
+        {
+            throw new ElasticsearchClientException(
+                $"Elasticsearch returned a malformed response while attempting to {operation}.",
+                ex);
+        }
+    }
+
     private static void HydrateSourceId<TDocument>(TDocument source, string id)
     {
         if (string.IsNullOrWhiteSpace(id))
@@ -402,6 +634,25 @@ public sealed class ElasticsearchDocumentClient : IElasticsearchDocumentClient
             throw new ArgumentException("Document id must not be empty.", nameof(id));
         }
     }
+
+    private static void ValidateKeepAlive(string keepAlive)
+    {
+        if (string.IsNullOrWhiteSpace(keepAlive))
+        {
+            throw new ArgumentException("Point-in-time keep alive must not be empty.", nameof(keepAlive));
+        }
+    }
+
+    private static void ValidatePointInTimeId(string pointInTimeId)
+    {
+        if (string.IsNullOrWhiteSpace(pointInTimeId))
+        {
+            throw new ArgumentException("Point-in-time id must not be empty.", nameof(pointInTimeId));
+        }
+    }
+
+    private static ElasticsearchClientException MalformedResponse(string operation, string detail) =>
+        new($"Elasticsearch returned a malformed response while attempting to {operation}: {detail}.");
 
     private static void EnsureValid(IResponse response, string operation)
     {

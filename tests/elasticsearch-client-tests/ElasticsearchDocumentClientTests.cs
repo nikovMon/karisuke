@@ -208,6 +208,232 @@ public sealed class ElasticsearchDocumentClientTests
     }
 
     [Fact]
+    public async Task OpenPointInTimeAsyncReturnsIdAndUsesIndexPitEndpoint()
+    {
+        IApiCallDetails? call = null;
+        var client = CreateDocumentClient(
+            """{"id":"pit-1"}""",
+            onRequestCompleted: details => call = details);
+
+        var result = await client.OpenPointInTimeAsync("rules", "1m");
+
+        Assert.Equal("pit-1", result);
+        Assert.NotNull(call);
+        Assert.Equal("/rules/_pit", call.Uri.AbsolutePath);
+        Assert.Contains("keep_alive=1m", call.Uri.Query, StringComparison.Ordinal);
+        Assert.DoesNotContain("allow_partial_search_results", call.Uri.Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SearchPointInTimeAsyncReturnsStrictPageMetadataAndStableCursor()
+    {
+        IApiCallDetails? call = null;
+        var client = CreateDocumentClient(
+            """
+            {
+              "pit_id": "pit-2",
+              "timed_out": false,
+              "_shards": {
+                "total": 1,
+                "successful": 1,
+                "failed": 0
+              },
+              "hits": {
+                "total": {
+                  "value": 1,
+                  "relation": "eq"
+                },
+                "hits": [
+                  {
+                    "_id": "rule-from-hit",
+                    "_source": {
+                      "ruleName": "one"
+                    },
+                    "sort": [42]
+                  }
+                ]
+              }
+            }
+            """,
+            onRequestCompleted: details => call = details);
+
+        var page = await client.SearchPointInTimeAsync<TestRuleDocument>(
+            new ElasticsearchPointInTimeSearchRequest
+            {
+                Search = new ElasticsearchSearchRequest
+                {
+                    IndexName = "rules",
+                    Size = 500
+                },
+                PointInTimeId = "pit-1",
+                SearchAfter = [JsonSerializer.SerializeToElement(41L)]
+            });
+
+        var hit = Assert.Single(page.Hits);
+        Assert.Equal("pit-2", page.PointInTimeId);
+        Assert.Equal(1, page.Total);
+        Assert.Equal("rule-from-hit", hit.Id);
+        Assert.Equal("rule-from-hit", hit.Source.Id);
+        Assert.Equal(42, hit.SortValues[0].GetInt64());
+
+        Assert.NotNull(call);
+        Assert.Equal("/_search", call.Uri.AbsolutePath);
+        Assert.Contains("allow_partial_search_results=false", call.Uri.Query, StringComparison.Ordinal);
+        using var request = JsonDocument.Parse(call.RequestBodyInBytes);
+        Assert.Equal("pit-1", request.RootElement.GetProperty("pit").GetProperty("id").GetString());
+        Assert.Equal("_shard_doc", request.RootElement.GetProperty("sort")[0].GetString());
+        Assert.Equal(41, request.RootElement.GetProperty("search_after")[0].GetInt64());
+    }
+
+    [Fact]
+    public async Task SearchPointInTimeAsyncAllowsOmittedTotalWhenExactTrackingIsDisabled()
+    {
+        var client = CreateDocumentClient(
+            """
+            {
+              "pit_id": "pit-2",
+              "timed_out": false,
+              "_shards": {
+                "total": 1,
+                "successful": 1,
+                "failed": 0
+              },
+              "hits": {
+                "hits": [
+                  {
+                    "_id": "rule-1",
+                    "_source": {
+                      "ruleName": "one"
+                    },
+                    "sort": [42]
+                  }
+                ]
+              }
+            }
+            """);
+
+        var page = await client.SearchPointInTimeAsync<TestRuleDocument>(
+            new ElasticsearchPointInTimeSearchRequest
+            {
+                Search = new ElasticsearchSearchRequest
+                {
+                    IndexName = "rules",
+                    Size = 500
+                },
+                PointInTimeId = "pit-1",
+                TrackTotalHits = false
+            });
+
+        Assert.Null(page.Total);
+        Assert.Single(page.Hits);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("{}")]
+    [InlineData("""
+        {
+          "pit_id": "pit-2",
+          "timed_out": false,
+          "_shards": { "total": 1, "successful": 1, "failed": 0 },
+          "hits": {
+            "total": { "value": 1, "relation": "eq" },
+            "hits": [{ "_id": "rule-1", "_source": null, "sort": [1] }]
+          }
+        }
+        """)]
+    [InlineData("""
+        {
+          "pit_id": "pit-2",
+          "timed_out": false,
+          "_shards": { "total": 1, "successful": 1, "failed": 0 },
+          "hits": {
+            "total": { "value": 1, "relation": "gte" },
+            "hits": []
+          }
+        }
+        """)]
+    [InlineData("""
+        {
+          "pit_id": "pit-2",
+          "timed_out": false,
+          "_shards": { "total": 1, "successful": 0, "failed": 1 },
+          "hits": {
+            "total": { "value": 0, "relation": "eq" },
+            "hits": []
+          }
+        }
+        """)]
+    [InlineData("""
+        {
+          "pit_id": "pit-2",
+          "timed_out": false,
+          "_shards": {},
+          "hits": {
+            "total": { "value": 0, "relation": "eq" },
+            "hits": []
+          }
+        }
+        """)]
+    [InlineData("""
+        {
+          "pit_id": "pit-2",
+          "timed_out": false,
+          "_shards": { "total": 1, "successful": 1, "failed": 0 },
+          "hits": {
+            "total": { "relation": "eq" },
+            "hits": []
+          }
+        }
+        """)]
+    [InlineData("""
+        {
+          "pit_id": "pit-2",
+          "timed_out": false,
+          "_shards": { "total": 0, "successful": 0, "failed": 0 },
+          "hits": {
+            "total": { "value": 0, "relation": "eq" },
+            "hits": []
+          }
+        }
+        """)]
+    public async Task SearchPointInTimeAsyncRejectsBlankOrIncompleteResponses(string response)
+    {
+        var client = CreateDocumentClient(response);
+
+        await Assert.ThrowsAsync<ElasticsearchClientException>(() =>
+            client.SearchPointInTimeAsync<TestRuleDocument>(
+                new ElasticsearchPointInTimeSearchRequest
+                {
+                    Search = new ElasticsearchSearchRequest
+                    {
+                        IndexName = "rules"
+                    },
+                    PointInTimeId = "pit-1"
+                }));
+    }
+
+    [Fact]
+    public async Task ClosePointInTimeAsyncRequiresSuccessfulResponseAndSendsId()
+    {
+        IApiCallDetails? call = null;
+        var client = CreateDocumentClient(
+            """{"succeeded":true,"num_freed":1}""",
+            onRequestCompleted: details => call = details);
+
+        await client.ClosePointInTimeAsync("pit-2");
+
+        Assert.NotNull(call);
+        Assert.Equal("/_pit", call.Uri.AbsolutePath);
+        using var request = JsonDocument.Parse(call.RequestBodyInBytes);
+        Assert.Equal("pit-2", request.RootElement.GetProperty("id").GetString());
+
+        var unsuccessful = CreateDocumentClient("""{"succeeded":false,"num_freed":0}""");
+        await Assert.ThrowsAsync<ElasticsearchClientException>(() =>
+            unsuccessful.ClosePointInTimeAsync("pit-2"));
+    }
+
+    [Fact]
     public async Task GetAsyncReturnsNullWhenDocumentIsMissing()
     {
         var client = CreateDocumentClient("""
@@ -484,7 +710,8 @@ public sealed class ElasticsearchDocumentClientTests
     private static ElasticsearchDocumentClient CreateDocumentClient(
         string responseJson,
         int statusCode = 200,
-        Uri? nodeUri = null)
+        Uri? nodeUri = null,
+        Action<IApiCallDetails>? onRequestCompleted = null)
     {
         var bytes = Encoding.UTF8.GetBytes(responseJson);
         var pool = new SingleNodeConnectionPool(nodeUri ?? new Uri("http://localhost:9200"));
@@ -492,6 +719,11 @@ public sealed class ElasticsearchDocumentClientTests
         var settings = new ConnectionSettings(pool, connection)
             .DefaultIndex("rules")
             .DisableDirectStreaming();
+        if (onRequestCompleted is not null)
+        {
+            settings = settings.OnRequestCompleted(onRequestCompleted);
+        }
+
         var elasticClient = new ElasticClient(settings);
         return new ElasticsearchDocumentClient(elasticClient);
     }

@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Common.Dtos.Rules.Responses;
 using ImagingPipeline.Rules.Api.Tests.Fakes;
+using static ImagingPipeline.Common.Dtos.Rules.Models.RegistrationQuality;
 
 namespace ImagingPipeline.Rules.Api.Tests;
 
@@ -265,7 +266,7 @@ public sealed class RulesApiRouteTests
                 {
                   "_id": "rule-1",
                   "ruleName": "one",
-                  "algorithmName": "Unknown",
+                  "algorithmName": ["Unknown"],
                   "isActive": true,
                   "minimumResolution": 0.5,
                   "maximumResolution": 1,
@@ -309,10 +310,62 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
+    public async Task CreateAndPatchPersistAndReturnBothAlgorithmsAsAnArray()
+    {
+        using var context = CreateContext();
+        var createRequest = ValidRule("ignored", "both-algorithms");
+        createRequest.AlgorithmNames = [AlgorithmName.Rpn, AlgorithmName.FindAir];
+
+        var createResponse = await context.Client.PostAsJsonAsync(
+            "/rules",
+            createRequest,
+            JsonOptions);
+        using var createdJson = JsonDocument.Parse(
+            await createResponse.Content.ReadAsStringAsync());
+        var createdAlgorithms = createdJson.RootElement
+            .GetProperty("algorithmName")
+            .EnumerateArray()
+            .Select(value => value.GetString()!)
+            .ToArray();
+        var createdId = createdJson.RootElement.GetProperty("_id").GetString();
+
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        Assert.Equal(["FindAir", "Rpn"], createdAlgorithms);
+        Assert.False(string.IsNullOrWhiteSpace(createdId));
+
+        var patchResponse = await context.Client.PatchAsync(
+            $"/rules/{createdId}",
+            Json("""{"algorithmName":["Rpn"]}"""));
+        var patched = await patchResponse.Content.ReadFromJsonAsync<RuleDto>(JsonOptions);
+
+        Assert.Equal(HttpStatusCode.OK, patchResponse.StatusCode);
+        Assert.Equal([AlgorithmName.Rpn], patched?.AlgorithmNames);
+        Assert.Equal(
+            [AlgorithmName.Rpn],
+            (await context.Repository.GetByIdAsync(createdId!))?.AlgorithmNames);
+    }
+
+    [Theory]
+    [InlineData("""{"algorithmName":[]}""")]
+    [InlineData("""{"algorithmName":["FindAir","FindAir"]}""")]
+    [InlineData("""{"algorithmName":"FindAir"}""")]
+    public async Task PatchOneRejectsInvalidAlgorithmSelections(string body)
+    {
+        using var context = CreateContext(ValidRule("rule-1", "one"));
+
+        var response = await context.Client.PatchAsync("/rules/rule-1", Json(body));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(
+            [AlgorithmName.FindAir],
+            (await context.Repository.GetByIdAsync("rule-1"))?.AlgorithmNames);
+    }
+
+    [Fact]
     public async Task PatchOneReplacesSensorsAndNormalizesValues()
     {
         var rule = ValidRule("rule-1", "one");
-        rule.Sensors["camera"] = ["cam-1"];
+        rule.Sensors["camera"] = [Accurate];
         using var context = CreateContext(rule);
 
         var response = await context.Client.PatchAsync(
@@ -320,8 +373,8 @@ public sealed class RulesApiRouteTests
             Json("""
                 {
                   "sensors": {
-                    "thermal": ["th-1", "th-1", ""],
-                    "": ["ignored"]
+                    "thermal": ["Sensor", "Sensor", "Accurate"],
+                    "": ["Sensor"]
                   },
                   "tenantsInfo": [
                     {
@@ -342,7 +395,7 @@ public sealed class RulesApiRouteTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.False(updated?.Sensors.ContainsKey("camera"));
-        Assert.Equal(["th-1"], updated?.Sensors["thermal"]);
+        Assert.Equal([Sensor, Accurate], updated?.Sensors["thermal"]);
         Assert.False(updated?.Sensors.ContainsKey(""));
         var tenant = Assert.Single(updated?.TenantsInfo ?? []);
         Assert.Equal("tenant-2", tenant.TenantId);
@@ -557,7 +610,7 @@ public sealed class RulesApiRouteTests
             Json("""
                 {
                   "ruleName": "invalid-sensors",
-                  "algorithmName": "FindAir",
+                  "algorithmName": ["FindAir"],
                   "sensors": { "camera": null },
                   "minimumResolution": 0.5,
                   "maximumResolution": 999,
@@ -573,21 +626,46 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
+    public async Task CreateAndUpdateRejectEmptySensorValueLists()
+    {
+        using var context = CreateContext(ValidRule("rule-1", "one"));
+
+        var create = await context.Client.PostAsync(
+            "/rules",
+            Json("""
+                {
+                  "ruleName": "invalid-sensors",
+                  "algorithmName": ["FindAir"],
+                  "sensors": { "camera": [] },
+                  "minimumResolution": 0.5,
+                  "maximumResolution": 999,
+                  "locationWkt": "POINT (1 1)"
+                }
+                """));
+        var update = await context.Client.PatchAsync(
+            "/rules/rule-1",
+            Json("""{ "sensors": { "camera": [] } }"""));
+
+        Assert.Equal(HttpStatusCode.BadRequest, create.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, update.StatusCode);
+    }
+
+    [Fact]
     public async Task AddSensorsRouteAddsUniqueValuesAndReportsMissingIds()
     {
         var rule = ValidRule("rule-1", "one");
-        rule.Sensors["camera"] = ["cam-1"];
+        rule.Sensors["camera"] = [Accurate];
         using var context = CreateContext(rule);
 
         var response = await context.Client.PatchAsJsonAsync(
             "/rules/sensors/add?ids=rule-1,missing",
-            new { sensorName = "camera", values = new[] { "cam-1", "cam-2" } },
+            new { sensorName = "camera", values = new[] { "Accurate", "Sensor" } },
             JsonOptions);
         var result = await response.Content.ReadFromJsonAsync<BulkOperationResult>(JsonOptions);
 
         Assert.Equal(HttpStatusCode.MultiStatus, response.StatusCode);
         Assert.Equal(["rule-1"], result?.SuccessIds);
-        Assert.Equal(["cam-1", "cam-2"], (await context.Repository.GetByIdAsync("rule-1"))?.Sensors["camera"]);
+        Assert.Equal([Accurate, Sensor], (await context.Repository.GetByIdAsync("rule-1"))?.Sensors["camera"]);
         Assert.Single(result?.FailedIds ?? []);
     }
 
@@ -595,7 +673,7 @@ public sealed class RulesApiRouteTests
     public async Task SensorRoutesReturnUnprocessableEntityWhenEveryItemFails()
     {
         using var context = CreateContext();
-        var request = new { sensorName = "camera", values = new[] { "cam-1" } };
+        var request = new { sensorName = "camera", values = new[] { "Accurate" } };
 
         var add = await context.Client.PatchAsJsonAsync(
             "/rules/sensors/add?ids=missing-1,missing-2",
@@ -617,23 +695,23 @@ public sealed class RulesApiRouteTests
 
         var response = await context.Client.PatchAsJsonAsync(
             "/rules/sensors/add?ids=rule-1",
-            new { sensorName = "thermal", values = new[] { "th-1", "th-2" } },
+            new { sensorName = "thermal", values = new[] { "Sensor", "Accurate" } },
             JsonOptions);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(["th-1", "th-2"], (await context.Repository.GetByIdAsync("rule-1"))?.Sensors["thermal"]);
+        Assert.Equal([Sensor, Accurate], (await context.Repository.GetByIdAsync("rule-1"))?.Sensors["thermal"]);
     }
 
     [Fact]
     public async Task RemoveSensorsRouteRemovesValuesAndDeletesEmptyKey()
     {
         var rule = ValidRule("rule-1", "one");
-        rule.Sensors["camera"] = ["cam-1"];
+        rule.Sensors["camera"] = [Accurate];
         using var context = CreateContext(rule);
 
         var response = await context.Client.PatchAsJsonAsync(
             "/rules/sensors/remove?ids=rule-1",
-            new { sensorName = "camera", values = new[] { "cam-1" } },
+            new { sensorName = "camera", values = new[] { "Accurate" } },
             JsonOptions);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -644,16 +722,16 @@ public sealed class RulesApiRouteTests
     public async Task RemoveSensorsRouteLeavesRuleUnchangedWhenSensorIsMissing()
     {
         var rule = ValidRule("rule-1", "one");
-        rule.Sensors["camera"] = ["cam-1"];
+        rule.Sensors["camera"] = [Accurate];
         using var context = CreateContext(rule);
 
         var response = await context.Client.PatchAsJsonAsync(
             "/rules/sensors/remove?ids=rule-1",
-            new { sensorName = "thermal", values = new[] { "th-1" } },
+            new { sensorName = "thermal", values = new[] { "Sensor" } },
             JsonOptions);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(["cam-1"], (await context.Repository.GetByIdAsync("rule-1"))?.Sensors["camera"]);
+        Assert.Equal([Accurate], (await context.Repository.GetByIdAsync("rule-1"))?.Sensors["camera"]);
     }
 
     [Fact]
@@ -663,11 +741,11 @@ public sealed class RulesApiRouteTests
 
         var invalidPayload = await context.Client.PatchAsJsonAsync(
             "/rules/sensors/add?ids=rule-1",
-            new { sensorName = "", values = new[] { "cam-1", "cam-1" } },
+            new { sensorName = "", values = new[] { "Accurate", "Accurate" } },
             JsonOptions);
         var emptyIds = await context.Client.PatchAsJsonAsync(
             "/rules/sensors/remove",
-            new { sensorName = "camera", values = new[] { "cam-1" } },
+            new { sensorName = "camera", values = new[] { "Accurate" } },
             JsonOptions);
 
         Assert.Equal(HttpStatusCode.BadRequest, invalidPayload.StatusCode);
@@ -728,11 +806,11 @@ public sealed class RulesApiRouteTests
         var activity = await client.PatchAsJsonAsync("/rules/rule-1/activity", new { isActive = true }, JsonOptions);
         var addSensor = await client.PatchAsJsonAsync(
             "/rules/sensors/add?ids=rule-1",
-            new { sensorName = "camera", values = new[] { "cam-1" } },
+            new { sensorName = "camera", values = new[] { "Accurate" } },
             JsonOptions);
         var removeSensor = await client.PatchAsJsonAsync(
             "/rules/sensors/remove?ids=rule-1",
-            new { sensorName = "camera", values = new[] { "cam-1" } },
+            new { sensorName = "camera", values = new[] { "Accurate" } },
             JsonOptions);
         var delete = await client.DeleteAsync("/rules/rule-1");
 
@@ -765,7 +843,7 @@ public sealed class RulesApiRouteTests
         {
             Id = id,
             RuleName = ruleName,
-            AlgorithmName = AlgorithmName.FindAir,
+            AlgorithmNames = [AlgorithmName.FindAir],
             IsActive = isActive,
             MinimumResolution = 0.5,
             MaximumResolution = 1,

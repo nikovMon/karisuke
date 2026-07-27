@@ -6,6 +6,7 @@ using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbConsumer.Application;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 
 namespace ImagingPipeline.TbConsumer.Tests;
@@ -23,7 +24,11 @@ public sealed class WorkerTests
             Mock.Of<IRabbitMqPublisher>(),
             TimeProvider.System,
             NullLogger<TbMessageHandler>.Instance);
-        var worker = new Worker(new ReturningConsumer(), handler, logger);
+        var worker = new Worker(
+            new ReturningConsumer(),
+            handler,
+            logger,
+            Options.Create(new RabbitMqClientOptions()));
 
         await worker.StartAsync(CancellationToken.None);
         try

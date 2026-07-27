@@ -93,13 +93,17 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                         return RabbitMqMessageProcessingResult.Failure(deserializationError);
                     }
 
+                    var matchedAlgorithms = input.MissionMetadata.Overlay.AlgorithmNames;
+                    var algorithmNameText = matchedAlgorithms is { Count: > 0 }
+                        ? string.Join(",", matchedAlgorithms)
+                        : null;
                     validationActivity.AddPipelineContext(
                         taskId: input.TaskId,
                         requestId: input.RequestId,
                         imageId: input.MissionMetadata.Overlay.ImageId,
                         ruleId: input.MissionMetadata.Overlay.RuleId,
                         tenantId: input.MissionMetadata.TenantId,
-                        algorithmName: input.MissionMetadata.Overlay.AlgorithmName.ToString());
+                        algorithmName: algorithmNameText);
 
                     var validationError = Validate(input);
                     if (validationError is not null)
@@ -109,18 +113,6 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                         validationActivity.SetTelemetryError(error);
                         _logger.MessageRejected(validationError);
                         return RabbitMqMessageProcessingResult.Failure(validationError);
-                    }
-
-                    var matchedAlgorithm = input.MissionMetadata.Overlay.AlgorithmName;
-                    if (!Enum.IsDefined(typeof(AlgorithmName), matchedAlgorithm))
-                    {
-                        var invalidAlgorithmError =
-                            $"Validation failed: invalid algorithm '{matchedAlgorithm}'. Valid algorithms are: {string.Join(", ", Enum.GetNames<AlgorithmName>())}";
-                        outcome = TelemetryOutcome.Rejected;
-                        error = TelemetryErrorCategory.Validation;
-                        validationActivity.SetTelemetryError(error);
-                        _logger.MessageRejected(invalidAlgorithmError);
-                        return RabbitMqMessageProcessingResult.Failure(invalidAlgorithmError);
                     }
 
                     if (validationActivity?.IsAllDataRequested == true)
@@ -208,7 +200,11 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
         CancellationToken cancellationToken,
         HandlerTelemetryState telemetryState)
     {
-        var matchedAlgorithm = input.MissionMetadata.Overlay.AlgorithmName;
+        var matchedAlgorithms = input.MissionMetadata.Overlay.AlgorithmNames;
+        var algorithmNames = matchedAlgorithms
+            .Select(algorithm => algorithm.ToString())
+            .ToList();
+        var algorithmNameText = string.Join(",", algorithmNames);
         var overlay = input.MissionMetadata.Overlay;
         using var pipelineScope = _logger.BeginTelemetryScope(new TelemetryLogContext(
             TaskId: input.TaskId,
@@ -216,7 +212,7 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
             ImageId: overlay.ImageId,
             RuleId: overlay.RuleId,
             TenantId: input.MissionMetadata.TenantId,
-            AlgorithmName: matchedAlgorithm.ToString()));
+            AlgorithmName: algorithmNameText));
         using var correlationBaggage = PipelineCorrelationBaggage.Push(
             new PipelineCorrelationContext(
                 TaskId: input.TaskId,
@@ -224,14 +220,14 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                 ImageId: overlay.ImageId,
                 RuleId: overlay.RuleId,
                 TenantId: input.MissionMetadata.TenantId,
-                AlgorithmName: matchedAlgorithm.ToString()));
+                AlgorithmName: algorithmNameText));
 
         PipelineTelemetry.RecordBatchSize(PipelineStage.TbConsumer, PipelineItem.Tile, input.Tiles.Count);
 
         var outgoingHeaders = message.Headers is null
             ? new Dictionary<string, object?>(StringComparer.Ordinal)
             : new Dictionary<string, object?>(message.Headers, StringComparer.Ordinal);
-        outgoingHeaders["algorithm_name"] = matchedAlgorithm.ToString();
+        outgoingHeaders["algorithm_name"] = algorithmNameText;
         var headers = new ReadOnlyDictionary<string, object?>(outgoingHeaders);
 
         var tilesRois = input.Tiles
@@ -249,7 +245,7 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                     imageId: overlay.ImageId,
                     ruleId: overlay.RuleId,
                     tenantId: input.MissionMetadata.TenantId,
-                    algorithmName: matchedAlgorithm.ToString());
+                    algorithmName: algorithmNameText);
                 if (projectionActivity?.IsAllDataRequested == true)
                 {
                     projectionActivity.SetTag(
@@ -316,7 +312,7 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                 imageId: overlay.ImageId,
                 ruleId: overlay.RuleId,
                 tenantId: input.MissionMetadata.TenantId,
-                algorithmName: matchedAlgorithm.ToString());
+                algorithmName: algorithmNameText);
             if (buildActivity?.IsAllDataRequested == true)
             {
                 buildActivity.SetTag("imaging_pipeline.pipeline.tile.count", input.Tiles.Count);
@@ -364,7 +360,7 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                 ImagingTime = overlay.ImageTime,
                 Resolution = overlay.ResolutionMPerPx,
                 TenantId = input.MissionMetadata.TenantId,
-                Algorithms = new List<string> { matchedAlgorithm.ToString() },
+                Algorithms = algorithmNames,
                 TileCoordinates = tileCoordinates,
                 Lon = lon,
                 Lat = lat,
@@ -451,8 +447,16 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
             return "Validation failed: tenantId is missing or empty.";
         }
 
-        return input.Tiles is not { Count: > 0 }
-            ? "Validation failed: Tiles batch is null or empty."
+        if (input.Tiles is not { Count: > 0 })
+        {
+            return "Validation failed: Tiles batch is null or empty.";
+        }
+
+        var matchedAlgorithms = input.MissionMetadata.Overlay.AlgorithmNames;
+        return matchedAlgorithms is not { Count: > 0 }
+               || matchedAlgorithms.Any(algorithm => !Enum.IsDefined(algorithm))
+               || matchedAlgorithms.Distinct().Count() != matchedAlgorithms.Count
+            ? $"Validation failed: algorithm_name must contain one or more unique algorithms. Valid algorithms are: {string.Join(", ", Enum.GetNames<AlgorithmName>())}"
             : null;
     }
 

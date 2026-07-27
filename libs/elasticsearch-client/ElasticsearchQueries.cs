@@ -51,6 +51,27 @@ public sealed class ElasticsearchSearchRequest
     public List<ElasticsearchGeoShapeFilter> GeoShapeFilters { get; init; } = [];
 }
 
+public sealed class ElasticsearchPointInTimeSearchRequest
+{
+    public required ElasticsearchSearchRequest Search { get; init; }
+    public required string PointInTimeId { get; init; }
+    public string KeepAlive { get; init; } = "1m";
+    public IReadOnlyList<JsonElement> SearchAfter { get; init; } = [];
+    public bool TrackTotalHits { get; init; } = true;
+}
+
+public sealed record ElasticsearchSearchHit<TDocument>(
+    string Id,
+    TDocument Source,
+    IReadOnlyList<JsonElement> SortValues)
+    where TDocument : class;
+
+public sealed record ElasticsearchSearchPage<TDocument>(
+    string PointInTimeId,
+    long? Total,
+    IReadOnlyList<ElasticsearchSearchHit<TDocument>> Hits)
+    where TDocument : class;
+
 public sealed class ElasticsearchSensorSearchRequest
 {
     public required string IndexName { get; init; }
@@ -87,6 +108,75 @@ public static class ElasticsearchQueryJsonBuilder
             WriteSourceIncludes(writer, request);
             writer.WritePropertyName("query");
             WriteQuery(writer, request);
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    public static string BuildPointInTimeSearchBody(ElasticsearchPointInTimeSearchRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Search);
+        Validate(request.Search);
+
+        if (request.Search.From != 0)
+        {
+            throw new ArgumentException(
+                "Point-in-time searches do not support a non-zero From value.",
+                nameof(request));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.PointInTimeId))
+        {
+            throw new ArgumentException("PointInTimeId must not be empty.", nameof(request));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.KeepAlive))
+        {
+            throw new ArgumentException("KeepAlive must not be empty.", nameof(request));
+        }
+
+        if (request.SearchAfter.Any(value =>
+            value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined))
+        {
+            throw new ArgumentException(
+                "SearchAfter values must not be null or undefined.",
+                nameof(request));
+        }
+
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("size", request.Search.Size);
+            writer.WriteBoolean("track_total_hits", request.TrackTotalHits);
+            WriteSourceIncludes(writer, request.Search);
+
+            writer.WriteStartObject("pit");
+            writer.WriteString("id", request.PointInTimeId);
+            writer.WriteString("keep_alive", request.KeepAlive);
+            writer.WriteEndObject();
+
+            writer.WritePropertyName("sort");
+            writer.WriteStartArray();
+            writer.WriteStringValue("_shard_doc");
+            writer.WriteEndArray();
+
+            if (request.SearchAfter.Count > 0)
+            {
+                writer.WritePropertyName("search_after");
+                writer.WriteStartArray();
+                foreach (var value in request.SearchAfter)
+                {
+                    value.WriteTo(writer);
+                }
+
+                writer.WriteEndArray();
+            }
+
+            writer.WritePropertyName("query");
+            WriteQuery(writer, request.Search);
             writer.WriteEndObject();
         }
 
@@ -325,4 +415,76 @@ internal sealed class ElasticsearchHit<TDocument>
 
     [JsonPropertyName("_source")]
     public TDocument? Source { get; set; }
+}
+
+internal sealed class ElasticsearchOpenPointInTimeResponse
+{
+    [JsonPropertyName("id")]
+    public string? Id { get; set; }
+}
+
+internal sealed class ElasticsearchClosePointInTimeResponse
+{
+    [JsonPropertyName("succeeded")]
+    public bool Succeeded { get; set; }
+}
+
+internal sealed class ElasticsearchPointInTimeSearchResponse<TDocument>
+    where TDocument : class
+{
+    [JsonPropertyName("pit_id")]
+    public string? PointInTimeId { get; set; }
+
+    [JsonPropertyName("timed_out")]
+    public bool? TimedOut { get; set; }
+
+    [JsonPropertyName("_shards")]
+    public ElasticsearchShardSummary? Shards { get; set; }
+
+    [JsonPropertyName("hits")]
+    public ElasticsearchPointInTimeHits<TDocument>? Hits { get; set; }
+}
+
+internal sealed class ElasticsearchShardSummary
+{
+    [JsonPropertyName("total")]
+    public int? Total { get; set; }
+
+    [JsonPropertyName("successful")]
+    public int? Successful { get; set; }
+
+    [JsonPropertyName("failed")]
+    public int? Failed { get; set; }
+}
+
+internal sealed class ElasticsearchPointInTimeHits<TDocument>
+    where TDocument : class
+{
+    [JsonPropertyName("total")]
+    public ElasticsearchTotalHits? Total { get; set; }
+
+    [JsonPropertyName("hits")]
+    public List<ElasticsearchPointInTimeHit<TDocument>>? Items { get; set; }
+}
+
+internal sealed class ElasticsearchTotalHits
+{
+    [JsonPropertyName("value")]
+    public long? Value { get; set; }
+
+    [JsonPropertyName("relation")]
+    public string? Relation { get; set; }
+}
+
+internal sealed class ElasticsearchPointInTimeHit<TDocument>
+    where TDocument : class
+{
+    [JsonPropertyName("_id")]
+    public string? Id { get; set; }
+
+    [JsonPropertyName("_source")]
+    public TDocument? Source { get; set; }
+
+    [JsonPropertyName("sort")]
+    public List<JsonElement>? SortValues { get; set; }
 }

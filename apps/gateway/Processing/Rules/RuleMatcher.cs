@@ -9,10 +9,11 @@ public sealed class RuleMatcher
         IReadOnlyList<ActiveRule> activeRules)
     {
         var matches = new List<RuleMatchResult>();
+        var registrationQualityMask = RegistrationQualityMask.From(input.RegistrationQuality);
 
         foreach (var activeRule in activeRules)
         {
-            if (!MatchesSensor(input, activeRule) ||
+            if (!MatchesSensor(input.SensorName, registrationQualityMask, activeRule) ||
                 !MatchesResolution(input, activeRule))
             {
                 continue;
@@ -35,27 +36,20 @@ public sealed class RuleMatcher
         return matches;
     }
 
-    private static bool MatchesSensor(GatewayInputMessage input, ActiveRule rule)
+    private static bool MatchesSensor(
+        string sensorName,
+        int registrationQualityMask,
+        ActiveRule rule)
     {
         if (rule.Sensors.Count == 0)
         {
             return true;
         }
 
-        if (!string.IsNullOrWhiteSpace(input.SensorType) &&
-            rule.Sensors.TryGetValue(input.SensorType, out var typedSensors))
-        {
-            return typedSensors.Contains(input.SensorName);
-        }
-
-        if (!string.IsNullOrWhiteSpace(input.SensorType))
-        {
-            return false;
-        }
-
-        return rule.Sensors.Values.Any(values => values.Contains(input.SensorName));
+        return rule.Sensors.TryGetValue(sensorName, out var allowedRegistrationQualities) &&
+            (allowedRegistrationQualities & registrationQualityMask) != 0;
     }
 
     private static bool MatchesResolution(GatewayInputMessage input, ActiveRule rule) =>
-        input.Resolution >= rule.MinimumResolution && input.Resolution <= rule.MaximumResolution;
+        input.BestResolution >= rule.MinimumResolution && input.BestResolution <= rule.MaximumResolution;
 }

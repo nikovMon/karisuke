@@ -3,6 +3,7 @@ using System.Diagnostics.Metrics;
 using ImagingPipeline.Observability;
 using ImagingPipeline.RabbitMqClient;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ImagingPipeline.TbPublisher.Tests;
 
@@ -14,7 +15,11 @@ public sealed class WorkerTests
         var restartMeasurements = new ConcurrentQueue<KeyValuePair<string, object?>[]>();
         using var listener = CreateRestartListener(restartMeasurements);
         var logger = new SignalingLogger<Worker>(eventId: 3003);
-        var worker = new Worker(new ReturningConsumer(), new NoOpHandler(), logger);
+        var worker = new Worker(
+            new ReturningConsumer(),
+            new NoOpHandler(),
+            logger,
+            Options.Create(new RabbitMqClientOptions()));
 
         await worker.StartAsync(CancellationToken.None);
         try

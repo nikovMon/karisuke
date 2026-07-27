@@ -27,14 +27,14 @@ internal readonly struct RabbitMqPublisherChannelLease : IAsyncDisposable
 
 internal sealed class RabbitMqPublisherChannelPool : IRabbitMqPublisherChannelPool
 {
-    private readonly IRabbitMqConnectionManager _connections;
+    private readonly IRabbitMqPublisherConnectionManager _connections;
     private readonly RabbitMqClientOptions _options;
     private readonly ConcurrentQueue<IChannel> _channels = new();
     private readonly SemaphoreSlim _leases;
     private bool _disposed;
 
     public RabbitMqPublisherChannelPool(
-        IRabbitMqConnectionManager connections,
+        IRabbitMqPublisherConnectionManager connections,
         IOptions<RabbitMqClientOptions> options)
     {
         _connections = connections;

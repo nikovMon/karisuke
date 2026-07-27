@@ -1,4 +1,4 @@
-using ImagingPipeline.Common.Dtos.Messaging;
+using ImagingPipeline.Common.Dtos.Gateway.Messages;
 
 namespace ImagingPipeline.TbPublisher.MessageHandling;
 

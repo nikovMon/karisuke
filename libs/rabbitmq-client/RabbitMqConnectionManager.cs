@@ -11,7 +11,35 @@ internal interface IRabbitMqConnectionManager : IAsyncDisposable
     Task<IConnection> GetConnectionAsync(CancellationToken cancellationToken = default);
 }
 
-internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
+internal interface IRabbitMqPublisherConnectionManager : IRabbitMqConnectionManager
+{
+}
+
+internal interface IRabbitMqConsumerConnectionManager : IRabbitMqConnectionManager
+{
+}
+
+internal sealed class RabbitMqPublisherConnectionManager : RabbitMqConnectionManager, IRabbitMqPublisherConnectionManager
+{
+    public RabbitMqPublisherConnectionManager(
+        IOptions<RabbitMqClientOptions> options,
+        ILogger<RabbitMqConnectionManager> logger)
+        : base(options, logger, "publisher")
+    {
+    }
+}
+
+internal sealed class RabbitMqConsumerConnectionManager : RabbitMqConnectionManager, IRabbitMqConsumerConnectionManager
+{
+    public RabbitMqConsumerConnectionManager(
+        IOptions<RabbitMqClientOptions> options,
+        ILogger<RabbitMqConnectionManager> logger)
+        : base(options, logger, "consumer")
+    {
+    }
+}
+
+internal class RabbitMqConnectionManager : IRabbitMqConnectionManager
 {
     private static readonly TimeSpan DefaultDisposalTimeout = TimeSpan.FromSeconds(5);
 
@@ -19,6 +47,7 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
     private readonly ILogger<RabbitMqConnectionManager> _logger;
     private readonly Func<CancellationToken, Task<IConnection>> _connectionFactory;
     private readonly TimeSpan _disposalTimeout;
+    private readonly string _role;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly CancellationTokenSource _disposalCancellation = new();
     private readonly object _disposalSync = new();
@@ -29,13 +58,31 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
     private int _disposed;
 
     public RabbitMqConnectionManager(IOptions<RabbitMqClientOptions> options, ILogger<RabbitMqConnectionManager> logger)
-        : this(options, logger, connectionFactory: null, DefaultDisposalTimeout)
+        : this(options, logger, "shared", connectionFactory: null, DefaultDisposalTimeout)
     {
     }
 
     internal RabbitMqConnectionManager(
         IOptions<RabbitMqClientOptions> options,
         ILogger<RabbitMqConnectionManager> logger,
+        Func<CancellationToken, Task<IConnection>>? connectionFactory,
+        TimeSpan disposalTimeout)
+        : this(options, logger, "test", connectionFactory, disposalTimeout)
+    {
+    }
+
+    protected RabbitMqConnectionManager(
+        IOptions<RabbitMqClientOptions> options,
+        ILogger<RabbitMqConnectionManager> logger,
+        string role)
+        : this(options, logger, role, connectionFactory: null, DefaultDisposalTimeout)
+    {
+    }
+
+    private RabbitMqConnectionManager(
+        IOptions<RabbitMqClientOptions> options,
+        ILogger<RabbitMqConnectionManager> logger,
+        string role,
         Func<CancellationToken, Task<IConnection>>? connectionFactory,
         TimeSpan disposalTimeout)
     {
@@ -45,6 +92,9 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
         _disposalTimeout = disposalTimeout > TimeSpan.Zero
             ? disposalTimeout
             : throw new ArgumentOutOfRangeException(nameof(disposalTimeout));
+        _role = string.IsNullOrWhiteSpace(role)
+            ? throw new ArgumentException("Connection role must not be empty.", nameof(role))
+            : role;
     }
 
     public async Task<IConnection> GetConnectionAsync(CancellationToken cancellationToken = default)
@@ -101,7 +151,7 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
                 MessagingTelemetry.RecordConnectionEvent(
                     RabbitMqConnectionEvent.ConnectFailure,
                     TelemetryErrorCategory.Connection);
-                RabbitMqLog.ConnectionFailed(_logger, ex);
+                RabbitMqLog.ConnectionFailed(_logger, ex, _role);
                 throw;
             }
 
@@ -125,7 +175,12 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
             }
 
             MessagingTelemetry.RecordConnectionEvent(RabbitMqConnectionEvent.ConnectSuccess);
-            RabbitMqLog.ConnectionEstablished(_logger, _options.Host, _options.Port, _options.VirtualHost);
+            RabbitMqLog.ConnectionEstablished(
+                _logger,
+                _role,
+                _options.Host,
+                _options.Port,
+                _options.VirtualHost);
             return connection;
         }
         finally
@@ -149,7 +204,7 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
             // Parallelism is provided by multiple consumer channels, not concurrent callbacks on one channel.
             ConsumerDispatchConcurrency = 1,
             ClientProvidedName =
-                $"imagingpipeline-{Environment.MachineName}-{Environment.ProcessId}"
+                $"imagingpipeline-{Environment.MachineName}-{Environment.ProcessId}-{_role}"
         };
 
         return factory.CreateConnectionAsync(cancellationToken);
@@ -165,7 +220,12 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
         MessagingTelemetry.RecordConnectionEvent(RabbitMqConnectionEvent.Shutdown);
         if (Volatile.Read(ref _disposed) == 0)
         {
-            RabbitMqLog.ConnectionShutdown(_logger, args.Initiator, args.ReplyCode, args.ReplyText);
+            RabbitMqLog.ConnectionShutdown(
+                _logger,
+                _role,
+                args.Initiator,
+                args.ReplyCode,
+                args.ReplyText);
         }
 
         return Task.CompletedTask;
@@ -178,7 +238,7 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
             return Task.CompletedTask;
         }
 
-        RabbitMqLog.CallbackFailed(_logger, args.Exception);
+        RabbitMqLog.CallbackFailed(_logger, args.Exception, _role);
         return Task.CompletedTask;
     }
 
@@ -190,7 +250,7 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
         }
 
         MessagingTelemetry.RecordConnectionEvent(RabbitMqConnectionEvent.RecoverySuccess);
-        RabbitMqLog.RecoverySucceeded(_logger);
+        RabbitMqLog.RecoverySucceeded(_logger, _role);
         return Task.CompletedTask;
     }
 
@@ -204,7 +264,7 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
         MessagingTelemetry.RecordConnectionEvent(
             RabbitMqConnectionEvent.RecoveryFailure,
             TelemetryErrorCategory.Connection);
-        RabbitMqLog.RecoveryFailed(_logger, args.Exception);
+        RabbitMqLog.RecoveryFailed(_logger, args.Exception, _role);
         return Task.CompletedTask;
     }
 
@@ -369,7 +429,10 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
                 // The in-progress acquisition owns the semaphore and is responsible for
                 // disposing any connection that arrives late. Do not dispose the semaphore:
                 // that owner and any pre-existing waiter must still be able to release it.
-                RabbitMqLog.ConnectionDisposalTimedOut(_logger, _disposalTimeout.TotalSeconds);
+                RabbitMqLog.ConnectionDisposalTimedOut(
+                    _logger,
+                    _disposalTimeout.TotalSeconds,
+                    _role);
                 return;
             }
 

@@ -9,6 +9,14 @@ internal readonly record struct RabbitMqCompletionResult(
     TelemetryOutcome Outcome,
     TelemetryErrorCategory Error);
 
+internal sealed class RabbitMqMessageCompletionException : Exception
+{
+    public RabbitMqMessageCompletionException(string messageId, Exception innerException)
+        : base($"Could not safely complete RabbitMQ message '{messageId}'.", innerException)
+    {
+    }
+}
+
 internal sealed class RabbitMqOutcomeRouter
 {
     private readonly IRabbitMqPublisher _publisher;
@@ -68,13 +76,7 @@ internal sealed class RabbitMqOutcomeRouter
         catch (Exception ex)
         {
             RabbitMqLog.CompletionFailed(_logger, ex, delivery.Message.MessageId);
-            await NackAsync(
-                channel,
-                delivery.DeliveryTag,
-                requeue: true,
-                TelemetryOutcome.Requeue,
-                cancellationToken);
-            return new RabbitMqCompletionResult(TelemetryOutcome.Requeue, TelemetryErrorCategory.Unknown);
+            throw new RabbitMqMessageCompletionException(delivery.Message.MessageId, ex);
         }
     }
 

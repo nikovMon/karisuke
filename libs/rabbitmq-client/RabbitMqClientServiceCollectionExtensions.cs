@@ -8,6 +8,10 @@ namespace ImagingPipeline.RabbitMqClient;
 
 public static class RabbitMqClientServiceCollectionExtensions
 {
+    private sealed class RabbitMqOptionsBindingMarker
+    {
+    }
+
     public static IServiceCollection AddRabbitMqPublisher(
         this IServiceCollection services,
         IConfiguration configuration)
@@ -18,7 +22,7 @@ public static class RabbitMqClientServiceCollectionExtensions
             .Validate(options => options.IsPublisherValid(out _), "RabbitMq publisher configuration is invalid.")
             .ValidateOnStart();
 
-        services.TryAddSingleton<IRabbitMqConnectionManager, RabbitMqConnectionManager>();
+        services.TryAddSingleton<IRabbitMqPublisherConnectionManager, RabbitMqPublisherConnectionManager>();
         services.TryAddSingleton<IRabbitMqPublisherChannelPool, RabbitMqPublisherChannelPool>();
         services.TryAddSingleton<IMessageTraceContextPropagator>(RabbitMqNativeTracing.Propagator);
         services.TryAddSingleton<IRabbitMqPublisher, RabbitMqPublisher>();
@@ -34,6 +38,7 @@ public static class RabbitMqClientServiceCollectionExtensions
             .Validate(options => options.IsConsumerValid(out _), "RabbitMq consumer configuration is invalid.")
             .ValidateOnStart();
 
+        services.TryAddSingleton<IRabbitMqConsumerConnectionManager, RabbitMqConsumerConnectionManager>();
         services.TryAddSingleton<RabbitMqOutcomeRouter>();
         services.TryAddSingleton<IRabbitMqConsumer, RabbitMqConsumer>();
         services.TryAddSingleton<IRabbitMqClient, RabbitMqClient>();
@@ -51,7 +56,13 @@ public static class RabbitMqClientServiceCollectionExtensions
         IServiceCollection services,
         IConfiguration configuration)
     {
-        return services.AddOptions<RabbitMqClientOptions>()
-            .Bind(configuration.GetSection(RabbitMqClientOptions.SectionName));
+        var options = services.AddOptions<RabbitMqClientOptions>();
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(RabbitMqOptionsBindingMarker)))
+        {
+            return options;
+        }
+
+        services.AddSingleton(new RabbitMqOptionsBindingMarker());
+        return options.Bind(configuration.GetSection(RabbitMqClientOptions.SectionName));
     }
 }
