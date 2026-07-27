@@ -7,11 +7,11 @@ using ImagingPipeline.Gateway.Processing.Messages;
 using ImagingPipeline.Gateway.Processing.Rules;
 using ImagingPipeline.RabbitMqClient;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using System.Diagnostics;
 
 public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
 {
-    private static readonly TimeSpan DefaultConsumerRestartDelay = TimeSpan.FromSeconds(5);
-
     private readonly IRabbitMqConsumer _consumer;
     private readonly ActiveRuleCache _ruleCache;
     private readonly GatewayInputMessageParser _inputParser;
@@ -19,27 +19,7 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
     private readonly GatewayOutputMessageBuilder _outputBuilder;
     private readonly GatewayHealthState _healthState;
     private readonly ILogger<GatewayWorker> _logger;
-    private readonly TimeSpan _consumerRestartDelay;
-
-    public GatewayWorker(
-        IRabbitMqConsumer consumer,
-        ActiveRuleCache ruleCache,
-        GatewayInputMessageParser inputParser,
-        RuleMatcher ruleMatcher,
-        GatewayOutputMessageBuilder outputBuilder,
-        GatewayHealthState healthState,
-        ILogger<GatewayWorker> logger)
-        : this(
-            consumer,
-            ruleCache,
-            inputParser,
-            ruleMatcher,
-            outputBuilder,
-            healthState,
-            logger,
-            DefaultConsumerRestartDelay)
-    {
-    }
+    private readonly RabbitMqConsumerRestartBackoff _consumerRestartBackoff;
 
     public GatewayWorker(
         IRabbitMqConsumer consumer,
@@ -49,13 +29,29 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
         GatewayOutputMessageBuilder outputBuilder,
         GatewayHealthState healthState,
         ILogger<GatewayWorker> logger,
+        IOptions<RabbitMqClientOptions> rabbitMqOptions)
+        : this(
+            consumer,
+            ruleCache,
+            inputParser,
+            ruleMatcher,
+            outputBuilder,
+            healthState,
+            logger,
+            TimeSpan.FromSeconds(rabbitMqOptions.Value.ReconnectDelaySeconds))
+    {
+    }
+
+    internal GatewayWorker(
+        IRabbitMqConsumer consumer,
+        ActiveRuleCache ruleCache,
+        GatewayInputMessageParser inputParser,
+        RuleMatcher ruleMatcher,
+        GatewayOutputMessageBuilder outputBuilder,
+        GatewayHealthState healthState,
+        ILogger<GatewayWorker> logger,
         TimeSpan consumerRestartDelay)
     {
-        if (consumerRestartDelay < TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(consumerRestartDelay));
-        }
-
         _consumer = consumer;
         _ruleCache = ruleCache;
         _inputParser = inputParser;
@@ -63,7 +59,7 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
         _outputBuilder = outputBuilder;
         _healthState = healthState;
         _logger = logger;
-        _consumerRestartDelay = consumerRestartDelay;
+        _consumerRestartBackoff = new RabbitMqConsumerRestartBackoff(consumerRestartDelay);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -71,6 +67,8 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
         while (!stoppingToken.IsCancellationRequested)
         {
             var shouldRestart = false;
+            var restartDelay = TimeSpan.Zero;
+            var consumerStarted = Stopwatch.GetTimestamp();
             _healthState.MarkConsumerStarted();
 
             try
@@ -79,9 +77,11 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
                 shouldRestart = !stoppingToken.IsCancellationRequested;
                 if (shouldRestart)
                 {
+                    restartDelay = _consumerRestartBackoff.NextDelay(
+                        Stopwatch.GetElapsedTime(consumerStarted));
                     _logger.LogWarning(
                         "RabbitMQ consumer exited unexpectedly; restarting in {RestartDelay}.",
-                        _consumerRestartDelay);
+                        restartDelay);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -93,10 +93,12 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
                 shouldRestart = !stoppingToken.IsCancellationRequested;
                 if (shouldRestart)
                 {
+                    restartDelay = _consumerRestartBackoff.NextDelay(
+                        Stopwatch.GetElapsedTime(consumerStarted));
                     _logger.LogWarning(
                         ex,
                         "RabbitMQ consumer failed; restarting in {RestartDelay}.",
-                        _consumerRestartDelay);
+                        restartDelay);
                 }
             }
             finally
@@ -106,16 +108,16 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
 
             if (shouldRestart)
             {
-                await DelayBeforeRestartAsync(stoppingToken);
+                await DelayBeforeRestartAsync(restartDelay, stoppingToken);
             }
         }
     }
 
-    private async Task DelayBeforeRestartAsync(CancellationToken stoppingToken)
+    private static async Task DelayBeforeRestartAsync(TimeSpan restartDelay, CancellationToken stoppingToken)
     {
         try
         {
-            await Task.Delay(_consumerRestartDelay, stoppingToken);
+            await Task.Delay(restartDelay, stoppingToken);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {

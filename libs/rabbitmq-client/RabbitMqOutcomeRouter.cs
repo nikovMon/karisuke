@@ -4,6 +4,14 @@ using RabbitMQ.Client;
 
 namespace ImagingPipeline.RabbitMqClient;
 
+internal sealed class RabbitMqMessageCompletionException : Exception
+{
+    public RabbitMqMessageCompletionException(string messageId, Exception innerException)
+        : base($"Could not safely complete RabbitMQ message '{messageId}'.", innerException)
+    {
+    }
+}
+
 internal sealed class RabbitMqOutcomeRouter
 {
     private readonly IRabbitMqPublisher _publisher;
@@ -58,12 +66,11 @@ internal sealed class RabbitMqOutcomeRouter
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex, "Could not safely complete RabbitMQ message {MessageId}; nacking for requeue",
+            _logger.LogError(
+                ex,
+                "Could not safely complete RabbitMQ message {MessageId}; the consumer channel will close and the broker will requeue any unacknowledged delivery",
                 delivery.Message.MessageId);
-            await channel.BasicNackAsync(delivery.DeliveryTag, multiple: false, requeue: true, cancellationToken);
-            RabbitMqClientDiagnostics.NackedMessages.Add(1,
-                RabbitMqClientDiagnostics.Tag("queue", _options.InputQueue),
-                RabbitMqClientDiagnostics.Tag("requeue", true));
+            throw new RabbitMqMessageCompletionException(delivery.Message.MessageId, ex);
         }
     }
 

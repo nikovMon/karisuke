@@ -27,9 +27,22 @@ public static class RuleValidation
             errors.Add("ruleName cannot be empty.");
         }
 
-        if (request.HasField("algorithmName") && request.AlgorithmName is null)
+        if (request.HasField("algorithmName") &&
+            (request.AlgorithmNames is null || request.AlgorithmNames.Count == 0))
         {
-            errors.Add("algorithmName is required.");
+            errors.Add("algorithmName must contain at least one algorithm.");
+        }
+
+        if (request.AlgorithmNames is { Count: > 0 } &&
+            request.AlgorithmNames.Any(value => !AlgorithmNameContract.IsDefined(value)))
+        {
+            errors.Add("algorithmName values must be valid algorithms.");
+        }
+
+        if (request.AlgorithmNames is { Count: > 0 } &&
+            request.AlgorithmNames.Count != request.AlgorithmNames.Distinct().Count())
+        {
+            errors.Add("algorithmName values must be unique.");
         }
 
         if (request.HasField("minimumResolution") && request.MinimumResolution is null or <= 0)

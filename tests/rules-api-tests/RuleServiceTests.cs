@@ -20,7 +20,7 @@ public sealed class RuleServiceTests
 
         var result = await service.CreateAsync(new CreateRuleRequest
         {
-            AlgorithmName = AlgorithmName.FindAir
+            AlgorithmNames = [AlgorithmName.FindAir]
         });
 
         Assert.Equal(RuleOperationStatus.ValidationFailed, result.Status);
@@ -453,7 +453,7 @@ public sealed class RuleServiceTests
         new()
         {
             RuleName = ruleName,
-            AlgorithmName = AlgorithmName.FindAir,
+            AlgorithmNames = [AlgorithmName.FindAir],
             IsActive = true,
             MinimumResolution = 0.5,
             MaximumResolution = 1,
@@ -481,7 +481,7 @@ public sealed class RuleServiceTests
         {
             Id = id,
             RuleName = ruleName,
-            AlgorithmName = AlgorithmName.FindAir,
+            AlgorithmNames = [AlgorithmName.FindAir],
             IsActive = true,
             MinimumResolution = 0.5,
             MaximumResolution = 1,

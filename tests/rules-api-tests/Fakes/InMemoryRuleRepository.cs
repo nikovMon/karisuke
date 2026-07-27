@@ -159,7 +159,7 @@ internal sealed class InMemoryRuleRepository : IElasticsearchDocumentClient
             Id = rule.Id,
             RuleName = rule.RuleName,
             Description = rule.Description,
-            AlgorithmName = rule.AlgorithmName,
+            AlgorithmNames = rule.AlgorithmNames.ToList(),
             Sensors = rule.Sensors.ToDictionary(
                 item => item.Key,
                 item => item.Value.ToList(),

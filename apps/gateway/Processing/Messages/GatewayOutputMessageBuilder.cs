@@ -1,5 +1,5 @@
+using System.Buffers;
 using System.Text.Json;
-using ImagingPipeline.Common.Dtos.Gateway.Messages;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Gateway.Contracts.Messages;
 using ImagingPipeline.Gateway.Processing.Rules;
@@ -28,7 +28,7 @@ public sealed class GatewayOutputMessageBuilder
 
         foreach (var match in matches)
         {
-            var roiFootprint = _geometry.WriteGeoJson(match.IntersectionGeometry);
+            var roiFootprint = _geometry.WriteGeoJsonUtf8(match.IntersectionGeometry);
 
             foreach (var tenant in match.Rule.TenantsInfo)
             {
@@ -48,22 +48,38 @@ public sealed class GatewayOutputMessageBuilder
         GatewayInputMessage input,
         RuleMatchResult match,
         TenantInfo tenant,
-        JsonElement roiFootprint,
+        ReadOnlySpan<byte> roiFootprint,
         int outputIndex)
     {
-        var payload = new GatewayOutputPayload
+        var buffer = new ArrayBufferWriter<byte>();
+        using var writer = new Utf8JsonWriter(buffer);
+        writer.WriteStartObject();
+        writer.WriteString(
+            "taskId",
+            CreateTaskId(inputMessageId, match.Rule.Id, tenant.TenantId, outputIndex));
+        writer.WriteString("ruleId", match.Rule.Id);
+        writer.WriteStartArray("algorithmName");
+        foreach (var algorithmName in match.Rule.AlgorithmNames)
         {
-            TaskId = CreateTaskId(inputMessageId, match.Rule.Id, tenant.TenantId, outputIndex),
-            RuleId = match.Rule.Id,
-            AlgorithmName = match.Rule.AlgorithmName,
-            TenantId = tenant.TenantId,
-            TilingConfigs = tenant.TilingConfigs,
-            ImageId = input.ImageId,
-            RoiFootprint = roiFootprint,
-            PhotoTime = input.PhotoTime
-        };
-
-        return JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);
+            writer.WriteStringValue(algorithmName.ToString());
+        }
+        writer.WriteEndArray();
+        writer.WriteString("tenantId", tenant.TenantId);
+        writer.WritePropertyName("tilingConfigs");
+        JsonSerializer.Serialize(writer, tenant.TilingConfigs, JsonOptions);
+        writer.WriteString("imageId", input.ImageId);
+        writer.WritePropertyName("roiFootprint");
+        writer.WriteRawValue(roiFootprint, skipInputValidation: true);
+        writer.WriteString("photoTime", input.PhotoTime);
+        writer.WriteString("sensorType", input.SensorType);
+        writer.WriteString("imageUrl", input.ImageUrl);
+        writer.WriteNumber("imageWidth", input.ImageWidth);
+        writer.WriteNumber("imageHeight", input.ImageHeight);
+        writer.WriteNumber("resolutionMPerPx", input.ResolutionMPerPx);
+        writer.WriteString("sensorName", input.SensorName);
+        writer.WriteEndObject();
+        writer.Flush();
+        return buffer.WrittenSpan.ToArray();
     }
 
     private static string CreateTaskId(

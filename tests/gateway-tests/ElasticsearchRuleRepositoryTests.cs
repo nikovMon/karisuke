@@ -22,9 +22,11 @@ public sealed class ElasticsearchRuleRepositoryTests
             Page("pit-3", null, Hit("rule-500", 500)));
         var repository = CreateRepository(client);
 
-        var rules = await repository.GetActiveRulesAsync(CancellationToken.None);
+        var load = await repository.GetActiveRulesAsync(CancellationToken.None);
+        var rules = load.Rules;
 
         Assert.Equal(501, rules.Count);
+        Assert.Empty(load.RejectedSources);
         Assert.Equal(501, rules.Select(rule => rule.Id).Distinct(StringComparer.Ordinal).Count());
         Assert.Equal(2, client.SearchRequests.Count);
         Assert.Empty(client.SearchRequests[0].SearchAfter);
@@ -138,9 +140,10 @@ public sealed class ElasticsearchRuleRepositoryTests
         };
         var repository = CreateRepository(client, logger);
 
-        var rules = await repository.GetActiveRulesAsync(CancellationToken.None);
+        var load = await repository.GetActiveRulesAsync(CancellationToken.None);
 
-        Assert.Empty(rules);
+        Assert.Empty(load.Rules);
+        Assert.Empty(load.RejectedSources);
         Assert.Equal(["pit-2"], client.ClosedPointInTimeIds);
         var warning = Assert.Single(logger.Entries);
         Assert.Equal(LogLevel.Warning, warning.Level);
@@ -159,32 +162,85 @@ public sealed class ElasticsearchRuleRepositoryTests
             }),
             logger ?? NullLogger<ElasticsearchRuleRepository>.Instance);
 
-    private static ElasticsearchSearchPage<RuleDto> Page(
+    [Fact]
+    public async Task GetActiveRulesAsyncIsolatesInvalidSourceAfterCompletingPitScan()
+    {
+        var client = new StubPointInTimeClient(
+            Page(
+                "pit-2",
+                2,
+                RawHit(
+                    "invalid-rule",
+                    1,
+                    """
+                    {
+                      "ruleName": "invalid",
+                      "algorithmName": ["Unknown"]
+                    }
+                    """),
+                Hit("valid-rule", 2)));
+        var repository = CreateRepository(client);
+
+        var load = await repository.GetActiveRulesAsync(CancellationToken.None);
+
+        Assert.Equal(2, load.SourceRuleCount);
+        Assert.Equal("valid-rule", Assert.Single(load.Rules).Id);
+        var rejection = Assert.Single(load.RejectedSources);
+        Assert.Equal("invalid-rule", rejection.RuleId);
+        Assert.IsType<JsonException>(rejection.Exception);
+        Assert.Equal(["pit-2"], client.ClosedPointInTimeIds);
+    }
+
+    [Fact]
+    public async Task GetActiveRulesAsyncTreatsNonObjectSourceAsAnInvalidRule()
+    {
+        var client = new StubPointInTimeClient(
+            Page("pit-2", 1, RawHit("invalid-rule", 1, "null")));
+        var repository = CreateRepository(client);
+
+        var load = await repository.GetActiveRulesAsync(CancellationToken.None);
+
+        Assert.Empty(load.Rules);
+        Assert.Equal("invalid-rule", Assert.Single(load.RejectedSources).RuleId);
+        Assert.Equal(1, load.SourceRuleCount);
+        Assert.Equal(["pit-2"], client.ClosedPointInTimeIds);
+    }
+
+    private static ElasticsearchSearchPage<RawRuleSource> Page(
         string pointInTimeId,
         long? total,
-        params ElasticsearchSearchHit<RuleDto>[] hits) =>
+        params ElasticsearchSearchHit<RawRuleSource>[] hits) =>
         new(pointInTimeId, total, hits);
 
-    private static ElasticsearchSearchHit<RuleDto> Hit(
+    private static ElasticsearchSearchHit<RawRuleSource> Hit(
         string id,
         long shardDocument) =>
         new(
             id,
-            new RuleDto
+            new RawRuleSource(JsonSerializer.SerializeToElement(new RuleDto
             {
                 Id = id,
                 RuleName = id,
-                AlgorithmName = AlgorithmName.FindAir
-            },
+                AlgorithmNames = [AlgorithmName.FindAir]
+            })),
+            [JsonSerializer.SerializeToElement(shardDocument)]);
+
+    private static ElasticsearchSearchHit<RawRuleSource> RawHit(
+        string id,
+        long shardDocument,
+        string sourceJson) =>
+        new(
+            id,
+            new RawRuleSource(JsonSerializer.Deserialize<JsonElement>(sourceJson)),
             [JsonSerializer.SerializeToElement(shardDocument)]);
 
     private sealed class StubPointInTimeClient : IElasticsearchPointInTimeClient
     {
-        private readonly Queue<ElasticsearchSearchPage<RuleDto>> _pages;
+        private readonly Queue<ElasticsearchSearchPage<RawRuleSource>> _pages;
 
-        public StubPointInTimeClient(params ElasticsearchSearchPage<RuleDto>[] pages)
+        public StubPointInTimeClient(params ElasticsearchSearchPage<RawRuleSource>[] pages)
         {
-            _pages = new Queue<ElasticsearchSearchPage<RuleDto>>(pages);
+            _pages = new Queue<ElasticsearchSearchPage<RawRuleSource>>(pages);
         }
 
         public List<ElasticsearchPointInTimeSearchRequest> SearchRequests { get; } = [];

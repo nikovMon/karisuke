@@ -266,7 +266,7 @@ public sealed class RulesApiRouteTests
                 {
                   "_id": "rule-1",
                   "ruleName": "one",
-                  "algorithmName": "Unknown",
+                  "algorithmName": ["Unknown"],
                   "isActive": true,
                   "minimumResolution": 0.5,
                   "maximumResolution": 1,
@@ -307,6 +307,58 @@ public sealed class RulesApiRouteTests
         Assert.Equal("one", updated?.RuleName);
         Assert.True(updated?.IsPhotoOld);
         Assert.Equal(0.8, updated?.MinimumResolution);
+    }
+
+    [Fact]
+    public async Task CreateAndPatchPersistAndReturnBothAlgorithmsAsAnArray()
+    {
+        using var context = CreateContext();
+        var createRequest = ValidRule("ignored", "both-algorithms");
+        createRequest.AlgorithmNames = [AlgorithmName.Rpn, AlgorithmName.FindAir];
+
+        var createResponse = await context.Client.PostAsJsonAsync(
+            "/rules",
+            createRequest,
+            JsonOptions);
+        using var createdJson = JsonDocument.Parse(
+            await createResponse.Content.ReadAsStringAsync());
+        var createdAlgorithms = createdJson.RootElement
+            .GetProperty("algorithmName")
+            .EnumerateArray()
+            .Select(value => value.GetString()!)
+            .ToArray();
+        var createdId = createdJson.RootElement.GetProperty("_id").GetString();
+
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        Assert.Equal(["FindAir", "Rpn"], createdAlgorithms);
+        Assert.False(string.IsNullOrWhiteSpace(createdId));
+
+        var patchResponse = await context.Client.PatchAsync(
+            $"/rules/{createdId}",
+            Json("""{"algorithmName":["Rpn"]}"""));
+        var patched = await patchResponse.Content.ReadFromJsonAsync<RuleDto>(JsonOptions);
+
+        Assert.Equal(HttpStatusCode.OK, patchResponse.StatusCode);
+        Assert.Equal([AlgorithmName.Rpn], patched?.AlgorithmNames);
+        Assert.Equal(
+            [AlgorithmName.Rpn],
+            (await context.Repository.GetByIdAsync(createdId!))?.AlgorithmNames);
+    }
+
+    [Theory]
+    [InlineData("""{"algorithmName":[]}""")]
+    [InlineData("""{"algorithmName":["FindAir","FindAir"]}""")]
+    [InlineData("""{"algorithmName":"FindAir"}""")]
+    public async Task PatchOneRejectsInvalidAlgorithmSelections(string body)
+    {
+        using var context = CreateContext(ValidRule("rule-1", "one"));
+
+        var response = await context.Client.PatchAsync("/rules/rule-1", Json(body));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(
+            [AlgorithmName.FindAir],
+            (await context.Repository.GetByIdAsync("rule-1"))?.AlgorithmNames);
     }
 
     [Fact]
@@ -558,7 +610,7 @@ public sealed class RulesApiRouteTests
             Json("""
                 {
                   "ruleName": "invalid-sensors",
-                  "algorithmName": "FindAir",
+                  "algorithmName": ["FindAir"],
                   "sensors": { "camera": null },
                   "minimumResolution": 0.5,
                   "maximumResolution": 999,
@@ -583,7 +635,7 @@ public sealed class RulesApiRouteTests
             Json("""
                 {
                   "ruleName": "invalid-sensors",
-                  "algorithmName": "FindAir",
+                  "algorithmName": ["FindAir"],
                   "sensors": { "camera": [] },
                   "minimumResolution": 0.5,
                   "maximumResolution": 999,
@@ -791,7 +843,7 @@ public sealed class RulesApiRouteTests
         {
             Id = id,
             RuleName = ruleName,
-            AlgorithmName = AlgorithmName.FindAir,
+            AlgorithmNames = [AlgorithmName.FindAir],
             IsActive = isActive,
             MinimumResolution = 0.5,
             MaximumResolution = 1,

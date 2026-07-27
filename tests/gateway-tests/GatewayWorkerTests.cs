@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
+using ImagingPipeline.Common.Dtos.Gateway.Messages;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Gateway.Configuration;
 using ImagingPipeline.Gateway.Health;
@@ -36,11 +38,22 @@ public sealed class GatewayWorkerTests
         using var second = JsonDocument.Parse(outputs[1].Body);
         Assert.Equal("message-1:gateway-task:rule-1:der:0", first.RootElement.GetProperty("taskId").GetString());
         Assert.Equal("rule-1", first.RootElement.GetProperty("ruleId").GetString());
-        Assert.Equal("FindAir", first.RootElement.GetProperty("algorithmName").GetString());
+        Assert.Equal(
+            ["FindAir", "Rpn"],
+            first.RootElement.GetProperty("algorithmName")
+                .EnumerateArray()
+                .Select(value => value.GetString()!)
+                .ToArray());
         Assert.Equal("der", first.RootElement.GetProperty("tenantId").GetString());
         Assert.Single(first.RootElement.GetProperty("tilingConfigs").EnumerateArray());
         Assert.Equal("image-1", first.RootElement.GetProperty("imageId").GetString());
         Assert.Equal("2026-06-30T06:54:07+00:00", first.RootElement.GetProperty("photoTime").GetString());
+        Assert.Equal("EO", first.RootElement.GetProperty("sensorType").GetString());
+        Assert.Equal("/images/image-1.tiff", first.RootElement.GetProperty("imageUrl").GetString());
+        Assert.Equal(4096, first.RootElement.GetProperty("imageWidth").GetInt32());
+        Assert.Equal(3072, first.RootElement.GetProperty("imageHeight").GetInt32());
+        Assert.Equal(0.4, first.RootElement.GetProperty("resolutionMPerPx").GetDouble());
+        Assert.Equal("cam-001", first.RootElement.GetProperty("sensorName").GetString());
         Assert.Equal("Polygon", first.RootElement.GetProperty("roiFootprint").GetProperty("type").GetString());
         Assert.Equal("message-1:gateway-task:rule-1:findair:1", second.RootElement.GetProperty("taskId").GetString());
         Assert.Equal("findair", second.RootElement.GetProperty("tenantId").GetString());
@@ -54,7 +67,13 @@ public sealed class GatewayWorkerTests
                 "tilingConfigs",
                 "imageId",
                 "roiFootprint",
-                "photoTime"
+                "photoTime",
+                "sensorType",
+                "imageUrl",
+                "imageWidth",
+                "imageHeight",
+                "resolutionMPerPx",
+                "sensorName"
             ],
             first.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
         Assert.All(outputs, output =>
@@ -63,6 +82,19 @@ public sealed class GatewayWorkerTests
         });
         Assert.Equal("message-1:gateway-output:rule-1:der:0", outputs[0].MessageId);
         Assert.Equal("message-1:gateway-output:rule-1:findair:1", outputs[1].MessageId);
+
+        var sharedContract = JsonSerializer.Deserialize<GatewayOutputMessageDto>(
+            outputs[0].Body,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.NotNull(sharedContract);
+        var validationResults = new List<ValidationResult>();
+        Assert.True(
+            Validator.TryValidateObject(
+                sharedContract,
+                new ValidationContext(sharedContract),
+                validationResults,
+                validateAllProperties: true),
+            string.Join(" | ", validationResults.Select(result => result.ErrorMessage)));
     }
 
     [Fact]
@@ -577,7 +609,7 @@ public sealed class GatewayWorkerTests
         var result = await harness.GatewayWorker.HandleAsync(invalid);
 
         Assert.False(result.IsSuccess);
-        Assert.Contains("gateway.missing_image_id", result.Error, StringComparison.Ordinal);
+        Assert.Contains("gateway.invalid_json", result.Error, StringComparison.Ordinal);
         Assert.Equal(RabbitMqMessageFailureAction.DeadLetter, result.FailureAction);
         Assert.Empty(OutputMessages(result));
     }
@@ -592,9 +624,18 @@ public sealed class GatewayWorkerTests
               "overlay": {
                 "id": "image-1",
                 "sensorName": "cam-001",
-                "bestResolution": 25.9
-              },
-              "intersectionArea": "POLYGON((34.7800 32.0800, 34.7900 32.0800, 34.7900 32.0900, 34.7800 32.0900, 34.7800 32.0800))"
+                "sensorType": "EO",
+                "bestResolution": 25.9,
+                "resolutionMPerPx": 0.4,
+                "imageUrl": "/images/image-1.tiff",
+                "imageWidth": 4096,
+                "imageHeight": 3072,
+                "photoTime": "2026-06-30T06:54:07Z",
+                "roiFootprint": {
+                  "type": "Polygon",
+                  "coordinates": [[[34.7800, 32.0800], [34.7900, 32.0800], [34.7900, 32.0900], [34.7800, 32.0900], [34.7800, 32.0800]]]
+                }
+              }
             }
             """,
             "message-1");
@@ -602,7 +643,7 @@ public sealed class GatewayWorkerTests
         var result = await harness.GatewayWorker.HandleAsync(invalid);
 
         Assert.False(result.IsSuccess);
-        Assert.Contains("gateway.missing_registration_quality", result.Error, StringComparison.Ordinal);
+        Assert.Contains("gateway.invalid_json", result.Error, StringComparison.Ordinal);
         Assert.Equal(RabbitMqMessageFailureAction.DeadLetter, result.FailureAction);
         Assert.Empty(OutputMessages(result));
     }
@@ -630,11 +671,19 @@ public sealed class GatewayWorkerTests
               "overlay": {
                 "id": "image-1",
                 "sensorName": "{{sensorName}}",
+                "sensorType": "EO",
                 "registrationQuality": "{{registrationQuality}}",
                 "bestResolution": 25.9,
-                "photoTime": "2026-06-30T06:54:07Z"
-              },
-              "intersectionArea": "POLYGON((34.7800 32.0800, 34.7900 32.0800, 34.7900 32.0900, 34.7800 32.0900, 34.7800 32.0800))"
+                "resolutionMPerPx": 0.4,
+                "imageUrl": "/images/image-1.tiff",
+                "imageWidth": 4096,
+                "imageHeight": 3072,
+                "photoTime": "2026-06-30T06:54:07Z",
+                "roiFootprint": {
+                  "type": "Polygon",
+                  "coordinates": [[[34.7800, 32.0800], [34.7900, 32.0800], [34.7900, 32.0900], [34.7800, 32.0900], [34.7800, 32.0800]]]
+                }
+              }
             }
             """,
             messageId);
@@ -645,7 +694,7 @@ public sealed class GatewayWorkerTests
             Id = "rule-1",
             RuleName = "FindSuspiciousAreaRule",
             Description = "Rule that detects suspicious activity in a configured geographic area",
-            AlgorithmName = AlgorithmName.FindAir,
+            AlgorithmNames = [AlgorithmName.FindAir, AlgorithmName.Rpn],
             Sensors = new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal)
             {
                 ["cam-001"] = [RegistrationQuality.Accurate]
@@ -718,10 +767,7 @@ public sealed class GatewayWorkerTests
         {
             var health = new GatewayHealthState();
             var geometry = new GatewayGeometryConverter();
-            var pathReader = new JsonPathReader();
-            var inputParser = new GatewayInputMessageParser(
-                pathReader,
-                geometry);
+            var inputParser = new GatewayInputMessageParser(geometry);
             var outputBuilder = new GatewayOutputMessageBuilder(geometry);
             var ruleCache = new ActiveRuleCache(
                 new StaticRuleRepository(rules),
@@ -763,8 +809,8 @@ public sealed class GatewayWorkerTests
             _rules = rules;
         }
 
-        public Task<IReadOnlyList<RuleDto>> GetActiveRulesAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(_rules);
+        public Task<RuleLoadResult> GetActiveRulesAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(RuleLoadResult.FromRules(_rules));
     }
 
     private sealed class FailingThenValidRefreshRepository : IRuleRepository
@@ -785,18 +831,18 @@ public sealed class GatewayWorkerTests
 
         public void AllowRecovery() => _recoveryAllowed.TrySetResult();
 
-        public async Task<IReadOnlyList<RuleDto>> GetActiveRulesAsync(
+        public async Task<RuleLoadResult> GetActiveRulesAsync(
             CancellationToken cancellationToken)
         {
             switch (Interlocked.Increment(ref _calls))
             {
                 case 1:
-                    return _initialRules;
+                    return RuleLoadResult.FromRules(_initialRules);
                 case 2:
                     throw new InvalidOperationException("Rule repository refresh failed.");
                 default:
                     await _recoveryAllowed.Task.WaitAsync(cancellationToken);
-                    return _validRefreshRules;
+                    return RuleLoadResult.FromRules(_validRefreshRules);
             }
         }
     }
@@ -822,17 +868,17 @@ public sealed class GatewayWorkerTests
 
         public void AllowRecovery() => _recoveryAllowed.TrySetResult();
 
-        public async Task<IReadOnlyList<RuleDto>> GetActiveRulesAsync(CancellationToken cancellationToken)
+        public async Task<RuleLoadResult> GetActiveRulesAsync(CancellationToken cancellationToken)
         {
             switch (Interlocked.Increment(ref _calls))
             {
                 case 1:
-                    return _initialRules;
+                    return RuleLoadResult.FromRules(_initialRules);
                 case 2:
-                    return _invalidRefreshRules;
+                    return RuleLoadResult.FromRules(_invalidRefreshRules);
                 default:
                     await _recoveryAllowed.Task.WaitAsync(cancellationToken);
-                    return _validRefreshRules;
+                    return RuleLoadResult.FromRules(_validRefreshRules);
             }
         }
     }

@@ -123,17 +123,34 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
     }
 
     private ActiveRule[] BuildSnapshot(
-        IReadOnlyList<RuleDto> rules,
+        RuleLoadResult load,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var rules = load.Rules;
         var snapshot = new List<ActiveRule>(rules.Count);
-        var rejectedRuleCount = 0;
+        var rejectedRuleCount = load.RejectedSources.Count;
+        var detailedWarningCount = 0;
+
+        foreach (var sourceRejection in load.RejectedSources)
+        {
+            if (detailedWarningCount >= MaxDetailedInvalidRuleWarningsPerLoad)
+            {
+                break;
+            }
+
+            LogRejectedRule(new RuleRejection(
+                sourceRejection.RuleId,
+                sourceRejection.Reason,
+                sourceRejection.Exception));
+            detailedWarningCount++;
+        }
+
         foreach (var rule in rules)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var captureRejection =
-                rejectedRuleCount < MaxDetailedInvalidRuleWarningsPerLoad;
+                detailedWarningCount < MaxDetailedInvalidRuleWarningsPerLoad;
             if (TryBuildRuleSnapshot(
                 rule,
                 captureRejection,
@@ -148,17 +165,18 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
                 if (rejection is not null)
                 {
                     LogRejectedRule(rejection);
+                    detailedWarningCount++;
                 }
             }
         }
 
-        if (rules.Count > 0 && snapshot.Count == 0)
+        if (load.SourceRuleCount > 0 && snapshot.Count == 0)
         {
             _logger.LogWarning(
                 "Active-rule load returned {RuleCount} rules, but none passed validation. Logged details for {DetailedWarningCount} rules and suppressed {SuppressedWarningCount}; refusing to publish an empty candidate snapshot.",
-                rules.Count,
-                Math.Min(rejectedRuleCount, MaxDetailedInvalidRuleWarningsPerLoad),
-                Math.Max(0, rejectedRuleCount - MaxDetailedInvalidRuleWarningsPerLoad));
+                load.SourceRuleCount,
+                detailedWarningCount,
+                Math.Max(0, rejectedRuleCount - detailedWarningCount));
             throw new InvalidDataException(
                 "The active-rule load was non-empty, but none of its rules passed validation.");
         }
@@ -169,8 +187,8 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
                 "Active-rule load accepted {AcceptedRuleCount} rules and skipped {RejectedRuleCount} invalid rules. Logged details for {DetailedWarningCount} rules and suppressed {SuppressedWarningCount}.",
                 snapshot.Count,
                 rejectedRuleCount,
-                Math.Min(rejectedRuleCount, MaxDetailedInvalidRuleWarningsPerLoad),
-                Math.Max(0, rejectedRuleCount - MaxDetailedInvalidRuleWarningsPerLoad));
+                detailedWarningCount,
+                Math.Max(0, rejectedRuleCount - detailedWarningCount));
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -295,7 +313,7 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
         Geometry geometry) =>
         new(
             rule.Id,
-            rule.AlgorithmName,
+            rule.AlgorithmNames.ToArray(),
             BuildSensorSnapshot(rule.Sensors),
             BuildTenantSnapshot(rule.TenantsInfo),
             rule.MinimumResolution,

@@ -37,7 +37,6 @@ public static class Program
         builder.Services.AddRabbitMqClient(builder.Configuration);
 
         builder.Services.AddSingleton<GatewayHealthState>();
-        builder.Services.AddSingleton<JsonPathReader>();
         builder.Services.AddSingleton<GatewayGeometryConverter>();
         builder.Services.AddSingleton<GatewayInputMessageParser>();
         builder.Services.AddSingleton<GatewayOutputMessageBuilder>();

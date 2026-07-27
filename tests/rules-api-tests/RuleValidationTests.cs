@@ -13,7 +13,7 @@ public sealed class RuleValidationTests
     {
         var rule = new RuleDto
         {
-            AlgorithmName = AlgorithmName.FindAir
+            AlgorithmNames = [AlgorithmName.FindAir]
         };
 
         var errors = RuleValidation.ValidateRule(rule);
@@ -43,7 +43,7 @@ public sealed class RuleValidationTests
         var invalid = new UpdateRuleRequest
         {
             RuleName = " ",
-            AlgorithmName = null,
+            AlgorithmNames = null,
             MinimumResolution = 0
         };
         invalid.ProvidedFields.Add("ruleName");
@@ -55,7 +55,7 @@ public sealed class RuleValidationTests
 
         Assert.Equal(["At least one field must be provided."], emptyErrors);
         Assert.Contains("ruleName cannot be empty.", invalidErrors);
-        Assert.Contains("algorithmName is required.", invalidErrors);
+        Assert.Contains("algorithmName must contain at least one algorithm.", invalidErrors);
         Assert.Contains("minimumResolution must be greater than 0.", invalidErrors);
     }
 
@@ -81,7 +81,7 @@ public sealed class RuleValidationTests
     {
         var rule = new RuleDto
         {
-            AlgorithmName = AlgorithmName.FindAir
+            AlgorithmNames = [AlgorithmName.FindAir]
         };
 
         var errors = RuleValidation.ValidateRule(rule);
@@ -95,6 +95,30 @@ public sealed class RuleValidationTests
     {
         Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<RuleDto>("{}"));
         Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<CreateRuleRequest>("{}"));
+    }
+
+    [Fact]
+    public void AlgorithmNameJsonUsesARequiredArrayWithStrictUniqueValues()
+    {
+        var both = JsonSerializer.Deserialize<CreateRuleRequest>(
+            """{"algorithmName":["FindAir","Rpn"]}""");
+        var duplicateUpdate = new UpdateRuleRequest
+        {
+            AlgorithmNames = [AlgorithmName.FindAir, AlgorithmName.FindAir]
+        };
+
+        Assert.Equal(
+            [AlgorithmName.FindAir, AlgorithmName.Rpn],
+            both?.AlgorithmNames);
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<CreateRuleRequest>(
+            """{"algorithmName":"FindAir"}"""));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<CreateRuleRequest>(
+            """{"algorithmName":["findair"]}"""));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<CreateRuleRequest>(
+            """{"algorithmName":[0]}"""));
+        Assert.Contains(
+            "algorithmName values must be unique.",
+            RuleValidation.ValidateUpdate(duplicateUpdate));
     }
 
     [Fact]
@@ -270,7 +294,7 @@ public sealed class RuleValidationTests
         {
             Id = "rule-1",
             RuleName = "one",
-            AlgorithmName = AlgorithmName.FindAir,
+            AlgorithmNames = [AlgorithmName.FindAir],
             IsActive = true,
             MinimumResolution = 0.5,
             MaximumResolution = 1,

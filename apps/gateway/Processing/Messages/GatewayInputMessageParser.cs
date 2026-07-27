@@ -1,120 +1,147 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ImagingPipeline.Common.Dtos.Gateway.Messages;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Gateway.Contracts.Messages;
 using ImagingPipeline.Gateway.Errors;
-using NetTopologySuite.Geometries;
 
 namespace ImagingPipeline.Gateway.Processing.Messages;
 
 public sealed class GatewayInputMessageParser
 {
-    private readonly JsonPathReader _json;
     private readonly GatewayGeometryConverter _geometry;
 
-    public GatewayInputMessageParser(
-        JsonPathReader json,
-        GatewayGeometryConverter geometry)
+    public GatewayInputMessageParser(GatewayGeometryConverter geometry)
     {
-        _json = json;
         _geometry = geometry;
     }
 
     public GatewayInputMessage Parse(ReadOnlyMemory<byte> body)
     {
-        JsonElement root;
+        GatewayInputMessageDto input;
         try
         {
-            using var document = JsonDocument.Parse(body);
-            root = document.RootElement.Clone();
+            input = JsonSerializer.Deserialize(
+                    body.Span,
+                    GatewayInputJsonSerializerContext.Default.GatewayInputMessageDto)
+                ?? throw new GatewayValidationException(
+                    "Input body cannot be JSON null.",
+                    "gateway.invalid_json_shape");
         }
         catch (JsonException ex)
         {
-            throw new GatewayValidationException($"Input body is not valid UTF-8 JSON: {ex.Message}", "gateway.invalid_json");
+            throw new GatewayValidationException(
+                $"Input body does not match the required JSON contract: {ex.Message}",
+                "gateway.invalid_json");
         }
 
-        if (root.ValueKind != JsonValueKind.Object)
+        var overlay = input.Overlay
+            ?? throw new GatewayValidationException(
+                "Input overlay is required.",
+                "gateway.missing_overlay");
+        if (string.IsNullOrWhiteSpace(overlay.Id))
         {
-            throw new GatewayValidationException("Input JSON top-level value must be an object.", "gateway.invalid_json_shape");
+            throw new GatewayValidationException(
+                "Input image id is required and must be a non-empty string.",
+                "gateway.missing_image_id");
         }
 
-        if (!_json.TryReadNonEmptyString(root, GatewayInputMessageSchema.ImageId, out var imageId))
+        if (string.IsNullOrWhiteSpace(overlay.SensorName))
         {
-            throw new GatewayValidationException("Input image id is required and must be a non-empty string.", "gateway.missing_image_id");
+            throw new GatewayValidationException(
+                "Input sensor name is required and must be a non-empty string.",
+                "gateway.missing_sensor_name");
         }
 
-        if (!_json.TryReadNonEmptyString(root, GatewayInputMessageSchema.SensorName, out var sensorName))
+        if (string.IsNullOrWhiteSpace(overlay.SensorType))
         {
-            throw new GatewayValidationException("Input sensor name is required and must be a non-empty string.", "gateway.missing_sensor_name");
+            throw new GatewayValidationException(
+                "Input sensor type is required and must be a non-empty string.",
+                "gateway.missing_sensor_type");
         }
 
-        if (!_json.TryReadNonEmptyString(root, GatewayInputMessageSchema.RegistrationQuality, out var registrationQuality))
+        if (string.IsNullOrWhiteSpace(overlay.RegistrationQuality))
         {
             throw new GatewayValidationException(
                 "Input registration quality is required and must be a non-empty string.",
                 "gateway.missing_registration_quality");
         }
 
-        if (!RegistrationQualityExtensions.TryParseJsonValue(registrationQuality, out var parsedRegistrationQuality))
+        if (!RegistrationQualityExtensions.TryParseJsonValue(
+                overlay.RegistrationQuality,
+                out var registrationQuality))
         {
             throw new GatewayValidationException(
                 $"Input registration quality must be either {RegistrationQualityContract.AllowedJsonValues}.",
                 "gateway.invalid_registration_quality");
         }
 
-        if (!_json.TryReadPositiveDouble(root, GatewayInputMessageSchema.Resolution, out var resolution))
+        ValidatePositiveFinite(
+            overlay.BestResolution,
+            "Input best resolution is required and must be a positive finite number.",
+            "gateway.invalid_best_resolution");
+        ValidatePositiveFinite(
+            overlay.ResolutionMPerPx,
+            "Input resolutionMPerPx is required and must be a positive finite number.",
+            "gateway.invalid_resolution_m_per_px");
+
+        if (string.IsNullOrWhiteSpace(overlay.ImageUrl))
         {
-            throw new GatewayValidationException("Input resolution is required and must be a positive number.", "gateway.invalid_resolution");
+            throw new GatewayValidationException(
+                "Input image URL is required and must be a non-empty string.",
+                "gateway.missing_image_url");
         }
 
-        var photoTime = ReadPhotoTime(root);
-        var geometry = ReadGeometry(root);
+        if (overlay.ImageWidth <= 0)
+        {
+            throw new GatewayValidationException(
+                "Input image width is required and must be greater than zero.",
+                "gateway.invalid_image_width");
+        }
+
+        if (overlay.ImageHeight <= 0)
+        {
+            throw new GatewayValidationException(
+                "Input image height is required and must be greater than zero.",
+                "gateway.invalid_image_height");
+        }
+
+        if (overlay.RoiFootprint.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            throw new GatewayValidationException(
+                "Input roiFootprint is required.",
+                "gateway.missing_geometry");
+        }
+
+        var geometry = _geometry.ReadGeoJson(overlay.RoiFootprint, "input roiFootprint");
 
         return new GatewayInputMessage(
-            imageId,
-            sensorName,
-            parsedRegistrationQuality,
-            resolution,
-            photoTime,
+            overlay.Id,
+            overlay.SensorName,
+            overlay.SensorType,
+            registrationQuality,
+            overlay.BestResolution,
+            overlay.ResolutionMPerPx,
+            overlay.ImageUrl,
+            overlay.ImageWidth,
+            overlay.ImageHeight,
+            overlay.PhotoTime.ToUniversalTime(),
             geometry);
     }
 
-    private DateTimeOffset? ReadPhotoTime(JsonElement root)
+    private static void ValidatePositiveFinite(
+        double value,
+        string message,
+        string errorCode)
     {
-        if (!_json.TryRead(root, GatewayInputMessageSchema.PhotoTime, out var element) ||
-            element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        if (!double.IsFinite(value) || value <= 0)
         {
-            return null;
+            throw new GatewayValidationException(message, errorCode);
         }
-
-        if (element.ValueKind != JsonValueKind.String ||
-            !DateTimeOffset.TryParse(element.GetString(), out var photoTime))
-        {
-            throw new GatewayValidationException(
-                "Input photo time must be parseable as DateTimeOffset when provided.",
-                "gateway.invalid_photo_time");
-        }
-
-        return photoTime.ToUniversalTime();
     }
+}
 
-    private Geometry ReadGeometry(JsonElement root)
-    {
-        if (_json.TryRead(root, GatewayInputMessageSchema.GeometryWkt, out var wktElement) &&
-            wktElement.ValueKind == JsonValueKind.String &&
-            !string.IsNullOrWhiteSpace(wktElement.GetString()))
-        {
-            return _geometry.ReadWkt(wktElement.GetString()!, "input");
-        }
-
-        if (_json.TryRead(root, GatewayInputMessageSchema.GeometryGeoJson, out var geoJsonElement) &&
-            geoJsonElement.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
-        {
-            return _geometry.ReadGeoJson(geoJsonElement, "input");
-        }
-
-        throw new GatewayValidationException(
-            "Input geometry is required as WKT or GeoJSON.",
-            "gateway.missing_geometry");
-    }
+[JsonSerializable(typeof(GatewayInputMessageDto))]
+internal sealed partial class GatewayInputJsonSerializerContext : JsonSerializerContext
+{
 }

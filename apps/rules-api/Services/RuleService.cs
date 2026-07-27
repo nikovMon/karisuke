@@ -509,7 +509,7 @@ public sealed class RuleService : IRuleService
         {
             ["ruleName"] = () => rule.RuleName = request.RuleName ?? string.Empty,
             ["description"] = () => rule.Description = request.Description,
-            ["algorithmName"] = () => rule.AlgorithmName = request.AlgorithmName!.Value,
+            ["algorithmName"] = () => rule.AlgorithmNames = request.AlgorithmNames!.ToList(),
             ["sensors"] = () => rule.Sensors = request.Sensors ?? new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal),
             ["isActive"] = () => rule.IsActive = request.IsActive.GetValueOrDefault(),
             ["tenantsInfo"] = () => rule.TenantsInfo = request.TenantsInfo ?? [],
@@ -565,6 +565,9 @@ public sealed class RuleService : IRuleService
 
     private static void NormalizeRuleCollections(RuleDto rule)
     {
+        rule.AlgorithmNames = (rule.AlgorithmNames ?? [])
+            .OrderBy(value => value)
+            .ToList();
         rule.Sensors = new Dictionary<string, List<RegistrationQuality>>(
             (rule.Sensors ?? new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal))
                 .Where(item => !string.IsNullOrWhiteSpace(item.Key))

@@ -51,5 +51,5 @@ public sealed class RuleMatcher
     }
 
     private static bool MatchesResolution(GatewayInputMessage input, ActiveRule rule) =>
-        input.Resolution >= rule.MinimumResolution && input.Resolution <= rule.MaximumResolution;
+        input.BestResolution >= rule.MinimumResolution && input.BestResolution <= rule.MaximumResolution;
 }

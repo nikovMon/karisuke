@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Messaging;
+using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbPublisher.MessageHandling;
@@ -38,11 +39,19 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
         var consumerTask = consumer.ConsumeAsync(handler, cts.Token);
         var body = """
         {
+          "taskId": "msg-1",
           "ruleId": "rule-1",
-          "algorithmName": "FindAir",
+          "algorithmName": ["FindAir", "Rpn"],
           "tenantId": "tenant-1",
           "imageId": "image-1",
           "roiFootprint": { "type": "Point", "coordinates": [35.98, 34.15] },
+          "photoTime": "2026-07-27T10:00:00Z",
+          "sensorType": "EO",
+          "imageUrl": "/images/image-1.tiff",
+          "imageWidth": 4096,
+          "imageHeight": 3072,
+          "resolutionMPerPx": 0.4,
+          "sensorName": "sensor-1",
           "tilingConfigs": [
             { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 32, "tileOverlapHeight": 32 }
           ]
@@ -56,6 +65,9 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
         var outputMessage = JsonSerializer.Deserialize<TbPublisherOutputMessageDto>(
             output, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         Assert.Equal("rule-1", outputMessage!.MissionMetadata.Overlay.RuleId);
+        Assert.Equal(
+            [AlgorithmName.FindAir, AlgorithmName.Rpn],
+            outputMessage.MissionMetadata.Overlay.AlgorithmNames);
         Assert.Equal("tenant-1", outputMessage.MissionMetadata.TenantId);
         Assert.Equal("image-1", outputMessage.MissionMetadata.Overlay.ImageId);
         Assert.Equal(512, outputMessage.ModelMetadata.TbCropSizeX);
@@ -100,11 +112,19 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
         var consumerTask = consumer.ConsumeAsync(handler, cts.Token);
         var body = """
         {
+          "taskId": "msg-1",
           "ruleId": "rule-1",
-          "algorithmName": "FindAir",
+          "algorithmName": ["FindAir"],
           "tenantId": "tenant-1",
           "imageId": "image-1",
           "roiFootprint": { "type": "Point", "coordinates": [35.98, 34.15] },
+          "photoTime": "2026-07-27T10:00:00Z",
+          "sensorType": "EO",
+          "imageUrl": "/images/image-1.tiff",
+          "imageWidth": 4096,
+          "imageHeight": 3072,
+          "resolutionMPerPx": 0.4,
+          "sensorName": "sensor-1",
           "tilingConfigs": [
             { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 32, "tileOverlapHeight": 32 }
           ]

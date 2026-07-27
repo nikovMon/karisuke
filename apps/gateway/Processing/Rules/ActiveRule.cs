@@ -5,7 +5,7 @@ namespace ImagingPipeline.Gateway.Processing.Rules;
 
 public sealed record ActiveRule(
     string Id,
-    AlgorithmName AlgorithmName,
+    IReadOnlyList<AlgorithmName> AlgorithmNames,
     IReadOnlyDictionary<string, int> Sensors,
     IReadOnlyList<TenantInfo> TenantsInfo,
     double MinimumResolution,

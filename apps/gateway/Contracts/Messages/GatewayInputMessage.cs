@@ -6,8 +6,13 @@ namespace ImagingPipeline.Gateway.Contracts.Messages;
 public sealed record GatewayInputMessage(
     string ImageId,
     string SensorName,
+    string SensorType,
     RegistrationQuality RegistrationQuality,
-    double Resolution,
-    DateTimeOffset? PhotoTime,
+    double BestResolution,
+    double ResolutionMPerPx,
+    string ImageUrl,
+    int ImageWidth,
+    int ImageHeight,
+    DateTimeOffset PhotoTime,
     Geometry Geometry
 );

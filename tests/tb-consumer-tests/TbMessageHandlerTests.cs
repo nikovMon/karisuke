@@ -41,7 +41,7 @@ public class TbMessageHandlerTests
                 ImageId = "img-001",
                 ImageUrl = "/images/test.tiff",
                 RuleId = "rule-1",
-                AlgorithmName = AlgorithmName.FindAir,
+                AlgorithmNames = [AlgorithmName.FindAir, AlgorithmName.Rpn],
                 ResolutionMPerPx = 0.5,
                 ImageWidth = 1024,
                 ImageHeight = 1024,
@@ -95,7 +95,7 @@ public class TbMessageHandlerTests
                 It.Is<RabbitMqMessageEnvelope>(e =>
                     e.Headers != null &&
                     e.Headers.ContainsKey("algorithm_name") &&
-                    (string)e.Headers["algorithm_name"]! == "FindAir"),
+                    (string)e.Headers["algorithm_name"]! == "FindAir,Rpn"),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -157,8 +157,7 @@ public class TbMessageHandlerTests
         Assert.Equal(0.0, embedder.Lon);
         Assert.Equal(0.0, embedder.Lat);
         Assert.NotNull(embedder.ImagingTime);
-        Assert.Single(embedder.Algorithms);
-        Assert.Equal("FindAir", embedder.Algorithms[0]);
+        Assert.Equal(["FindAir", "Rpn"], embedder.Algorithms);
         Assert.NotNull(embedder.TileCoordinates);
         Assert.NotEmpty(embedder.TileCoordinates.Coordinates);
 

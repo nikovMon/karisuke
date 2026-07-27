@@ -66,16 +66,25 @@ public sealed class RegistrationQualityContractTests
     [Fact]
     public void GatewayParserUsesCachedAllowedValuesInValidationError()
     {
-        var parser = new GatewayInputMessageParser(
-            new JsonPathReader(),
-            new GatewayGeometryConverter());
+        var parser = new GatewayInputMessageParser(new GatewayGeometryConverter());
         var body = Encoding.UTF8.GetBytes(
             """
             {
               "overlay": {
                 "id": "image-1",
                 "sensorName": "camera",
-                "registrationQuality": "accurate"
+                "sensorType": "EO",
+                "registrationQuality": "accurate",
+                "bestResolution": 1,
+                "resolutionMPerPx": 1,
+                "imageUrl": "/images/image-1.tiff",
+                "imageWidth": 100,
+                "imageHeight": 100,
+                "photoTime": "2026-07-27T10:00:00Z",
+                "roiFootprint": {
+                  "type": "Polygon",
+                  "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+                }
               }
             }
             """);

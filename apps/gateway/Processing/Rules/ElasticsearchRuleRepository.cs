@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.ElasticsearchClient;
 using ImagingPipeline.Gateway.Errors;
@@ -26,7 +27,7 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<RuleDto>> GetActiveRulesAsync(CancellationToken cancellationToken)
+    public async Task<RuleLoadResult> GetActiveRulesAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -40,7 +41,7 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
         }
     }
 
-    private async Task<IReadOnlyList<RuleDto>> ReadActiveRulesAsync(
+    private async Task<RuleLoadResult> ReadActiveRulesAsync(
         CancellationToken cancellationToken)
     {
         string? pointInTimeId = null;
@@ -53,16 +54,18 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
                 cancellationToken);
 
             var rules = new List<RuleDto>();
+            var rejectedSources = new List<RuleSourceRejection>();
             var ids = new HashSet<string>(StringComparer.Ordinal);
             IReadOnlyList<JsonElement> searchAfter = [];
             long? expectedTotal = null;
             long? previousShardDocument = null;
+            long processedHitCount = 0;
 
             while (true)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var page = await _client.SearchPointInTimeAsync<RuleDto>(
+                var page = await _client.SearchPointInTimeAsync<RawRuleSource>(
                     new ElasticsearchPointInTimeSearchRequest
                     {
                         Search = ActiveRulesSearch(),
@@ -108,17 +111,6 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
                         throw PaginationFailure($"duplicate rule id '{hit.Id}' was returned");
                     }
 
-                    if (hit.Source is null)
-                    {
-                        throw PaginationFailure($"rule '{hit.Id}' had a null source");
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(hit.Source.Id) &&
-                        !string.Equals(hit.Source.Id, hit.Id, StringComparison.Ordinal))
-                    {
-                        throw PaginationFailure($"rule '{hit.Id}' had a conflicting source id");
-                    }
-
                     var shardDocument = ReadShardDocument(hit);
                     if (previousShardDocument is not null &&
                         shardDocument <= previousShardDocument.Value)
@@ -127,18 +119,27 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
                     }
 
                     previousShardDocument = shardDocument;
-                    hit.Source.Id = hit.Id;
-                    rules.Add(hit.Source);
+                    processedHitCount++;
+
+                    if (TryDeserializeRule(hit, out var rule, out var rejection))
+                    {
+                        rule.Id = hit.Id;
+                        rules.Add(rule);
+                    }
+                    else
+                    {
+                        rejectedSources.Add(rejection);
+                    }
                 }
 
-                if (rules.Count > expectedTotal.Value)
+                if (processedHitCount > expectedTotal.Value)
                 {
                     throw PaginationFailure("more rules were returned than the exact hit count");
                 }
 
-                if (rules.Count == expectedTotal.Value)
+                if (processedHitCount == expectedTotal.Value)
                 {
-                    return rules;
+                    return new RuleLoadResult(rules, rejectedSources);
                 }
 
                 if (page.Hits.Count == 0 || page.Hits.Count < PageSize)
@@ -208,7 +209,59 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
         }
     }
 
-    private static long ReadShardDocument(ElasticsearchSearchHit<RuleDto> hit)
+    private static bool TryDeserializeRule(
+        ElasticsearchSearchHit<RawRuleSource> hit,
+        out RuleDto rule,
+        out RuleSourceRejection rejection)
+    {
+        rule = null!;
+        rejection = null!;
+
+        if (hit.Source is null ||
+            hit.Source.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            rejection = new RuleSourceRejection(
+                hit.Id,
+                "Its Elasticsearch source was null.");
+            return false;
+        }
+
+        if (hit.Source.Value.ValueKind != JsonValueKind.Object)
+        {
+            rejection = new RuleSourceRejection(
+                hit.Id,
+                "Its Elasticsearch source was not a JSON object.");
+            return false;
+        }
+
+        try
+        {
+            rule = hit.Source.Value.Deserialize<RuleDto>() ??
+                throw new JsonException("The deserialized rule source was null.");
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
+        {
+            rejection = new RuleSourceRejection(
+                hit.Id,
+                "Its Elasticsearch source could not be deserialized as a rule.",
+                ex);
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(rule.Id) &&
+            !string.Equals(rule.Id, hit.Id, StringComparison.Ordinal))
+        {
+            rejection = new RuleSourceRejection(
+                hit.Id,
+                "Its Elasticsearch source contained a conflicting rule id.");
+            rule = null!;
+            return false;
+        }
+
+        return true;
+    }
+
+    private static long ReadShardDocument(ElasticsearchSearchHit<RawRuleSource> hit)
     {
         if (hit.SortValues is null ||
             hit.SortValues.Count != 1 ||
@@ -223,4 +276,27 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
 
     private static ElasticsearchClientException PaginationFailure(string detail) =>
         new($"Elasticsearch returned incomplete active-rule pagination: {detail}.");
+}
+
+[JsonConverter(typeof(RawRuleSourceJsonConverter))]
+internal sealed record RawRuleSource(JsonElement Value);
+
+internal sealed class RawRuleSourceJsonConverter : JsonConverter<RawRuleSource>
+{
+    public override bool HandleNull => true;
+
+    public override RawRuleSource Read(
+        ref Utf8JsonReader reader,
+        Type typeToConvert,
+        JsonSerializerOptions options)
+    {
+        using var document = JsonDocument.ParseValue(ref reader);
+        return new RawRuleSource(document.RootElement.Clone());
+    }
+
+    public override void Write(
+        Utf8JsonWriter writer,
+        RawRuleSource value,
+        JsonSerializerOptions options) =>
+        value.Value.WriteTo(writer);
 }

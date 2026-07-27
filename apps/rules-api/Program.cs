@@ -22,6 +22,7 @@ public sealed partial class Program
             .AddJsonOptions(options =>
             {
                 options.JsonSerializerOptions.Converters.Add(new RegistrationQualityJsonConverter());
+                options.JsonSerializerOptions.Converters.Add(new AlgorithmNameJsonConverter());
                 options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
             });
         builder.Services.Configure<ApiBehaviorOptions>(options =>
