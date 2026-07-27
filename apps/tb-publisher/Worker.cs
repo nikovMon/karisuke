@@ -25,9 +25,16 @@ public sealed class Worker : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            var shouldRestart = false;
             try
             {
                 await _consumer.ConsumeAsync(_handler, stoppingToken);
+                shouldRestart = !stoppingToken.IsCancellationRequested;
+                if (shouldRestart)
+                {
+                    MessagingTelemetry.RecordConsumerRestart(TelemetryErrorCategory.Unknown);
+                    _logger.ConsumerRestartScheduled(RestartDelay.TotalSeconds);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -35,13 +42,21 @@ public sealed class Worker : BackgroundService
             }
             catch (Exception ex)
             {
-                MessagingTelemetry.RecordConsumerRestart(TelemetryErrorCategory.Connection);
-                _logger.ConsumerRestartAfterFailure(ex, RestartDelay.TotalSeconds);
+                shouldRestart = !stoppingToken.IsCancellationRequested;
+                if (shouldRestart)
+                {
+                    MessagingTelemetry.RecordConsumerRestart(TelemetryErrorCategory.Connection);
+                    _logger.ConsumerRestartAfterFailure(ex, RestartDelay.TotalSeconds);
+                }
+            }
+
+            if (shouldRestart)
+            {
                 try
                 {
                     await Task.Delay(RestartDelay, stoppingToken);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
                     break;
                 }

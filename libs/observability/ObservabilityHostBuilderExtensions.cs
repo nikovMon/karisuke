@@ -41,8 +41,6 @@ public static class ObservabilityHostBuilderExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(defaultServiceName);
 
-        var section = builder.Configuration.GetSection(ImagingPipelineObservabilityOptions.SectionName);
-        builder.Services.AddOptions<ImagingPipelineObservabilityOptions>().Bind(section);
         builder.Services.AddSingleton<IMessageTraceContextPropagator, W3CMessageTraceContextPropagator>();
 
         // Propagation remains W3C even when signal collection is disabled.
@@ -94,7 +92,7 @@ public static class ObservabilityHostBuilderExtensions
                         options.RecordException = settings.RecordExceptions;
                         if (settings.ExcludeHealthChecks)
                         {
-                            options.Filter = context =>
+                            options.Filter = static context =>
                                 !context.Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase)
                                 && !context.Request.Path.StartsWithSegments("/live", StringComparison.OrdinalIgnoreCase)
                                 && !context.Request.Path.StartsWithSegments("/ready", StringComparison.OrdinalIgnoreCase);
@@ -121,10 +119,6 @@ public static class ObservabilityHostBuilderExtensions
                 if (instrumentAspNetCore)
                 {
                     metrics.AddAspNetCoreInstrumentation();
-                }
-
-                if (instrumentAspNetCore)
-                {
                     metrics.AddMeter("Microsoft.AspNetCore.Hosting", "Microsoft.AspNetCore.Server.Kestrel");
                 }
 
@@ -149,10 +143,6 @@ public static class ObservabilityHostBuilderExtensions
                         ActivityTrackingOptions.TraceId |
                         ActivityTrackingOptions.SpanId;
                 });
-            }
-
-            if (settings.ConsoleLogsEnabled)
-            {
                 builder.Logging.AddJsonConsole(options =>
                 {
                     options.IncludeScopes = settings.IncludeLogScopes;
@@ -203,7 +193,6 @@ public static class ObservabilityHostBuilderExtensions
                  {
                      TelemetryMetricNames.MessagingClientDuration,
                      TelemetryMetricNames.MessagingProcessDuration,
-                     TelemetryMetricNames.MessagingDeliveryDelay,
                      TelemetryMetricNames.RabbitMqChannelWaitDuration,
                      TelemetryMetricNames.DependencyDuration,
                      TelemetryMetricNames.PipelineStageDuration,
@@ -216,6 +205,7 @@ public static class ObservabilityHostBuilderExtensions
 
         foreach (var metricName in new[]
                  {
+                     TelemetryMetricNames.MessagingDeliveryDelay,
                      TelemetryMetricNames.PipelineExternalStageDuration,
                      TelemetryMetricNames.PipelineEndToEndDuration
                  })
@@ -371,6 +361,6 @@ public static class ObservabilityHostBuilderExtensions
         }
 
         private static string? FirstNonEmpty(params string?[] values) =>
-            values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+            values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
     }
 }

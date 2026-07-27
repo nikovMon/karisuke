@@ -19,9 +19,16 @@ public sealed class Worker(
         {
             while (!stoppingToken.IsCancellationRequested)
             {
+                var shouldRestart = false;
                 try
                 {
                     await consumer.ConsumeAsync(handler, stoppingToken);
+                    shouldRestart = !stoppingToken.IsCancellationRequested;
+                    if (shouldRestart)
+                    {
+                        MessagingTelemetry.RecordConsumerRestart(TelemetryErrorCategory.Unknown);
+                        logger.ConsumerRestartScheduled(RestartDelay.TotalSeconds);
+                    }
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -29,8 +36,16 @@ public sealed class Worker(
                 }
                 catch (Exception ex)
                 {
-                    MessagingTelemetry.RecordConsumerRestart(TelemetryErrorCategory.Connection);
-                    logger.ConsumerRestartAfterFailure(ex, RestartDelay.TotalSeconds);
+                    shouldRestart = !stoppingToken.IsCancellationRequested;
+                    if (shouldRestart)
+                    {
+                        MessagingTelemetry.RecordConsumerRestart(TelemetryErrorCategory.Connection);
+                        logger.ConsumerRestartAfterFailure(ex, RestartDelay.TotalSeconds);
+                    }
+                }
+
+                if (shouldRestart)
+                {
                     try
                     {
                         await Task.Delay(RestartDelay, stoppingToken);

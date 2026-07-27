@@ -1,6 +1,3 @@
-using System.Globalization;
-using System.Text;
-
 namespace ImagingPipeline.Observability;
 
 public static class PipelineTimingHeaders
@@ -17,15 +14,21 @@ public static class PipelineTimingHeaders
     {
         ArgumentNullException.ThrowIfNull(headers);
         var now = (timeProvider ?? TimeProvider.System).GetUtcNow().ToUnixTimeMilliseconds();
-        var maximumAgeMilliseconds = ResolveMaximumAgeMilliseconds(maximumAge);
+        var maximumAgeMilliseconds =
+            TimingHeaderUtilities.ResolveMaximumAgeMilliseconds(maximumAge, DefaultMaximumAge);
         var maximumFutureClockSkewMilliseconds =
-            ResolveMaximumFutureClockSkewMilliseconds(maximumFutureClockSkew);
+            TimingHeaderUtilities.ResolveMaximumFutureClockSkewMilliseconds(
+                maximumFutureClockSkew,
+                DefaultMaximumFutureClockSkew);
 
         // Messages produced by this library already use the canonical key and a positive
         // integer value. Keep that full-rate path allocation-free.
         if (headers.TryGetValue(StartUnixMilliseconds, out var canonicalValue)
-            && TryReadValue(canonicalValue, out var canonicalOrigin)
-            && IsPlausible(
+            && TimingHeaderUtilities.TryReadValue(
+                canonicalValue,
+                acceptUnsignedIntegers: false,
+                out var canonicalOrigin)
+            && TimingHeaderUtilities.IsPlausible(
                 canonicalOrigin,
                 now,
                 maximumAgeMilliseconds,
@@ -61,9 +64,13 @@ public static class PipelineTimingHeaders
 
         foreach (var key in matchingKeys)
         {
-            if (existingOrigin is null && TryReadValue(headers[key], out var parsedOrigin))
+            if (existingOrigin is null
+                && TimingHeaderUtilities.TryReadValue(
+                    headers[key],
+                    acceptUnsignedIntegers: false,
+                    out var parsedOrigin))
             {
-                if (IsPlausible(
+                if (TimingHeaderUtilities.IsPlausible(
                         parsedOrigin,
                         now,
                         maximumAgeMilliseconds,
@@ -106,7 +113,7 @@ public static class PipelineTimingHeaders
         elapsedSeconds = 0;
         if (!TryReadStartUnixMilliseconds(headers, out var startedAt))
         {
-            if (ContainsHeader(headers))
+            if (TimingHeaderUtilities.ContainsHeader(headers, StartUnixMilliseconds))
             {
                 PipelineTelemetry.RecordInvalidTimingHeader(
                     TimingHeaderKind.PipelineOrigin,
@@ -117,11 +124,13 @@ public static class PipelineTimingHeaders
         }
 
         var now = (timeProvider ?? TimeProvider.System).GetUtcNow().ToUnixTimeMilliseconds();
-        if (!IsPlausible(
+        if (!TimingHeaderUtilities.IsPlausible(
                 startedAt,
                 now,
-                ResolveMaximumAgeMilliseconds(maximumAge),
-                ResolveMaximumFutureClockSkewMilliseconds(maximumFutureClockSkew),
+                TimingHeaderUtilities.ResolveMaximumAgeMilliseconds(maximumAge, DefaultMaximumAge),
+                TimingHeaderUtilities.ResolveMaximumFutureClockSkewMilliseconds(
+                    maximumFutureClockSkew,
+                    DefaultMaximumFutureClockSkew),
                 out var rejectionReason))
         {
             PipelineTelemetry.RecordInvalidTimingHeader(
@@ -137,104 +146,10 @@ public static class PipelineTimingHeaders
     public static bool TryReadStartUnixMilliseconds(
         IReadOnlyDictionary<string, object?>? headers,
         out long unixMilliseconds)
-    {
-        unixMilliseconds = 0;
-        if (headers is null)
-        {
-            return false;
-        }
+        => TimingHeaderUtilities.TryReadTimestamp(
+            headers,
+            StartUnixMilliseconds,
+            acceptUnsignedIntegers: false,
+            out unixMilliseconds);
 
-        object? raw = null;
-        if (!headers.TryGetValue(StartUnixMilliseconds, out raw))
-        {
-            raw = headers.FirstOrDefault(pair =>
-                    string.Equals(pair.Key, StartUnixMilliseconds, StringComparison.OrdinalIgnoreCase))
-                .Value;
-        }
-
-        return TryReadValue(raw, out unixMilliseconds);
-    }
-
-    private static bool TryReadValue(object? raw, out long unixMilliseconds)
-    {
-        unixMilliseconds = 0;
-        return raw switch
-        {
-            long value => Set(value, out unixMilliseconds),
-            int value => Set(value, out unixMilliseconds),
-            short value => Set(value, out unixMilliseconds),
-            string value => long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out unixMilliseconds),
-            byte[] value => TryParseBytes(value, out unixMilliseconds),
-            ReadOnlyMemory<byte> value => TryParseBytes(value.Span, out unixMilliseconds),
-            Memory<byte> value => TryParseBytes(value.Span, out unixMilliseconds),
-            _ => false
-        };
-    }
-
-    private static bool TryParseBytes(ReadOnlySpan<byte> bytes, out long value) =>
-        long.TryParse(Encoding.UTF8.GetString(bytes), NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
-
-    private static bool Set(long value, out long result)
-    {
-        result = value;
-        return true;
-    }
-
-    private static bool ContainsHeader(IReadOnlyDictionary<string, object?>? headers) =>
-        headers is not null &&
-        (headers.ContainsKey(StartUnixMilliseconds) || headers.Keys.Any(static key =>
-            string.Equals(key, StartUnixMilliseconds, StringComparison.OrdinalIgnoreCase)));
-
-    private static bool IsPlausible(
-        long timestamp,
-        long now,
-        long maximumAgeMilliseconds,
-        long maximumFutureClockSkewMilliseconds,
-        out TimingHeaderRejectionReason rejectionReason)
-    {
-        if (timestamp <= 0)
-        {
-            rejectionReason = TimingHeaderRejectionReason.Malformed;
-            return false;
-        }
-
-        if (timestamp > now && timestamp - now > maximumFutureClockSkewMilliseconds)
-        {
-            rejectionReason = TimingHeaderRejectionReason.Future;
-            return false;
-        }
-
-        if (now - timestamp > maximumAgeMilliseconds)
-        {
-            rejectionReason = TimingHeaderRejectionReason.TooOld;
-            return false;
-        }
-
-        rejectionReason = default;
-        return true;
-    }
-
-    private static long ResolveMaximumAgeMilliseconds(TimeSpan? maximumAge)
-    {
-        var resolved = maximumAge ?? DefaultMaximumAge;
-        if (resolved <= TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(nameof(maximumAge), "Maximum timing-header age must be positive.");
-        }
-
-        return (long)resolved.TotalMilliseconds;
-    }
-
-    private static long ResolveMaximumFutureClockSkewMilliseconds(TimeSpan? maximumFutureClockSkew)
-    {
-        var resolved = maximumFutureClockSkew ?? DefaultMaximumFutureClockSkew;
-        if (resolved < TimeSpan.Zero)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(maximumFutureClockSkew),
-                "Maximum future clock skew must not be negative.");
-        }
-
-        return (long)resolved.TotalMilliseconds;
-    }
 }

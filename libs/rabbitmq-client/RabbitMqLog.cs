@@ -74,4 +74,8 @@ internal static partial class RabbitMqLog
 
     [LoggerMessage(113, LogLevel.Warning, "RabbitMQ connection recovery failed")]
     public static partial void RecoveryFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(114, LogLevel.Warning,
+        "Timed out after {TimeoutSeconds} seconds waiting for RabbitMQ connection acquisition to stop during disposal; any late connection will be closed")]
+    public static partial void ConnectionDisposalTimedOut(ILogger logger, double timeoutSeconds);
 }

@@ -39,6 +39,29 @@ public sealed class MessagingTimingHeadersTests
     }
 
     [Fact]
+    public void TryReadPublishedUnixMillisecondsPreservesSupportedTypesAndStrictParsing()
+    {
+        var unsigned = new Dictionary<string, object?>
+        {
+            [MessagingTimingHeaders.PublishedUnixMilliseconds] = 12_500U
+        };
+        var paddedUtf8 = new Dictionary<string, object?>
+        {
+            [MessagingTimingHeaders.PublishedUnixMilliseconds] = Encoding.UTF8.GetBytes(" 12500 ")
+        };
+        var trailingData = new Dictionary<string, object?>
+        {
+            [MessagingTimingHeaders.PublishedUnixMilliseconds] = Encoding.UTF8.GetBytes("12500ms")
+        };
+
+        Assert.True(MessagingTimingHeaders.TryReadPublishedUnixMilliseconds(unsigned, out var unsignedValue));
+        Assert.Equal(12_500L, unsignedValue);
+        Assert.True(MessagingTimingHeaders.TryReadPublishedUnixMilliseconds(paddedUtf8, out var paddedValue));
+        Assert.Equal(12_500L, paddedValue);
+        Assert.False(MessagingTimingHeaders.TryReadPublishedUnixMilliseconds(trailingData, out _));
+    }
+
+    [Fact]
     public void TryGetDeliveryDelaySecondsRejectsTimestampBeyondClockSkewOrMalformedTimestamp()
     {
         var clock = new FakeTimeProvider(DateTimeOffset.FromUnixTimeMilliseconds(10_000));

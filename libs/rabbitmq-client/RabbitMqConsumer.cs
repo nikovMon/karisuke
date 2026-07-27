@@ -243,19 +243,13 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
                 var (parentContext, baggage) = ExtractTransportContext(delivery.Message.Headers);
                 var retryAttempt = ReadRetryAttempt(delivery.Message.Headers);
                 RabbitMqInputTelemetry.RecordConsumed(_options, delivery, retryAttempt);
-                MessagingTelemetry.AddInFlight(_options.InputQueue, 1);
 
-                try
-                {
-                    await buffer.Writer.WriteAsync(
-                        new BufferedDelivery(delivery, parentContext, baggage, receivedAt),
-                        cancellationToken);
-                }
-                catch
-                {
-                    MessagingTelemetry.AddInFlight(_options.InputQueue, -1);
-                    throw;
-                }
+                await RabbitMqBatchBufferWriter.WriteAsync(
+                    buffer.Writer,
+                    new BufferedDelivery(delivery, parentContext, baggage, receivedAt),
+                    _options.InputQueue,
+                    receivedAt,
+                    cancellationToken);
             };
 
             var consumerTag = await channel.BasicConsumeAsync(
@@ -556,6 +550,57 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
         ActivityContext ParentContext,
         Baggage Baggage,
         long ReceivedAt);
+}
+
+internal static class RabbitMqBatchBufferWriter
+{
+    public static async ValueTask WriteAsync<T>(
+        ChannelWriter<T> writer,
+        T item,
+        string destination,
+        long receivedAt,
+        CancellationToken cancellationToken)
+    {
+        MessagingTelemetry.AddInFlight(destination, 1);
+        try
+        {
+            // A successful write transfers telemetry ownership to the batch reader,
+            // which records the terminal outcome and removes the in-flight value.
+            await writer.WriteAsync(item, cancellationToken);
+        }
+        catch (Exception) when (cancellationToken.IsCancellationRequested)
+        {
+            RecordTerminalOutcome(
+                destination,
+                receivedAt,
+                TelemetryOutcome.Cancelled,
+                TelemetryErrorCategory.Cancelled);
+            throw;
+        }
+        catch
+        {
+            RecordTerminalOutcome(
+                destination,
+                receivedAt,
+                TelemetryOutcome.Failure,
+                TelemetryErrorCategory.Unknown);
+            throw;
+        }
+    }
+
+    private static void RecordTerminalOutcome(
+        string destination,
+        long receivedAt,
+        TelemetryOutcome outcome,
+        TelemetryErrorCategory error)
+    {
+        MessagingTelemetry.RecordProcessed(
+            destination,
+            TelemetryTiming.ElapsedSeconds(receivedAt),
+            outcome,
+            error);
+        MessagingTelemetry.AddInFlight(destination, -1);
+    }
 }
 
 internal static class RabbitMqInputTelemetry

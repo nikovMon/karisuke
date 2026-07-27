@@ -84,7 +84,7 @@ public sealed class TelemetryContractTests
     }
 
     [Fact]
-    public void Metrics_DoNotUseRoutingKeysOrBusinessIdentifiersAsDimensions()
+    public void MessagingMetricsDoNotDeclareARoutingKeyDimension()
     {
         var measurements = new ConcurrentBag<Measurement>();
         using var listener = new MeterListener
@@ -105,28 +105,46 @@ public sealed class TelemetryContractTests
 
         MessagingTelemetry.RecordSent(
             "pipeline.x",
-            "tenant-77/image-42",
             512,
             0.02,
             TelemetryOutcome.Success);
-        DependencyTelemetry.RecordOperation(
-            DependencyName.ProjectionMapper,
-            DependencyOperation.GroundToImage,
-            0.1,
-            TelemetryOutcome.Success);
-        PipelineTelemetry.RecordMessage(
-            PipelineStage.Gateway,
-            PipelineDirection.Ingress,
-            TelemetryOutcome.Success);
-
         Assert.NotEmpty(measurements);
-        var forbiddenValues = new[] { "tenant-77/image-42", "task-1", "image-42", "rule-1" };
-        Assert.DoesNotContain(
-            measurements.SelectMany(item => item.Tags),
-            tag => forbiddenValues.Contains(tag.Value?.ToString(), StringComparer.Ordinal));
         Assert.DoesNotContain(
             measurements.SelectMany(item => item.Tags),
             tag => tag.Key.Contains("routing_key", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void StageDurationDoesNotClaimAnIngressDirection()
+    {
+        KeyValuePair<string, object?>[]? capturedTags = null;
+        using var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, meterListener) =>
+            {
+                if (instrument.Name == TelemetryMetricNames.PipelineStageDuration)
+                {
+                    meterListener.EnableMeasurementEvents(instrument);
+                }
+            }
+        };
+        listener.SetMeasurementEventCallback<double>((_, _, tags, _) => capturedTags = tags.ToArray());
+        listener.Start();
+
+        PipelineTelemetry.RecordStageDuration(
+            PipelineStage.Gateway,
+            0.25,
+            TelemetryOutcome.Failure,
+            TelemetryErrorCategory.Handler);
+
+        var tags = Assert.IsType<KeyValuePair<string, object?>[]>(capturedTags);
+        Assert.Contains(tags, tag =>
+            tag.Key == TelemetryAttributeNames.PipelineStage && Equals(tag.Value, "gateway"));
+        Assert.Contains(tags, tag =>
+            tag.Key == TelemetryAttributeNames.PipelineOutcome && Equals(tag.Value, "failure"));
+        Assert.Contains(tags, tag =>
+            tag.Key == "error.type" && Equals(tag.Value, "handler"));
+        Assert.DoesNotContain(tags, tag => tag.Key == TelemetryAttributeNames.PipelineDirection);
     }
 
     [Fact]

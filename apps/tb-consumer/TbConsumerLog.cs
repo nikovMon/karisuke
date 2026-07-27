@@ -16,6 +16,11 @@ internal static partial class TbConsumerLog
         Exception exception,
         double restartDelaySeconds);
 
+    [LoggerMessage(4003, LogLevel.Warning, "TB Consumer RabbitMQ consumer exited unexpectedly; restarting in {RestartDelaySeconds} seconds.")]
+    public static partial void ConsumerRestartScheduled(
+        this ILogger logger,
+        double restartDelaySeconds);
+
     [LoggerMessage(4010, LogLevel.Warning, "TB Consumer rejected an input message because JSON deserialization failed: {ValidationError}")]
     public static partial void DeserializationRejected(this ILogger logger, string validationError);
 

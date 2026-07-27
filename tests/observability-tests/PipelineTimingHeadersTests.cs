@@ -75,6 +75,28 @@ public sealed class PipelineTimingHeadersTests
     }
 
     [Fact]
+    public void TryReadStartUnixMillisecondsPreservesSupportedTypesAndStrictParsing()
+    {
+        var unsigned = new Dictionary<string, object?>
+        {
+            [PipelineTimingHeaders.StartUnixMilliseconds] = 12_500U
+        };
+        var paddedUtf8 = new Dictionary<string, object?>
+        {
+            [PipelineTimingHeaders.StartUnixMilliseconds] = Encoding.UTF8.GetBytes(" 12500 ")
+        };
+        var trailingData = new Dictionary<string, object?>
+        {
+            [PipelineTimingHeaders.StartUnixMilliseconds] = Encoding.UTF8.GetBytes("12500ms")
+        };
+
+        Assert.False(PipelineTimingHeaders.TryReadStartUnixMilliseconds(unsigned, out _));
+        Assert.True(PipelineTimingHeaders.TryReadStartUnixMilliseconds(paddedUtf8, out var paddedValue));
+        Assert.Equal(12_500L, paddedValue);
+        Assert.False(PipelineTimingHeaders.TryReadStartUnixMilliseconds(trailingData, out _));
+    }
+
+    [Fact]
     public void TryGetElapsedSeconds_RejectsOriginBeyondClockSkewOrMalformedOrigin()
     {
         var clock = new FakeTimeProvider(DateTimeOffset.FromUnixTimeMilliseconds(10_000));

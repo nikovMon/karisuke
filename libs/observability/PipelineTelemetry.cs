@@ -40,10 +40,17 @@ public static class PipelineTelemetry
         PipelineStage stage,
         double durationSeconds,
         TelemetryOutcome outcome,
-        TelemetryErrorCategory error = TelemetryErrorCategory.None) =>
-        StageDuration.Record(
-            Math.Max(0, durationSeconds),
-            Tags(stage, PipelineDirection.Ingress, outcome, error));
+        TelemetryErrorCategory error = TelemetryErrorCategory.None)
+    {
+        var tags = StageTags(stage);
+        tags.Add(TelemetryAttributeNames.PipelineOutcome, outcome.Value());
+        if (error != TelemetryErrorCategory.None)
+        {
+            tags.Add("error.type", error.Value());
+        }
+
+        StageDuration.Record(Math.Max(0, durationSeconds), tags);
+    }
 
     public static void RecordExternalStageDuration(PipelineStage stage, double durationSeconds) =>
         ExternalStageDuration.Record(Math.Max(0, durationSeconds), StageTags(stage));

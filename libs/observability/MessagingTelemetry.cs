@@ -77,7 +77,6 @@ public static class MessagingTelemetry
 
     public static void RecordSent(
         string destination,
-        string? routingKey,
         long bodySizeBytes,
         double durationSeconds,
         TelemetryOutcome outcome,
@@ -88,8 +87,6 @@ public static class MessagingTelemetry
         ClientDuration.Record(NonNegative(durationSeconds), tags);
 
         var sizeTags = DestinationTags(destination, MessagingOperation.Send);
-        // Routing keys may be caller-controlled. Keep them on sampled spans, never metric dimensions.
-        _ = routingKey;
         BodySize.Record(NonNegative(bodySizeBytes), sizeTags);
 
         if (outcome != TelemetryOutcome.Success)

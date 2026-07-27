@@ -104,7 +104,6 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
         {
             MessagingTelemetry.RecordSent(
                 destination,
-                routingKey: null,
                 message.Body.LongLength,
                 TelemetryTiming.ElapsedSeconds(started),
                 outcome,

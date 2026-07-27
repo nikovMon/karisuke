@@ -5,8 +5,8 @@ namespace ImagingPipeline.Observability;
 
 public static class GatewayTelemetry
 {
-    private static long ruleCacheEntries;
-    private static long lastSuccessfulRefreshUnixMilliseconds;
+    private static long _ruleCacheEntries;
+    private static long _lastSuccessfulRefreshUnixMilliseconds;
 
     private static readonly Counter<long> CacheRefreshes = TelemetryMeters.Gateway.CreateCounter<long>(
         TelemetryMetricNames.GatewayRuleCacheRefreshes, "{refresh}", "Rule-cache refresh attempts.");
@@ -21,7 +21,7 @@ public static class GatewayTelemetry
     {
         TelemetryMeters.Gateway.CreateObservableGauge(
             TelemetryMetricNames.GatewayRuleCacheEntries,
-            () => Volatile.Read(ref ruleCacheEntries),
+            static () => Volatile.Read(ref _ruleCacheEntries),
             "{rule}",
             "Rules in this pod's active snapshot.");
         TelemetryMeters.Gateway.CreateObservableGauge(
@@ -47,8 +47,8 @@ public static class GatewayTelemetry
         CacheRefreshDuration.Record(Math.Max(0, durationSeconds), tags);
         if (outcome == TelemetryOutcome.Success)
         {
-            Volatile.Write(ref ruleCacheEntries, Math.Max(0, entries));
-            Volatile.Write(ref lastSuccessfulRefreshUnixMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            Volatile.Write(ref _ruleCacheEntries, Math.Max(0, entries));
+            Volatile.Write(ref _lastSuccessfulRefreshUnixMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         }
     }
 
@@ -60,7 +60,7 @@ public static class GatewayTelemetry
 
     private static double ObserveCacheAgeSeconds()
     {
-        var refreshedAt = Volatile.Read(ref lastSuccessfulRefreshUnixMilliseconds);
+        var refreshedAt = Volatile.Read(ref _lastSuccessfulRefreshUnixMilliseconds);
         return refreshedAt == 0
             ? 0
             : Math.Max(0, (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - refreshedAt) / 1_000d);

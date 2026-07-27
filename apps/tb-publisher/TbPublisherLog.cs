@@ -16,6 +16,11 @@ internal static partial class TbPublisherLog
         Exception exception,
         double restartDelaySeconds);
 
+    [LoggerMessage(3003, LogLevel.Warning, "TB Publisher RabbitMQ consumer exited unexpectedly; restarting in {RestartDelaySeconds} seconds.")]
+    public static partial void ConsumerRestartScheduled(
+        this ILogger logger,
+        double restartDelaySeconds);
+
     [LoggerMessage(3010, LogLevel.Warning, "TB Publisher rejected an input message because validation failed: {ValidationErrors}")]
     public static partial void MessageRejected(this ILogger logger, string validationErrors);
 

@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Messaging;
 using ImagingPipeline.Common.Dtos.Rules.Models;
@@ -382,5 +384,78 @@ public class TbMessageHandlerTests
         // Assert
         Assert.False(result.IsSuccess);
         Assert.Contains("Deserialization produced null", result.Error);
+    }
+
+    [Fact]
+    public async Task HandleAsync_InvalidJson_DoesNotRecordFanOut()
+    {
+        using var fanOut = new FanOutMeasurementCollector();
+
+        var result = await _handler.HandleAsync(RabbitMqMessageEnvelope.FromUtf8("not valid json {{{}"));
+
+        Assert.False(result.IsSuccess);
+        Assert.Empty(fanOut.Measurements);
+    }
+
+    [Fact]
+    public async Task HandleAsync_ValidationFailure_DoesNotRecordFanOut()
+    {
+        var input = CreateValidInput();
+        input.MissionMetadata.TenantId = "";
+        using var fanOut = new FanOutMeasurementCollector();
+
+        var result = await _handler.HandleAsync(ToEnvelope(input));
+
+        Assert.False(result.IsSuccess);
+        Assert.Empty(fanOut.Measurements);
+    }
+
+    [Fact]
+    public async Task HandleAsync_Success_RecordsPublishedFanOut()
+    {
+        SetupProjectionMapperPassthrough();
+        using var fanOut = new FanOutMeasurementCollector();
+
+        var result = await _handler.HandleAsync(ToEnvelope(CreateValidInput(tileCount: 3)));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(3, Assert.Single(fanOut.Measurements));
+    }
+
+    private sealed class FanOutMeasurementCollector : IDisposable
+    {
+        private readonly ConcurrentQueue<long> _measurements = new();
+        private readonly MeterListener _listener;
+
+        public FanOutMeasurementCollector()
+        {
+            _listener = new MeterListener
+            {
+                InstrumentPublished = (instrument, listener) =>
+                {
+                    if (instrument.Name == TelemetryMetricNames.PipelineFanOut)
+                    {
+                        listener.EnableMeasurementEvents(instrument);
+                    }
+                }
+            };
+            _listener.SetMeasurementEventCallback<long>((_, measurement, tags, _) =>
+            {
+                foreach (var tag in tags)
+                {
+                    if (tag.Key == TelemetryAttributeNames.PipelineStage
+                        && string.Equals(tag.Value as string, "tb_consumer", StringComparison.Ordinal))
+                    {
+                        _measurements.Enqueue(measurement);
+                        break;
+                    }
+                }
+            });
+            _listener.Start();
+        }
+
+        public IReadOnlyCollection<long> Measurements => _measurements.ToArray();
+
+        public void Dispose() => _listener.Dispose();
     }
 }

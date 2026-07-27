@@ -189,7 +189,10 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                     count: processingState.PublishedCount);
             }
 
-            PipelineTelemetry.RecordFanOut(PipelineStage.TbConsumer, processingState.PublishedCount);
+            if (processingState.Outcome == TelemetryOutcome.Success)
+            {
+                PipelineTelemetry.RecordFanOut(PipelineStage.TbConsumer, processingState.PublishedCount);
+            }
             PipelineTelemetry.RecordMessage(PipelineStage.TbConsumer, PipelineDirection.Ingress, outcome, error);
             PipelineTelemetry.RecordStageDuration(
                 PipelineStage.TbConsumer,

@@ -92,17 +92,24 @@ public sealed class W3CMessageTraceContextPropagator : IMessageTraceContextPropa
         ArgumentNullException.ThrowIfNull(headers);
 
         // Internally produced headers use canonical lowercase keys. Remove those without
-        // allocating; only allocate a cleanup array for unusual external casing.
+        // allocating; only allocate a cleanup list for unusual external casing.
         foreach (var headerName in PropagationHeaderNames)
         {
             headers.Remove(headerName);
         }
 
-        if (headers.Keys.Any(IsPropagationHeader))
+        List<string>? casingVariants = null;
+        foreach (var existingKey in headers.Keys)
         {
-            foreach (var existingKey in headers.Keys
-                         .Where(IsPropagationHeader)
-                         .ToArray())
+            if (IsPropagationHeader(existingKey))
+            {
+                (casingVariants ??= []).Add(existingKey);
+            }
+        }
+
+        if (casingVariants is not null)
+        {
+            foreach (var existingKey in casingVariants)
             {
                 headers.Remove(existingKey);
             }
