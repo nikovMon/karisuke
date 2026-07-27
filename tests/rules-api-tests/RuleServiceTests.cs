@@ -7,6 +7,7 @@ using ImagingPipeline.Rules.Api.Tests.Fakes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using static ImagingPipeline.Common.Dtos.Rules.Models.RegistrationQuality;
 
 namespace ImagingPipeline.Rules.Api.Tests;
 
@@ -19,7 +20,7 @@ public sealed class RuleServiceTests
 
         var result = await service.CreateAsync(new CreateRuleRequest
         {
-            AlgorithmName = AlgorithmName.FindAir
+            AlgorithmNames = [AlgorithmName.FindAir]
         });
 
         Assert.Equal(RuleOperationStatus.ValidationFailed, result.Status);
@@ -44,15 +45,15 @@ public sealed class RuleServiceTests
         var repository = new InMemoryRuleRepository();
         var service = CreateService(repository);
         var request = ValidCreateRequest("one");
-        request.Sensors["camera"] = ["cam-1", "cam-1", "", "cam-2"];
-        request.Sensors[" "] = ["ignored"];
+        request.Sensors["camera"] = [Accurate, Accurate, Sensor];
+        request.Sensors[" "] = [Sensor];
 
         var result = await service.CreateAsync(request);
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
         Assert.False(string.IsNullOrWhiteSpace(result.Value?.Id));
         Assert.NotEqual("rule-1", result.Value?.Id);
-        Assert.Equal(["cam-1", "cam-2"], result.Value?.Sensors["camera"]);
+        Assert.Equal([Accurate, Sensor], result.Value?.Sensors["camera"]);
         Assert.False(result.Value?.Sensors.ContainsKey(" "));
         Assert.True(result.Value?.CreationTime > DateTimeOffset.MinValue);
         Assert.True(result.Value?.UpdateTime > DateTimeOffset.MinValue);
@@ -189,7 +190,7 @@ public sealed class RuleServiceTests
         var repository = new InMemoryRuleRepository();
         var rule = ValidRule("rule-1", "one");
         rule.Description = "old description";
-        rule.Sensors["camera"] = ["cam-1"];
+        rule.Sensors["camera"] = [Accurate];
         rule.TenantsInfo =
         [
             new TenantInfo
@@ -210,9 +211,9 @@ public sealed class RuleServiceTests
         var request = new UpdateRuleRequest
         {
             Description = null,
-            Sensors = new Dictionary<string, List<string>>(StringComparer.Ordinal)
+            Sensors = new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal)
             {
-                ["thermal"] = ["th-1", "th-1", ""]
+                ["thermal"] = [Sensor, Sensor, Accurate]
             },
             TenantsInfo =
             [
@@ -241,7 +242,7 @@ public sealed class RuleServiceTests
         Assert.Equal(RuleOperationStatus.Success, result.Status);
         Assert.Null(result.Value?.Description);
         Assert.False(result.Value?.Sensors.ContainsKey("camera"));
-        Assert.Equal(["th-1"], result.Value?.Sensors["thermal"]);
+        Assert.Equal([Sensor, Accurate], result.Value?.Sensors["thermal"]);
         var tenant = Assert.Single(result.Value?.TenantsInfo ?? []);
         Assert.Equal("new-tenant", tenant.TenantId);
         var tiling = Assert.Single(tenant.TilingConfigs);
@@ -321,19 +322,19 @@ public sealed class RuleServiceTests
     {
         var repository = new InMemoryRuleRepository();
         var rule = ValidRule("rule-1", "one");
-        rule.Sensors["camera"] = ["cam-1"];
+        rule.Sensors["camera"] = [Accurate];
         repository.Add(rule);
         var service = CreateService(repository);
 
         var result = await service.AddSensorsAsync(["rule-1"], new RuleSensorUpdateRequest
         {
             SensorName = "camera",
-            Values = ["cam-1", "cam-2"]
+            Values = [Accurate, Sensor]
         });
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
         var updated = await repository.GetByIdAsync("rule-1");
-        Assert.Equal(["cam-1", "cam-2"], updated?.Sensors["camera"]);
+        Assert.Equal([Accurate, Sensor], updated?.Sensors["camera"]);
     }
 
     [Fact]
@@ -346,12 +347,12 @@ public sealed class RuleServiceTests
         var result = await service.AddSensorsAsync(["rule-1"], new RuleSensorUpdateRequest
         {
             SensorName = "thermal",
-            Values = ["th-1", "th-2"]
+            Values = [Sensor, Accurate]
         });
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
         var updated = await repository.GetByIdAsync("rule-1");
-        Assert.Equal(["th-1", "th-2"], updated?.Sensors["thermal"]);
+        Assert.Equal([Sensor, Accurate], updated?.Sensors["thermal"]);
     }
 
     [Fact]
@@ -359,14 +360,14 @@ public sealed class RuleServiceTests
     {
         var repository = new InMemoryRuleRepository();
         var rule = ValidRule("rule-1", "one");
-        rule.Sensors["camera"] = ["cam-1"];
+        rule.Sensors["camera"] = [Accurate];
         repository.Add(rule);
         var service = CreateService(repository);
 
         var result = await service.RemoveSensorsAsync(["rule-1"], new RuleSensorUpdateRequest
         {
             SensorName = "camera",
-            Values = ["cam-1"]
+            Values = [Accurate]
         });
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
@@ -379,19 +380,19 @@ public sealed class RuleServiceTests
     {
         var repository = new InMemoryRuleRepository();
         var rule = ValidRule("rule-1", "one");
-        rule.Sensors["camera"] = ["cam-1"];
+        rule.Sensors["camera"] = [Accurate];
         repository.Add(rule);
         var service = CreateService(repository);
 
         var result = await service.RemoveSensorsAsync(["rule-1"], new RuleSensorUpdateRequest
         {
             SensorName = "thermal",
-            Values = ["th-1"]
+            Values = [Sensor]
         });
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
         var updated = await repository.GetByIdAsync("rule-1");
-        Assert.Equal(["cam-1"], updated?.Sensors["camera"]);
+        Assert.Equal([Accurate], updated?.Sensors["camera"]);
     }
 
     [Fact]
@@ -404,7 +405,7 @@ public sealed class RuleServiceTests
         var result = await service.AddSensorsAsync(["rule-1"], new RuleSensorUpdateRequest
         {
             SensorName = "camera",
-            Values = ["cam-1", "cam-1"]
+            Values = [Accurate, Accurate]
         });
         var nullValuesResult = await service.AddSensorsAsync(["rule-1"], new RuleSensorUpdateRequest
         {
@@ -452,7 +453,7 @@ public sealed class RuleServiceTests
         new()
         {
             RuleName = ruleName,
-            AlgorithmName = AlgorithmName.FindAir,
+            AlgorithmNames = [AlgorithmName.FindAir],
             IsActive = true,
             MinimumResolution = 0.5,
             MaximumResolution = 1,
@@ -480,7 +481,7 @@ public sealed class RuleServiceTests
         {
             Id = id,
             RuleName = ruleName,
-            AlgorithmName = AlgorithmName.FindAir,
+            AlgorithmNames = [AlgorithmName.FindAir],
             IsActive = true,
             MinimumResolution = 0.5,
             MaximumResolution = 1,

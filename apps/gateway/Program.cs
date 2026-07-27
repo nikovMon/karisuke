@@ -1,5 +1,6 @@
 namespace ImagingPipeline.Gateway;
 
+using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.ElasticsearchClient;
 using ImagingPipeline.Gateway.Configuration;
 using ImagingPipeline.Gateway.Health;
@@ -11,6 +12,8 @@ public static class Program
 {
     public static async Task Main(string[] args)
     {
+        RegistrationQualityContract.EnsureValid();
+
         var builder = Host.CreateApplicationBuilder(args);
 
         var shutdownTimeoutSeconds = 30;
@@ -34,7 +37,6 @@ public static class Program
         builder.Services.AddRabbitMqClient(builder.Configuration);
 
         builder.Services.AddSingleton<GatewayHealthState>();
-        builder.Services.AddSingleton<JsonPathReader>();
         builder.Services.AddSingleton<GatewayGeometryConverter>();
         builder.Services.AddSingleton<GatewayInputMessageParser>();
         builder.Services.AddSingleton<GatewayOutputMessageBuilder>();

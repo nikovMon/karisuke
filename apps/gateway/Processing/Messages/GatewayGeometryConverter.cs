@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Gateway.Errors;
@@ -36,13 +37,13 @@ public sealed class GatewayGeometryConverter
     {
         if (!string.IsNullOrWhiteSpace(rule.LocationWkt))
         {
-            return GeometryUtilities.ReadTrustedWkt(rule.LocationWkt);
+            return GeometryUtilities.ReadWkt(rule.LocationWkt);
         }
 
         if (rule.LocationGeoJson.HasValue &&
             rule.LocationGeoJson.Value.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
         {
-            return GeometryUtilities.ReadTrustedGeoJson(rule.LocationGeoJson.Value);
+            return GeometryUtilities.ReadGeoJson(rule.LocationGeoJson.Value);
         }
 
         throw new GatewayValidationException(
@@ -52,7 +53,14 @@ public sealed class GatewayGeometryConverter
 
     public string WriteWkt(Geometry geometry) => GeometryUtilities.WriteWkt(geometry);
 
-    public JsonElement WriteGeoJson(Geometry geometry) => GeometryUtilities.WriteGeoJson(geometry);
+    public byte[] WriteGeoJsonUtf8(Geometry geometry)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        using var writer = new Utf8JsonWriter(buffer);
+        GeometryUtilities.WriteGeoJson(writer, geometry);
+        writer.Flush();
+        return buffer.WrittenSpan.ToArray();
+    }
 
     private static string RuleLabel(RuleDto rule) =>
         string.IsNullOrWhiteSpace(rule.Id) ? rule.RuleName : rule.Id;

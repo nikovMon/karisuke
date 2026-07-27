@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Messaging;
+using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbPublisher.MessageHandling;
@@ -16,10 +17,17 @@ public sealed class TbPublisherMessageHandlerTests
     {
       "taskId": "msg-1",
       "ruleId": "rule-1",
-      "algorithmName": "FindAir",
+      "algorithmName": ["FindAir", "Rpn"],
       "tenantId": "tenant-1",
       "imageId": "image-1",
       "roiFootprint": { "type": "Point", "coordinates": [35.98, 34.15] },
+      "photoTime": "2026-07-27T10:00:00Z",
+      "sensorType": "EO",
+      "imageUrl": "/images/image-1.tiff",
+      "imageWidth": 4096,
+      "imageHeight": 3072,
+      "resolutionMPerPx": 0.4,
+      "sensorName": "sensor-1",
       "tilingConfigs": [
         { "tileSizeWidth": 512, "tileSizeHeight": 384, "tileOverlapWidth": 32, "tileOverlapHeight": 24 },
         { "tileSizeWidth": 256, "tileSizeHeight": 128, "tileOverlapWidth": 16, "tileOverlapHeight": 8 }
@@ -49,6 +57,9 @@ public sealed class TbPublisherMessageHandlerTests
             .ToList();
         Assert.Equal("tenant-1", outputs[0].MissionMetadata.TenantId);
         Assert.Equal("image-1", outputs[0].MissionMetadata.Overlay.ImageId);
+        Assert.Equal(
+            [AlgorithmName.FindAir, AlgorithmName.Rpn],
+            outputs[0].MissionMetadata.Overlay.AlgorithmNames);
 
         Assert.Equal(512, outputs[0].ModelMetadata.TbCropSizeX);
         Assert.Equal(384, outputs[0].ModelMetadata.TbCropSizeY);
@@ -97,11 +108,19 @@ public sealed class TbPublisherMessageHandlerTests
     {
         var invalidTilingBody = Encoding.UTF8.GetBytes("""
         {
+          "taskId": "msg-1",
           "ruleId": "rule-1",
-          "algorithmName": "FindAir",
+          "algorithmName": ["FindAir"],
           "tenantId": "tenant-1",
           "imageId": "image-1",
           "roiFootprint": { "type": "Point", "coordinates": [35.98, 34.15] },
+          "photoTime": "2026-07-27T10:00:00Z",
+          "sensorType": "EO",
+          "imageUrl": "/images/image-1.tiff",
+          "imageWidth": 4096,
+          "imageHeight": 3072,
+          "resolutionMPerPx": 0.4,
+          "sensorName": "sensor-1",
           "tilingConfigs": [
             { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 512, "tileOverlapHeight": 0 }
           ]

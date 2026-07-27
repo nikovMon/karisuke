@@ -29,16 +29,21 @@ public sealed class TbMessageHandler(
             return RabbitMqMessageProcessingResult.Failure("Validation failed: Tiles batch is null or empty.");
         }
 
-        var matchedAlgorithm = input.MissionMetadata.Overlay.AlgorithmName;
-        if (!Enum.IsDefined(typeof(AlgorithmName), matchedAlgorithm))
+        var matchedAlgorithms = input.MissionMetadata.Overlay.AlgorithmNames;
+        if (matchedAlgorithms is not { Count: > 0 } ||
+            matchedAlgorithms.Any(algorithm => !Enum.IsDefined(algorithm)) ||
+            matchedAlgorithms.Distinct().Count() != matchedAlgorithms.Count)
         {
             return RabbitMqMessageProcessingResult.Failure(
-                $"Validation failed: invalid algorithm '{matchedAlgorithm}'. Valid algorithms are: {string.Join(", ", Enum.GetNames<AlgorithmName>())}");
+                $"Validation failed: algorithm_name must contain one or more unique algorithms. Valid algorithms are: {string.Join(", ", Enum.GetNames<AlgorithmName>())}");
         }
 
+        var algorithmNames = matchedAlgorithms
+            .Select(algorithm => algorithm.ToString())
+            .ToList();
         var headers = new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>
         {
-            ["algorithm_name"] = matchedAlgorithm.ToString()
+            ["algorithm_name"] = string.Join(",", algorithmNames)
         });
 
         var overlay = input.MissionMetadata.Overlay;
@@ -99,7 +104,7 @@ public sealed class TbMessageHandler(
                 ImagingTime = overlay.ImageTime,
                 Resolution = overlay.ResolutionMPerPx,
                 TenantId = input.MissionMetadata.TenantId,
-                Algorithms = new List<string> { matchedAlgorithm.ToString() },
+                Algorithms = algorithmNames,
                 TileCoordinates = tileCoordinates,
                 Lon = lon,
                 Lat = lat,

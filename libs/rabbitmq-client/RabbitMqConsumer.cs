@@ -8,13 +8,13 @@ namespace ImagingPipeline.RabbitMqClient;
 
 internal sealed class RabbitMqConsumer : IRabbitMqConsumer
 {
-    private readonly IRabbitMqConnectionManager _connections;
+    private readonly IRabbitMqConsumerConnectionManager _connections;
     private readonly RabbitMqClientOptions _options;
     private readonly RabbitMqOutcomeRouter _outcomes;
     private readonly ILogger<RabbitMqConsumer> _logger;
 
     public RabbitMqConsumer(
-        IRabbitMqConnectionManager connections,
+        IRabbitMqConsumerConnectionManager connections,
         IOptions<RabbitMqClientOptions> options,
         RabbitMqOutcomeRouter outcomes,
         ILogger<RabbitMqConsumer> logger)
@@ -57,7 +57,42 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
         await RabbitMqTopology.DeclareAsync(channel, _options, cancellationToken);
         await channel.BasicQosAsync(0, _options.PrefetchCount, global: false, cancellationToken);
 
+        var lifetime = new RabbitMqConsumerLifetime();
         var consumer = new AsyncEventingBasicConsumer(channel);
+
+        Task OnConsumerUnregisteredAsync(object _, ConsumerEventArgs args)
+        {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                lifetime.ConsumerCancelled(args.ConsumerTags, connection.IsOpen);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        Task OnChannelShutdownAsync(object _, ShutdownEventArgs args)
+        {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                lifetime.ChannelShutdown(args, connection.IsOpen);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        Task OnCallbackExceptionAsync(object _, CallbackExceptionEventArgs args)
+        {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                lifetime.CallbackFailed(args.Exception);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        consumer.UnregisteredAsync += OnConsumerUnregisteredAsync;
+        channel.ChannelShutdownAsync += OnChannelShutdownAsync;
+        channel.CallbackExceptionAsync += OnCallbackExceptionAsync;
         consumer.ReceivedAsync += async (_, args) =>
         {
             var delivery = RabbitMqDeliveryFactory.Create(args);
@@ -87,7 +122,14 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
                     RabbitMqClientDiagnostics.Tag("queue", _options.InputQueue));
             }
 
-            await _outcomes.CompleteAsync(channel, delivery, result, cancellationToken);
+            try
+            {
+                await _outcomes.CompleteAsync(channel, delivery, result, cancellationToken);
+            }
+            catch (RabbitMqMessageCompletionException ex)
+            {
+                lifetime.CompletionFailed(ex);
+            }
         };
 
         var consumerTag = await channel.BasicConsumeAsync(
@@ -100,17 +142,26 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
             _options.ConsumerConcurrency,
             _options.PrefetchCount);
 
+        var faulted = false;
         try
         {
-            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            await lifetime.Completion.WaitAsync(cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             _logger.LogInformation("Stopping RabbitMQ consumer for {InputQueue}", _options.InputQueue);
         }
+        catch
+        {
+            faulted = true;
+            throw;
+        }
         finally
         {
-            if (channel.IsOpen) await channel.BasicCancelAsync(consumerTag, noWait: false, CancellationToken.None);
+            consumer.UnregisteredAsync -= OnConsumerUnregisteredAsync;
+            channel.ChannelShutdownAsync -= OnChannelShutdownAsync;
+            channel.CallbackExceptionAsync -= OnCallbackExceptionAsync;
+            await StopConsumerChannelAsync(channel, consumerTag, faulted);
         }
     }
 
@@ -125,7 +176,42 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
         await channel.BasicQosAsync(0, _options.PrefetchCount, global: false, cancellationToken);
 
         var buffer = System.Threading.Channels.Channel.CreateUnbounded<RabbitMqDelivery>();
+        var lifetime = new RabbitMqConsumerLifetime();
         var consumer = new AsyncEventingBasicConsumer(channel);
+
+        Task OnConsumerUnregisteredAsync(object _, ConsumerEventArgs args)
+        {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                lifetime.ConsumerCancelled(args.ConsumerTags, connection.IsOpen);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        Task OnChannelShutdownAsync(object _, ShutdownEventArgs args)
+        {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                lifetime.ChannelShutdown(args, connection.IsOpen);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        Task OnCallbackExceptionAsync(object _, CallbackExceptionEventArgs args)
+        {
+            if (!cancellationToken.IsCancellationRequested)
+            {
+                lifetime.CallbackFailed(args.Exception);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        consumer.UnregisteredAsync += OnConsumerUnregisteredAsync;
+        channel.ChannelShutdownAsync += OnChannelShutdownAsync;
+        channel.CallbackExceptionAsync += OnCallbackExceptionAsync;
         consumer.ReceivedAsync += async (_, args) =>
         {
             var delivery = RabbitMqDeliveryFactory.Create(args);
@@ -140,6 +226,7 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
             "Consuming RabbitMQ queue {InputQueue} in batches of {BatchSize} with prefetch {PrefetchCount}",
             _options.InputQueue, batchSize, _options.PrefetchCount);
 
+        var faulted = false;
         try
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -152,7 +239,7 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
                 {
                     while (batch.Count < batchSize)
                     {
-                        var delivery = await buffer.Reader.ReadAsync(cts.Token);
+                        var delivery = await ReadDeliveryAsync(buffer.Reader, lifetime.Completion, cts.Token);
                         batch.Add(delivery);
                     }
                 }
@@ -171,9 +258,57 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
         {
             _logger.LogInformation("Stopping RabbitMQ batch consumer for {InputQueue}", _options.InputQueue);
         }
+        catch
+        {
+            faulted = true;
+            throw;
+        }
         finally
         {
-            if (channel.IsOpen) await channel.BasicCancelAsync(consumerTag, noWait: false, CancellationToken.None);
+            consumer.UnregisteredAsync -= OnConsumerUnregisteredAsync;
+            channel.ChannelShutdownAsync -= OnChannelShutdownAsync;
+            channel.CallbackExceptionAsync -= OnCallbackExceptionAsync;
+            await StopConsumerChannelAsync(channel, consumerTag, faulted);
+        }
+    }
+
+    private static async Task<RabbitMqDelivery> ReadDeliveryAsync(
+        System.Threading.Channels.ChannelReader<RabbitMqDelivery> reader,
+        Task consumerTermination,
+        CancellationToken cancellationToken)
+    {
+        var read = reader.ReadAsync(cancellationToken).AsTask();
+        var completed = await Task.WhenAny(read, consumerTermination);
+        if (ReferenceEquals(completed, consumerTermination))
+        {
+            await consumerTermination;
+            throw new UnreachableException();
+        }
+
+        return await read;
+    }
+
+    private async Task StopConsumerChannelAsync(IChannel channel, string consumerTag, bool faulted)
+    {
+        if (!channel.IsOpen)
+        {
+            return;
+        }
+
+        if (!faulted)
+        {
+            await channel.BasicCancelAsync(consumerTag, noWait: false, CancellationToken.None);
+            return;
+        }
+
+        try
+        {
+            // Closing the channel outside the delivery callback causes RabbitMQ to requeue unacknowledged deliveries.
+            await channel.CloseAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "RabbitMQ consumer channel was already unavailable while it was being replaced");
         }
     }
 

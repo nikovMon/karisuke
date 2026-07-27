@@ -19,11 +19,10 @@ public sealed class RuleDto : IValidatableObject
     public string? Description { get; set; }
 
     [JsonPropertyName("algorithmName")]
-    [JsonConverter(typeof(JsonStringEnumConverter))]
-    public required AlgorithmName AlgorithmName { get; set; }
+    public required List<AlgorithmName> AlgorithmNames { get; set; }
 
     [JsonPropertyName("sensors")]
-    public Dictionary<string, List<string>> Sensors { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, List<RegistrationQuality>> Sensors { get; set; } = new(StringComparer.Ordinal);
 
     [JsonPropertyName("isActive")]
     public bool IsActive { get; set; } = true;
@@ -64,6 +63,29 @@ public sealed class RuleDto : IValidatableObject
             yield return new ValidationResult("ruleName cannot be empty", [nameof(RuleName)]);
         }
 
+        if (AlgorithmNames is null || AlgorithmNames.Count == 0)
+        {
+            yield return new ValidationResult(
+                "algorithmName must contain at least one algorithm",
+                [nameof(AlgorithmNames)]);
+        }
+        else
+        {
+            if (AlgorithmNames.Any(value => !AlgorithmNameContract.IsDefined(value)))
+            {
+                yield return new ValidationResult(
+                    "algorithmName values must be valid algorithms",
+                    [nameof(AlgorithmNames)]);
+            }
+
+            if (AlgorithmNames.Count != AlgorithmNames.Distinct().Count())
+            {
+                yield return new ValidationResult(
+                    "algorithmName values must be unique",
+                    [nameof(AlgorithmNames)]);
+            }
+        }
+
         if (MinimumResolution <= 0)
         {
             yield return new ValidationResult(
@@ -92,6 +114,18 @@ public sealed class RuleDto : IValidatableObject
         else if (Sensors.Any(sensor => sensor.Value is null))
         {
             yield return new ValidationResult("sensor value lists cannot be null", [nameof(Sensors)]);
+        }
+        else if (Sensors.Any(sensor => sensor.Value.Count == 0))
+        {
+            yield return new ValidationResult(
+                "sensor value lists cannot be empty",
+                [nameof(Sensors)]);
+        }
+        else if (Sensors.Any(sensor => sensor.Value.Any(value => !Enum.IsDefined(value))))
+        {
+            yield return new ValidationResult(
+                "sensor values must be valid registration qualities",
+                [nameof(Sensors)]);
         }
 
         if (TenantsInfo is null || TenantsInfo.Count == 0)

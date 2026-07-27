@@ -8,8 +8,8 @@ public sealed class UpdateRuleRequest
 {
     private string? _ruleName;
     private string? _description;
-    private AlgorithmName? _algorithmName;
-    private Dictionary<string, List<string>>? _sensors;
+    private List<AlgorithmName>? _algorithmNames;
+    private Dictionary<string, List<RegistrationQuality>>? _sensors;
     private bool? _isActive;
     private List<TenantInfo>? _tenantsInfo;
     private double? _minimumResolution;
@@ -45,19 +45,18 @@ public sealed class UpdateRuleRequest
     }
 
     [JsonPropertyName("algorithmName")]
-    [JsonConverter(typeof(JsonStringEnumConverter))]
-    public AlgorithmName? AlgorithmName
+    public List<AlgorithmName>? AlgorithmNames
     {
-        get => _algorithmName;
+        get => _algorithmNames;
         set
         {
             ProvidedFields.Add("algorithmName");
-            _algorithmName = value;
+            _algorithmNames = value;
         }
     }
 
     [JsonPropertyName("sensors")]
-    public Dictionary<string, List<string>>? Sensors
+    public Dictionary<string, List<RegistrationQuality>>? Sensors
     {
         get => _sensors;
         set

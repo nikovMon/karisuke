@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.ElasticsearchClient;
 using ImagingPipeline.Rules.Api.Configuration;
 using ImagingPipeline.Rules.Api.Health;
@@ -14,10 +15,14 @@ public sealed partial class Program
 {
     public static async Task Main(string[] args)
     {
+        RegistrationQualityContract.EnsureValid();
+
         var builder = WebApplication.CreateBuilder(args);
         builder.Services.AddControllers()
             .AddJsonOptions(options =>
             {
+                options.JsonSerializerOptions.Converters.Add(new RegistrationQualityJsonConverter());
+                options.JsonSerializerOptions.Converters.Add(new AlgorithmNameJsonConverter());
                 options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
             });
         builder.Services.Configure<ApiBehaviorOptions>(options =>

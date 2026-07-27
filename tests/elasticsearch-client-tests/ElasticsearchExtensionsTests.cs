@@ -19,7 +19,11 @@ public sealed class ElasticsearchExtensionsTests
         });
 
         Assert.NotNull(provider.GetRequiredService<IElasticClient>());
-        Assert.IsType<ElasticsearchDocumentClient>(provider.GetRequiredService<IElasticsearchDocumentClient>());
+        var documentClient = Assert.IsType<ElasticsearchDocumentClient>(
+            provider.GetRequiredService<IElasticsearchDocumentClient>());
+        Assert.Same(
+            documentClient,
+            provider.GetRequiredService<IElasticsearchPointInTimeClient>());
     }
 
     [Fact]
@@ -45,6 +49,7 @@ public sealed class ElasticsearchExtensionsTests
             .GetRequiredService<IElasticClient>()
             .ConnectionSettings;
         Assert.Equal("user", clientSettings.BasicAuthenticationCredentials?.Username);
+        Assert.True(clientSettings.EnableApiVersioningHeader);
     }
 
     [Fact]

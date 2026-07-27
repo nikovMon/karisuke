@@ -509,8 +509,8 @@ public sealed class RuleService : IRuleService
         {
             ["ruleName"] = () => rule.RuleName = request.RuleName ?? string.Empty,
             ["description"] = () => rule.Description = request.Description,
-            ["algorithmName"] = () => rule.AlgorithmName = request.AlgorithmName!.Value,
-            ["sensors"] = () => rule.Sensors = request.Sensors ?? new Dictionary<string, List<string>>(StringComparer.Ordinal),
+            ["algorithmName"] = () => rule.AlgorithmNames = request.AlgorithmNames!.ToList(),
+            ["sensors"] = () => rule.Sensors = request.Sensors ?? new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal),
             ["isActive"] = () => rule.IsActive = request.IsActive.GetValueOrDefault(),
             ["tenantsInfo"] = () => rule.TenantsInfo = request.TenantsInfo ?? [],
             ["minimumResolution"] = () => rule.MinimumResolution = request.MinimumResolution.GetValueOrDefault(),
@@ -536,13 +536,13 @@ public sealed class RuleService : IRuleService
     {
         if (!rule.Sensors.TryGetValue(request.SensorName, out var values))
         {
-            rule.Sensors[request.SensorName] = request.Values.Distinct(StringComparer.Ordinal).ToList();
+            rule.Sensors[request.SensorName] = request.Values.Distinct().ToList();
             return;
         }
 
         foreach (var value in request.Values)
         {
-            if (!values.Contains(value, StringComparer.Ordinal))
+            if (!values.Contains(value))
             {
                 values.Add(value);
             }
@@ -556,7 +556,7 @@ public sealed class RuleService : IRuleService
             return;
         }
 
-        values.RemoveAll(value => request.Values.Contains(value, StringComparer.Ordinal));
+        values.RemoveAll(value => request.Values.Contains(value));
         if (values.Count == 0)
         {
             rule.Sensors.Remove(request.SensorName);
@@ -565,14 +565,16 @@ public sealed class RuleService : IRuleService
 
     private static void NormalizeRuleCollections(RuleDto rule)
     {
-        rule.Sensors = new Dictionary<string, List<string>>(
-            (rule.Sensors ?? new Dictionary<string, List<string>>(StringComparer.Ordinal))
+        rule.AlgorithmNames = (rule.AlgorithmNames ?? [])
+            .OrderBy(value => value)
+            .ToList();
+        rule.Sensors = new Dictionary<string, List<RegistrationQuality>>(
+            (rule.Sensors ?? new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal))
                 .Where(item => !string.IsNullOrWhiteSpace(item.Key))
-                .Select(item => new KeyValuePair<string, List<string>>(
+                .Select(item => new KeyValuePair<string, List<RegistrationQuality>>(
                     item.Key,
                     (item.Value ?? [])
-                        .Where(value => !string.IsNullOrWhiteSpace(value))
-                        .Distinct(StringComparer.Ordinal)
+                        .Distinct()
                         .ToList())),
             StringComparer.Ordinal);
         rule.TenantsInfo ??= [];

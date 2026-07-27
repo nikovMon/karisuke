@@ -10,18 +10,51 @@ internal interface IRabbitMqConnectionManager : IAsyncDisposable
     Task<IConnection> GetConnectionAsync(CancellationToken cancellationToken = default);
 }
 
-internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
+internal interface IRabbitMqPublisherConnectionManager : IRabbitMqConnectionManager
+{
+}
+
+internal interface IRabbitMqConsumerConnectionManager : IRabbitMqConnectionManager
+{
+}
+
+internal sealed class RabbitMqPublisherConnectionManager : RabbitMqConnectionManager, IRabbitMqPublisherConnectionManager
+{
+    public RabbitMqPublisherConnectionManager(
+        IOptions<RabbitMqClientOptions> options,
+        ILogger<RabbitMqConnectionManager> logger)
+        : base(options, logger, "publisher")
+    {
+    }
+}
+
+internal sealed class RabbitMqConsumerConnectionManager : RabbitMqConnectionManager, IRabbitMqConsumerConnectionManager
+{
+    public RabbitMqConsumerConnectionManager(
+        IOptions<RabbitMqClientOptions> options,
+        ILogger<RabbitMqConnectionManager> logger)
+        : base(options, logger, "consumer")
+    {
+    }
+}
+
+internal class RabbitMqConnectionManager : IRabbitMqConnectionManager
 {
     private readonly RabbitMqClientOptions _options;
     private readonly ILogger<RabbitMqConnectionManager> _logger;
+    private readonly string _role;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private IConnection? _connection;
     private bool _disposed;
 
-    public RabbitMqConnectionManager(IOptions<RabbitMqClientOptions> options, ILogger<RabbitMqConnectionManager> logger)
+    protected RabbitMqConnectionManager(
+        IOptions<RabbitMqClientOptions> options,
+        ILogger<RabbitMqConnectionManager> logger,
+        string role)
     {
         _options = options.Value;
         _logger = logger;
+        _role = role;
     }
 
     public async Task<IConnection> GetConnectionAsync(CancellationToken cancellationToken = default)
@@ -49,21 +82,25 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
                     NetworkRecoveryInterval = TimeSpan.FromSeconds(_options.ReconnectDelaySeconds),
                     // Parallelism is provided by multiple consumer channels, not concurrent callbacks on one channel.
                     ConsumerDispatchConcurrency = 1,
-                    ClientProvidedName = $"imagingpipeline-{Environment.ProcessId}"
+                    ClientProvidedName = $"imagingpipeline-{Environment.ProcessId}-{_role}"
                 };
 
                 _connection = await factory.CreateConnectionAsync(cancellationToken);
                 _connection.ConnectionShutdownAsync += OnConnectionShutdownAsync;
                 _connection.CallbackExceptionAsync += OnCallbackExceptionAsync;
                 RabbitMqClientDiagnostics.ConnectionRecoveries.Add(1, RabbitMqClientDiagnostics.Tag("host", _options.Host));
-                _logger.LogInformation("Connected to RabbitMQ at {Host}:{Port} vhost {VirtualHost}",
-                    _options.Host, _options.Port, _options.VirtualHost);
+                _logger.LogInformation(
+                    "Connected RabbitMQ {ConnectionRole} connection to {Host}:{Port} vhost {VirtualHost}",
+                    _role,
+                    _options.Host,
+                    _options.Port,
+                    _options.VirtualHost);
                 return _connection;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 RabbitMqClientDiagnostics.ConnectionFailures.Add(1, RabbitMqClientDiagnostics.Tag("host", _options.Host));
-                _logger.LogWarning(ex, "RabbitMQ connection failed");
+                _logger.LogWarning(ex, "RabbitMQ {ConnectionRole} connection failed", _role);
                 throw;
             }
         }
@@ -77,15 +114,19 @@ internal sealed class RabbitMqConnectionManager : IRabbitMqConnectionManager
     {
         if (!_disposed)
         {
-            _logger.LogWarning("RabbitMQ connection shut down. Initiator: {Initiator}; code: {ReplyCode}; reason: {ReplyText}",
-                args.Initiator, args.ReplyCode, args.ReplyText);
+            _logger.LogWarning(
+                "RabbitMQ {ConnectionRole} connection shut down. Initiator: {Initiator}; code: {ReplyCode}; reason: {ReplyText}",
+                _role,
+                args.Initiator,
+                args.ReplyCode,
+                args.ReplyText);
         }
         return Task.CompletedTask;
     }
 
     private Task OnCallbackExceptionAsync(object sender, CallbackExceptionEventArgs args)
     {
-        _logger.LogError(args.Exception, "RabbitMQ connection callback failed");
+        _logger.LogError(args.Exception, "RabbitMQ {ConnectionRole} connection callback failed", _role);
         return Task.CompletedTask;
     }
 

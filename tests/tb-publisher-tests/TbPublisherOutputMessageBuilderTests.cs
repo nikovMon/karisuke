@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ImagingPipeline.Common.Dtos.Gateway.Messages;
 using ImagingPipeline.Common.Dtos.Messaging;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.TbPublisher.MessageHandling;
@@ -29,6 +30,9 @@ public sealed class TbPublisherOutputMessageBuilderTests
             Assert.Equal(expectedMissionId, outputMessage.MissionMetadata.MissionId);
             Assert.Equal("tenant-1", outputMessage.MissionMetadata.TenantId);
             Assert.Equal("rule-1", outputMessage.MissionMetadata.Overlay.RuleId);
+            Assert.Equal(
+                [AlgorithmName.FindAir, AlgorithmName.Rpn],
+                outputMessage.MissionMetadata.Overlay.AlgorithmNames);
             Assert.Equal("image-1", outputMessage.MissionMetadata.Overlay.ImageId);
             Assert.Equal("image-1", outputMessage.FrameMetadata.General.Id);
             Assert.NotEmpty(outputMessage.TaskId);
@@ -70,10 +74,17 @@ public sealed class TbPublisherOutputMessageBuilderTests
     {
         TaskId = id,
         RuleId = "rule-1",
-        AlgorithmName = AlgorithmName.FindAir,
+        AlgorithmNames = [AlgorithmName.FindAir, AlgorithmName.Rpn],
         TenantId = "tenant-1",
         ImageId = "image-1",
         RoiFootprint = JsonDocument.Parse("""{ "type": "Point", "coordinates": [35.98, 34.15] }""").RootElement,
+        PhotoTime = DateTimeOffset.Parse("2026-07-27T10:00:00Z"),
+        SensorType = "EO",
+        ImageUrl = "/images/image-1.tiff",
+        ImageWidth = 4096,
+        ImageHeight = 3072,
+        ResolutionMPerPx = 0.4,
+        SensorName = "sensor-1",
         TilingConfigs =
         [
             new TilingConfig { TileSizeWidth = 110, TileSizeHeight = 110, TileOverlapWidth = 10, TileOverlapHeight = 10 },

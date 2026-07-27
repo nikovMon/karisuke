@@ -15,11 +15,10 @@ public sealed class CreateRuleRequest : IValidatableObject
     public string? Description { get; set; }
 
     [JsonPropertyName("algorithmName")]
-    [JsonConverter(typeof(JsonStringEnumConverter))]
-    public required AlgorithmName AlgorithmName { get; set; }
+    public required List<AlgorithmName> AlgorithmNames { get; set; }
 
     [JsonPropertyName("sensors")]
-    public Dictionary<string, List<string>> Sensors { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, List<RegistrationQuality>> Sensors { get; set; } = new(StringComparer.Ordinal);
 
     [JsonPropertyName("isActive")]
     public bool IsActive { get; set; } = true;
@@ -53,7 +52,7 @@ public sealed class CreateRuleRequest : IValidatableObject
         {
             RuleName = RuleName,
             Description = Description,
-            AlgorithmName = AlgorithmName,
+            AlgorithmNames = AlgorithmNames?.ToList()!,
             Sensors = Sensors,
             IsActive = IsActive,
             TenantsInfo = TenantsInfo,

@@ -264,6 +264,44 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
     }
 
     [RabbitMqBrokerFact]
+    public async Task BrokerCancellationFaultsConsumeAsync()
+    {
+        var topology = CreateTopology();
+        await using var provider = BuildProvider(topology);
+        var consumer = provider.GetRequiredService<IRabbitMqConsumer>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var consumerTask = consumer.ConsumeAsync(new AckOnlyHandler(), cts.Token);
+        await WaitForQueueConsumerCountAsync(topology.InputQueue, 1, cts.Token);
+        await DeleteQueueAsync(topology.InputQueue, cts.Token);
+
+        await Assert.ThrowsAsync<RabbitMqConsumerTerminatedException>(
+            () => consumerTask.WaitAsync(cts.Token));
+    }
+
+    [RabbitMqBrokerFact]
+    public async Task OutputPublishFailureFaultsConsumerAndBrokerRequeuesUnacknowledgedInput()
+    {
+        var topology = CreateTopology();
+        await using var provider = BuildProvider(topology);
+        var consumer = provider.GetRequiredService<IRabbitMqConsumer>();
+        var publisherConnections = provider.GetRequiredService<IRabbitMqPublisherConnectionManager>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var consumerTask = consumer.ConsumeAsync(new SuccessHandler(), cts.Token);
+        await WaitForQueueConsumerCountAsync(topology.InputQueue, 1, cts.Token);
+        await publisherConnections.DisposeAsync();
+        await PublishDirectlyToQueueAsync(topology.InputQueue, "requeue-me", cts.Token);
+
+        await Assert.ThrowsAsync<RabbitMqConsumerTerminatedException>(
+            () => consumerTask.WaitAsync(cts.Token));
+        await WaitForQueueMessageCountAsync(topology.InputQueue, 1, cts.Token);
+
+        Assert.Equal("requeue-me", await BasicGetAsync(topology.InputQueue, cts.Token));
+        Assert.Null(await BasicGetAsync(topology.OutputQueue, CancellationToken.None));
+    }
+
+    [RabbitMqBrokerFact]
     public async Task DefaultExchangeConfigurationRoutesFailureDirectlyToDeadLetterQueue()
     {
         var topology = CreateTopology(useExchanges: false);
@@ -497,6 +535,54 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
         }
 
         throw new TimeoutException($"Timed out waiting for {queue} to have {expectedCount} messages.");
+    }
+
+    private static async Task WaitForQueueConsumerCountAsync(
+        string queue,
+        uint expectedCount,
+        CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+
+        while (!timeout.IsCancellationRequested)
+        {
+            var info = await PassiveQueueDeclareAsync(queue);
+            if (info.ConsumerCount == expectedCount)
+            {
+                return;
+            }
+
+            await Task.Delay(250, timeout.Token);
+        }
+
+        throw new TimeoutException($"Timed out waiting for {queue} to have {expectedCount} consumers.");
+    }
+
+    private static async Task DeleteQueueAsync(string queue, CancellationToken cancellationToken)
+    {
+        await using var connection = await CreateConnectionAsync(cancellationToken);
+        await using var channel = await connection.CreateChannelAsync(cancellationToken: cancellationToken);
+        await channel.QueueDeleteAsync(
+            queue,
+            ifUnused: false,
+            ifEmpty: false,
+            cancellationToken: cancellationToken);
+    }
+
+    private static async Task PublishDirectlyToQueueAsync(
+        string queue,
+        string body,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await CreateConnectionAsync(cancellationToken);
+        await using var channel = await connection.CreateChannelAsync(cancellationToken: cancellationToken);
+        await channel.BasicPublishAsync(
+            exchange: string.Empty,
+            routingKey: queue,
+            mandatory: true,
+            body: Encoding.UTF8.GetBytes(body),
+            cancellationToken: cancellationToken);
     }
 
     private static async Task<string?> BasicGetAsync(string queue, CancellationToken cancellationToken)

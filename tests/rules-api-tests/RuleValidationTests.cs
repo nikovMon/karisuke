@@ -2,6 +2,7 @@ using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Common.Dtos.Rules.Requests;
 using ImagingPipeline.Rules.Api.Services;
 using System.Text.Json;
+using static ImagingPipeline.Common.Dtos.Rules.Models.RegistrationQuality;
 
 namespace ImagingPipeline.Rules.Api.Tests;
 
@@ -12,7 +13,7 @@ public sealed class RuleValidationTests
     {
         var rule = new RuleDto
         {
-            AlgorithmName = AlgorithmName.FindAir
+            AlgorithmNames = [AlgorithmName.FindAir]
         };
 
         var errors = RuleValidation.ValidateRule(rule);
@@ -42,7 +43,7 @@ public sealed class RuleValidationTests
         var invalid = new UpdateRuleRequest
         {
             RuleName = " ",
-            AlgorithmName = null,
+            AlgorithmNames = null,
             MinimumResolution = 0
         };
         invalid.ProvidedFields.Add("ruleName");
@@ -54,7 +55,7 @@ public sealed class RuleValidationTests
 
         Assert.Equal(["At least one field must be provided."], emptyErrors);
         Assert.Contains("ruleName cannot be empty.", invalidErrors);
-        Assert.Contains("algorithmName is required.", invalidErrors);
+        Assert.Contains("algorithmName must contain at least one algorithm.", invalidErrors);
         Assert.Contains("minimumResolution must be greater than 0.", invalidErrors);
     }
 
@@ -80,7 +81,7 @@ public sealed class RuleValidationTests
     {
         var rule = new RuleDto
         {
-            AlgorithmName = AlgorithmName.FindAir
+            AlgorithmNames = [AlgorithmName.FindAir]
         };
 
         var errors = RuleValidation.ValidateRule(rule);
@@ -94,6 +95,52 @@ public sealed class RuleValidationTests
     {
         Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<RuleDto>("{}"));
         Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<CreateRuleRequest>("{}"));
+    }
+
+    [Fact]
+    public void AlgorithmNameJsonUsesARequiredArrayWithStrictUniqueValues()
+    {
+        var both = JsonSerializer.Deserialize<CreateRuleRequest>(
+            """{"algorithmName":["FindAir","Rpn"]}""");
+        var duplicateUpdate = new UpdateRuleRequest
+        {
+            AlgorithmNames = [AlgorithmName.FindAir, AlgorithmName.FindAir]
+        };
+
+        Assert.Equal(
+            [AlgorithmName.FindAir, AlgorithmName.Rpn],
+            both?.AlgorithmNames);
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<CreateRuleRequest>(
+            """{"algorithmName":"FindAir"}"""));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<CreateRuleRequest>(
+            """{"algorithmName":["findair"]}"""));
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<CreateRuleRequest>(
+            """{"algorithmName":[0]}"""));
+        Assert.Contains(
+            "algorithmName values must be unique.",
+            RuleValidation.ValidateUpdate(duplicateUpdate));
+    }
+
+    [Fact]
+    public void RegistrationQualityJsonUsesPascalCaseValuesAndRejectsLowercase()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var request = new RuleSensorUpdateRequest
+        {
+            SensorName = "camera",
+            Values = [Accurate, Sensor]
+        };
+
+        var parsed = JsonSerializer.Deserialize<RuleSensorUpdateRequest>(
+            """{"sensorName":"camera","values":["Accurate","Sensor"]}""",
+            options);
+        var json = JsonSerializer.Serialize(request, options);
+
+        Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<RuleSensorUpdateRequest>(
+            """{"sensorName":"camera","values":["accurate","sensor"]}""",
+            options));
+        Assert.Contains("\"values\":[\"Accurate\",\"Sensor\"]", json, StringComparison.Ordinal);
+        Assert.Equal([Accurate, Sensor], parsed?.Values);
     }
 
     [Fact]
@@ -137,30 +184,36 @@ public sealed class RuleValidationTests
     [Fact]
     public void ValidateSensorRequestRejectsEmptyAndDuplicateValues()
     {
-        var request = new RuleSensorUpdateRequest
+        var duplicateRequest = new RuleSensorUpdateRequest
         {
             SensorName = "",
-            Values = ["cam-1", "cam-1", ""]
+            Values = [Accurate, Accurate]
+        };
+        var emptyValuesRequest = new RuleSensorUpdateRequest
+        {
+            SensorName = "camera",
+            Values = []
         };
 
-        var errors = RuleValidation.ValidateSensorRequest(request);
+        var duplicateErrors = RuleValidation.ValidateSensorRequest(duplicateRequest);
+        var emptyValueErrors = RuleValidation.ValidateSensorRequest(emptyValuesRequest);
 
-        Assert.Contains("sensorName cannot be empty.", errors);
-        Assert.Contains("sensor values cannot be empty.", errors);
-        Assert.Contains("sensor values must be unique.", errors);
+        Assert.Contains("sensorName cannot be empty.", duplicateErrors);
+        Assert.Contains("sensor values must be unique.", duplicateErrors);
+        Assert.Contains("sensor values cannot be empty.", emptyValueErrors);
     }
 
     [Fact]
     public void SensorValidationRejectsNullCollectionsWithoutThrowing()
     {
         var rule = ValidRule();
-        rule.Sensors = new Dictionary<string, List<string>>(StringComparer.Ordinal)
+        rule.Sensors = new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal)
         {
             ["camera"] = null!
         };
         var update = new UpdateRuleRequest
         {
-            Sensors = new Dictionary<string, List<string>>(StringComparer.Ordinal)
+            Sensors = new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal)
             {
                 ["camera"] = null!
             }
@@ -178,6 +231,27 @@ public sealed class RuleValidationTests
         Assert.Contains(ruleErrors, error => error.Contains("cannot be null", StringComparison.Ordinal));
         Assert.Contains("sensor value lists cannot be null.", updateErrors);
         Assert.Contains("sensor values cannot be empty.", requestErrors);
+    }
+
+    [Fact]
+    public void SensorValidationRejectsEmptyRuleSensorValueLists()
+    {
+        var rule = ValidRule();
+        rule.Sensors["camera"] = [];
+        var update = new UpdateRuleRequest
+        {
+            Sensors = new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal)
+            {
+                ["camera"] = []
+            }
+        };
+        update.ProvidedFields.Add("sensors");
+
+        var ruleErrors = RuleValidation.ValidateRule(rule);
+        var updateErrors = RuleValidation.ValidateUpdate(update);
+
+        Assert.Contains("sensor value lists cannot be empty", ruleErrors);
+        Assert.Contains("sensor value lists cannot be empty.", updateErrors);
     }
 
     [Fact]
@@ -220,7 +294,7 @@ public sealed class RuleValidationTests
         {
             Id = "rule-1",
             RuleName = "one",
-            AlgorithmName = AlgorithmName.FindAir,
+            AlgorithmNames = [AlgorithmName.FindAir],
             IsActive = true,
             MinimumResolution = 0.5,
             MaximumResolution = 1,
