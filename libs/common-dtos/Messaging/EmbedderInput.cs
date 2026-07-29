@@ -10,9 +10,12 @@ public class EmbedderInput
     [JsonPropertyName("gid")] 
     public string? Gid { get; set; }
     
-    [JsonPropertyName("image_path")] 
+    [JsonPropertyName("image_path")]
     public string ImagePath { get; set; } = string.Empty;
-    
+
+    [JsonPropertyName("url")]
+    public string ImageUrl { get; set; } = string.Empty;
+
     [JsonPropertyName("sensor")] 
     public string? Sensor { get; set; }
     
