@@ -39,10 +39,10 @@ internal static partial class TbPublisherLog
         int publishedCount,
         int totalCount);
 
-    [LoggerMessage(3015, LogLevel.Debug, "TB Publisher processed an input message with {GroundPointCount} ground points and {TilingConfigCount} tiling configurations, publishing {OutputCount} outputs.")]
+    [LoggerMessage(3015, LogLevel.Debug, "TB Publisher processed an input message with {CoordinateCount} coordinates and {TilingConfigCount} tiling configurations, publishing {OutputCount} outputs.")]
     public static partial void MessageProcessed(
         this ILogger logger,
-        int groundPointCount,
+        int coordinateCount,
         int tilingConfigCount,
         int outputCount);
 }
