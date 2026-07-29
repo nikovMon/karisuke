@@ -4,6 +4,6 @@ namespace ImagingPipeline.ProjectionMapperClient;
 
 public sealed class ProjectionMapperRequestDto
 {
-    [JsonPropertyName("groundPoints")]
-    public IReadOnlyList<IReadOnlyList<double>> GroundPoints { get; set; } = [];
+    [JsonPropertyName("coordinates")]
+    public IReadOnlyList<IReadOnlyList<double>> Coordinates { get; set; } = [];
 }

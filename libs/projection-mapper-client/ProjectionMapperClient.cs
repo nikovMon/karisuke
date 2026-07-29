@@ -33,7 +33,7 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
             ProjectionMapperEndpointKeys.G2IMultiPoints,
             DependencyOperation.GroundToImage,
             PipelineItem.GroundPoint,
-            request.GroundPoints.Count,
+            request.Coordinates.Count,
             request,
             cancellationToken);
     }

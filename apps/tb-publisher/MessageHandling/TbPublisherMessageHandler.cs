@@ -181,7 +181,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                         ruleId: inputMessage.RuleId,
                         tenantId: inputMessage.TenantId,
                         algorithmName: algorithmNameText);
-                    var request = new ProjectionMapperRequestDto { GroundPoints = groundPoints };
+                    var request = new ProjectionMapperRequestDto { Coordinates = groundPoints };
                     coordinates = await _projectionMapperClient.MapAsync(inputMessage.ImageId, request, cancellationToken);
                     if (projectionActivity?.IsAllDataRequested == true)
                     {
