@@ -39,6 +39,9 @@ public sealed class TbPublisherOutputMessageBuilderTests
         }
 
         Assert.Equal(messages[0].TaskId, messages[1].TaskId);
+        Assert.NotEmpty(messages[0].RequestId);
+        Assert.NotEmpty(messages[1].RequestId);
+        Assert.NotEqual(messages[0].RequestId, messages[1].RequestId);
 
         Assert.Equal(110, messages[0].ModelMetadata.TbCropSizeX);
         Assert.Equal(110, messages[0].ModelMetadata.TbCropSizeY);
@@ -83,8 +86,9 @@ public sealed class TbPublisherOutputMessageBuilderTests
         ImageUrl = "/images/image-1.tiff",
         ImageWidth = 4096,
         ImageHeight = 3072,
-        ResolutionMPerPx = 0.4,
+        BestResolution = 100,
         SensorName = "sensor-1",
+        IntersectionArea = 0.001,
         TilingConfigs =
         [
             new TilingConfig { TileSizeWidth = 110, TileSizeHeight = 110, TileOverlapWidth = 10, TileOverlapHeight = 10 },

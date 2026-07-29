@@ -16,6 +16,9 @@ public sealed class TbPublisherOutputMessageDto
     [JsonPropertyName("missionMetadata")]
     public MissionMetadataDto MissionMetadata { get; set; } = new();
 
+    [JsonPropertyName("requestId")]
+    public string RequestId { get; set; } = string.Empty;
+
     [JsonPropertyName("taskId")]
     public string TaskId { get; set; } = string.Empty;
 }
