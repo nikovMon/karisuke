@@ -140,6 +140,80 @@ public class TbMessageHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_RoiBoundingBox_SendsSingleCenterPointToProjectionMapper()
+    {
+        var input = CreateValidInput();
+        input.Tiles[0].Roi = [100.0, 200.0, 300.0, 400.0];
+        IReadOnlyList<IReadOnlyList<double>>? capturedCoordinates = null;
+        _projectionMapperMock
+            .Setup(m => m.ProcessBatchAsync(
+                "img-001",
+                It.IsAny<IReadOnlyList<IReadOnlyList<double>>>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, IReadOnlyList<IReadOnlyList<double>>, CancellationToken>(
+                (_, coordinates, _) => capturedCoordinates = coordinates)
+            .ReturnsAsync([[34.8, 32.1]]);
+
+        var result = await _handler.HandleAsync(ToEnvelope(input));
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(capturedCoordinates);
+        var center = Assert.Single(capturedCoordinates);
+        Assert.Equal([200.0, 300.0], center);
+    }
+
+    [Fact]
+    public async Task HandleAsync_MultipleTiles_BatchesOneUnroundedCenterPerTileAndMapsResultsInOrder()
+    {
+        var input = CreateValidInput(2);
+        input.Tiles[0].Roi = [100.0, 200.0, 301.0, 401.0];
+        input.Tiles[1].Roi = [10.0, 20.0, 30.0, 60.0];
+        IReadOnlyList<IReadOnlyList<double>>? capturedCoordinates = null;
+        _projectionMapperMock
+            .Setup(m => m.ProcessBatchAsync(
+                "img-001",
+                It.IsAny<IReadOnlyList<IReadOnlyList<double>>>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<string, IReadOnlyList<IReadOnlyList<double>>, CancellationToken>(
+                (_, coordinates, _) => capturedCoordinates = coordinates)
+            .ReturnsAsync(
+            [
+                [34.75, 32.125],
+                [35.5, 33.25]
+            ]);
+
+        var published = new List<EmbedderInputDto>();
+        _publisherMock
+            .Setup(p => p.PublishToOutputAsync(
+                It.IsAny<RabbitMqMessageEnvelope>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<RabbitMqMessageEnvelope, CancellationToken>((envelope, _) =>
+            {
+                published.Add(JsonSerializer.Deserialize<EmbedderInputDto>(
+                    envelope.BodyAsUtf8(),
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!);
+            })
+            .Returns(Task.CompletedTask);
+
+        var result = await _handler.HandleAsync(ToEnvelope(input));
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(capturedCoordinates);
+        Assert.Equal(2, capturedCoordinates.Count);
+        Assert.All(capturedCoordinates, center => Assert.Equal(2, center.Count));
+        Assert.Equal([200.5, 300.5], capturedCoordinates[0]);
+        Assert.Equal([20.0, 40.0], capturedCoordinates[1]);
+
+        Assert.Equal(2, published.Count);
+        Assert.Equal("0", published[0].EmbedderInput.TileId);
+        Assert.Equal(34.75, published[0].EmbedderInput.Lon);
+        Assert.Equal(32.125, published[0].EmbedderInput.Lat);
+        Assert.Equal("1", published[1].EmbedderInput.TileId);
+        Assert.Equal(35.5, published[1].EmbedderInput.Lon);
+        Assert.Equal(33.25, published[1].EmbedderInput.Lat);
+    }
+
+    [Fact]
     public async Task HandleAsync_PublishesAuthoritativeCorrelationBaggageAndRestoresAmbientState()
     {
         var previous = Baggage.Current;
@@ -234,8 +308,8 @@ public class TbMessageHandlerTests
         Assert.Equal("sensor-x", embedder.Sensor);
         Assert.Equal(0.5, embedder.Resolution);
         Assert.Equal("tenant-1", embedder.TenantId);
-        Assert.Equal(0.0, embedder.Lon);
-        Assert.Equal(0.0, embedder.Lat);
+        Assert.Equal(0.5, embedder.Lon);
+        Assert.Equal(0.5, embedder.Lat);
         Assert.NotNull(embedder.ImagingTime);
         Assert.Equal(["FindAir", "Rpn"], embedder.Algorithms);
         Assert.NotNull(embedder.TileCoordinates);
