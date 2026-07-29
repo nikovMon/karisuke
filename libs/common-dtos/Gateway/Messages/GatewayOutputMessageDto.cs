@@ -44,11 +44,14 @@ public sealed class GatewayOutputMessageDto : IValidatableObject
     [JsonPropertyName("imageHeight")]
     public required int ImageHeight { get; init; }
 
-    [JsonPropertyName("resolutionMPerPx")]
-    public required double ResolutionMPerPx { get; init; }
+    [JsonPropertyName("bestResolution")]
+    public required double BestResolution { get; init; }
 
     [JsonPropertyName("sensorName")]
     public required string SensorName { get; init; }
+
+    [JsonPropertyName("intersectionArea")]
+    public required double IntersectionArea { get; init; }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
@@ -131,16 +134,23 @@ public sealed class GatewayOutputMessageDto : IValidatableObject
             yield return new ValidationResult("imageHeight must be greater than zero.", [nameof(ImageHeight)]);
         }
 
-        if (!double.IsFinite(ResolutionMPerPx) || ResolutionMPerPx <= 0)
+        if (!double.IsFinite(BestResolution) || BestResolution <= 0)
         {
             yield return new ValidationResult(
-                "resolutionMPerPx must be a positive finite number.",
-                [nameof(ResolutionMPerPx)]);
+                "bestResolution must be a positive finite number.",
+                [nameof(BestResolution)]);
         }
 
         if (string.IsNullOrWhiteSpace(SensorName))
         {
             yield return new ValidationResult("sensorName cannot be empty.", [nameof(SensorName)]);
+        }
+
+        if (!double.IsFinite(IntersectionArea) || IntersectionArea < 0)
+        {
+            yield return new ValidationResult(
+                "intersectionArea must be a non-negative finite number.",
+                [nameof(IntersectionArea)]);
         }
     }
 }

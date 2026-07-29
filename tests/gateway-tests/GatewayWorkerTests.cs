@@ -64,8 +64,9 @@ public sealed class GatewayWorkerTests
         Assert.Equal("/images/image-1.tiff", first.RootElement.GetProperty("imageUrl").GetString());
         Assert.Equal(4096, first.RootElement.GetProperty("imageWidth").GetInt32());
         Assert.Equal(3072, first.RootElement.GetProperty("imageHeight").GetInt32());
-        Assert.Equal(0.4, first.RootElement.GetProperty("resolutionMPerPx").GetDouble());
+        Assert.Equal(25.9, first.RootElement.GetProperty("bestResolution").GetDouble());
         Assert.Equal("cam-001", first.RootElement.GetProperty("sensorName").GetString());
+        Assert.True(first.RootElement.GetProperty("intersectionArea").GetDouble() > 0);
         Assert.Equal("Polygon", first.RootElement.GetProperty("roiFootprint").GetProperty("type").GetString());
         Assert.Equal("message-1:gateway-task:rule-1:findair:1", second.RootElement.GetProperty("taskId").GetString());
         Assert.Equal("findair", second.RootElement.GetProperty("tenantId").GetString());
@@ -84,8 +85,9 @@ public sealed class GatewayWorkerTests
                 "imageUrl",
                 "imageWidth",
                 "imageHeight",
-                "resolutionMPerPx",
-                "sensorName"
+                "bestResolution",
+                "sensorName",
+                "intersectionArea"
             ],
             first.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
         Assert.All(outputs, output =>
