@@ -75,8 +75,9 @@ public sealed class GatewayOutputMessageBuilder
         writer.WriteString("imageUrl", input.ImageUrl);
         writer.WriteNumber("imageWidth", input.ImageWidth);
         writer.WriteNumber("imageHeight", input.ImageHeight);
-        writer.WriteNumber("resolutionMPerPx", input.ResolutionMPerPx);
+        writer.WriteNumber("bestResolution", input.BestResolution);
         writer.WriteString("sensorName", input.SensorName);
+        writer.WriteString("areaOfInterest", input.AreaOfInterest);
         writer.WriteEndObject();
         writer.Flush();
         return buffer.WrittenSpan.ToArray();

@@ -32,10 +32,10 @@ public sealed class TbPublisherOutputMessageBuilder : ITbPublisherOutputMessageB
             },
             ModelMetadata = new ModelMetadataDto
             {
-                OverlapHeight = tilingConfig.TileOverlapHeight,
-                TbCropSizeY = tilingConfig.TileSizeHeight,
-                OverlapWidth = tilingConfig.TileOverlapWidth,
-                TbCropSizeX = tilingConfig.TileSizeWidth
+                OverlapHeight = (int)(tilingConfig.TileOverlapHeight * 100 / message.BestResolution),
+                TbCropSizeY = (int)(tilingConfig.TileSizeHeight * 100 / message.BestResolution),
+                OverlapWidth = (int)(tilingConfig.TileOverlapWidth * 100 / message.BestResolution),
+                TbCropSizeX = (int)(tilingConfig.TileSizeWidth * 100 / message.BestResolution)
             },
             FocusedPxWkt = focusedPxWkt,
             MissionMetadata = new MissionMetadataDto
@@ -47,7 +47,8 @@ public sealed class TbPublisherOutputMessageBuilder : ITbPublisherOutputMessageB
                     ImageId = message.ImageId,
                     ImageUrl = message.ImageUrl,
                     RuleId = message.RuleId,
-                    ResolutionMPerPx = message.ResolutionMPerPx,
+                    BestResolution = message.BestResolution,
+                    AreaOfInterest = message.AreaOfInterest,
                     AlgorithmNames = message.AlgorithmNames,
                     ImageWidth = message.ImageWidth,
                     ImageHeight = message.ImageHeight,
@@ -57,6 +58,7 @@ public sealed class TbPublisherOutputMessageBuilder : ITbPublisherOutputMessageB
                     SensorType = message.SensorType
                 }
             },
+            RequestId = Guid.NewGuid().ToString("N"),
             TaskId = message.TaskId
         };
 }

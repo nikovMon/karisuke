@@ -32,8 +32,8 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
             overlayId,
             ProjectionMapperEndpointKeys.G2IMultiPoints,
             DependencyOperation.GroundToImage,
-            PipelineItem.GroundPoint,
-            request.GroundPoints.Count,
+            PipelineItem.Coordinate,
+            request.Coordinates.Count,
             request,
             cancellationToken);
     }
@@ -104,7 +104,11 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
                 $"{endpoint}?overlayId={Uri.EscapeDataString(overlayId)}&useCache={(_options.UseCache ? "true" : "false")}";
             using var requestMessage = new HttpRequestMessage(HttpMethod.Post, requestUri)
             {
-                Content = JsonContent.Create(request)
+                Content = JsonContent.Create(request),
+                Headers =
+                {
+                    { "sendingSystem", _options.SendingSystem }
+                }
             };
             RecordKnownContentLength(operation, PipelineDirection.Egress, requestMessage.Content);
             using var response = await _httpClient.SendAsync(requestMessage, cancellationToken);

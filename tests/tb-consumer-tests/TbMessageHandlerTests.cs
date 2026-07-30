@@ -30,6 +30,7 @@ public class TbMessageHandlerTests
 
         _handler = new TbMessageHandler(
             _projectionMapperMock.Object,
+            new EmbedderInputMessageBuilder(),
             _publisherMock.Object,
             _timeProvider,
             NullLogger<TbMessageHandler>.Instance);
@@ -38,32 +39,36 @@ public class TbMessageHandlerTests
     private static TbConsumerInputDto CreateValidInput(int tileCount = 1) => new()
     {
         RequestId = "req-001",
-        TaskId = "task-001",
-        MissionMetadata = new MissionMetadataDto
+        Metadata = new TileBuilderMetadataDto
         {
-            MissionId = "mission-1",
-            TenantId = "tenant-1",
-            Overlay = new OverlayDto
+            RequestId = "req-001",
+            TaskId = "task-001",
+            MissionMetadata = new MissionMetadataDto
             {
-                ImageId = "img-001",
-                ImageUrl = "/images/test.tiff",
-                RuleId = "rule-1",
-                AlgorithmNames = [AlgorithmName.FindAir, AlgorithmName.Rpn],
-                ResolutionMPerPx = 0.5,
-                ImageWidth = 1024,
-                ImageHeight = 1024,
-                SensorName = "sensor-x",
-                SensorType = "EO",
-                ImageTime = DateTimeOffset.Parse("2026-07-07T12:00:00Z"),
-                RoiFootprint = System.Text.Json.JsonDocument.Parse("{}").RootElement
+                MissionId = "mission-1",
+                TenantId = "tenant-1",
+                Overlay = new OverlayDto
+                {
+                    ImageId = "img-001",
+                    ImageUrl = "/images/test.tiff",
+                    RuleId = "rule-1",
+                    AlgorithmNames = [AlgorithmName.FindAir, AlgorithmName.Rpn],
+                    BestResolution = 50,
+                    ImageWidth = 1024,
+                    ImageHeight = 1024,
+                    SensorName = "sensor-x",
+                    SensorType = "EO",
+                    ImageTime = DateTimeOffset.Parse("2026-07-07T12:00:00Z"),
+                    RoiFootprint = System.Text.Json.JsonDocument.Parse("{}").RootElement
+                }
+            },
+            ModelMetadata = new ModelMetadataDto
+            {
+                OverlapHeight = 32,
+                OverlapWidth = 32,
+                TbCropSizeX = 256,
+                TbCropSizeY = 256
             }
-        },
-        ModelMetadata = new ModelMetadataDto
-        {
-            OverlapHeight = 32,
-            OverlapWidth = 32,
-            TbCropSizeX = 256,
-            TbCropSizeY = 256
         },
         Tiles = Enumerable.Range(0, tileCount)
             .Select(i => new TileBuilderTileOutput
@@ -305,6 +310,7 @@ public class TbMessageHandlerTests
         Assert.Equal("0", embedder.TileId);
         Assert.Equal("req-001", embedder.Gid);
         Assert.Equal("/tiles/tile_0.tiff", embedder.ImagePath);
+        Assert.Equal("/images/test.tiff", dto.ImageUrl);
         Assert.Equal("sensor-x", embedder.Sensor);
         Assert.Equal(0.5, embedder.Resolution);
         Assert.Equal("tenant-1", embedder.TenantId);
@@ -327,7 +333,7 @@ public class TbMessageHandlerTests
     {
         // Arrange
         var input = CreateValidInput();
-        input.MissionMetadata.TenantId = "";
+        input.Metadata.MissionMetadata.TenantId = "";
         var envelope = ToEnvelope(input);
 
         // Act
@@ -474,7 +480,7 @@ public class TbMessageHandlerTests
     public async Task HandleAsync_ValidationFailure_DoesNotRecordFanOut()
     {
         var input = CreateValidInput();
-        input.MissionMetadata.TenantId = "";
+        input.Metadata.MissionMetadata.TenantId = "";
         using var fanOut = new FanOutMeasurementCollector();
 
         var result = await _handler.HandleAsync(ToEnvelope(input));

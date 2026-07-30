@@ -15,17 +15,20 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
     private static readonly JsonSerializerOptions SerializerOptions = new() { PropertyNameCaseInsensitive = true };
 
     private readonly IProjectionMapperClient _projectionMapper;
+    private readonly EmbedderInputMessageBuilder _embedderInputMessageBuilder;
     private readonly IRabbitMqPublisher _publisher;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<TbMessageHandler> _logger;
 
     public TbMessageHandler(
         IProjectionMapperClient projectionMapper,
+        EmbedderInputMessageBuilder embedderInputMessageBuilder,
         IRabbitMqPublisher publisher,
         TimeProvider timeProvider,
         ILogger<TbMessageHandler> logger)
     {
         _projectionMapper = projectionMapper;
+        _embedderInputMessageBuilder = embedderInputMessageBuilder;
         _publisher = publisher;
         _timeProvider = timeProvider;
         _logger = logger;
@@ -93,16 +96,16 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                         return RabbitMqMessageProcessingResult.Failure(deserializationError);
                     }
 
-                    var matchedAlgorithms = input.MissionMetadata.Overlay.AlgorithmNames;
+                    var matchedAlgorithms = input.Metadata.MissionMetadata.Overlay.AlgorithmNames;
                     var algorithmNameText = matchedAlgorithms is { Count: > 0 }
                         ? string.Join(",", matchedAlgorithms)
                         : null;
                     validationActivity.AddPipelineContext(
-                        taskId: input.TaskId,
+                        taskId: input.Metadata.TaskId,
                         requestId: input.RequestId,
-                        imageId: input.MissionMetadata.Overlay.ImageId,
-                        ruleId: input.MissionMetadata.Overlay.RuleId,
-                        tenantId: input.MissionMetadata.TenantId,
+                        imageId: input.Metadata.MissionMetadata.Overlay.ImageId,
+                        ruleId: input.Metadata.MissionMetadata.Overlay.RuleId,
+                        tenantId: input.Metadata.MissionMetadata.TenantId,
                         algorithmName: algorithmNameText);
 
                     var validationError = Validate(input);
@@ -200,26 +203,26 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
         CancellationToken cancellationToken,
         HandlerTelemetryState telemetryState)
     {
-        var matchedAlgorithms = input.MissionMetadata.Overlay.AlgorithmNames;
+        var matchedAlgorithms = input.Metadata.MissionMetadata.Overlay.AlgorithmNames;
         var algorithmNames = matchedAlgorithms
             .Select(algorithm => algorithm.ToString())
             .ToList();
         var algorithmNameText = string.Join(",", algorithmNames);
-        var overlay = input.MissionMetadata.Overlay;
+        var overlay = input.Metadata.MissionMetadata.Overlay;
         using var pipelineScope = _logger.BeginTelemetryScope(new TelemetryLogContext(
-            TaskId: input.TaskId,
+            TaskId: input.Metadata.TaskId,
             RequestId: input.RequestId,
             ImageId: overlay.ImageId,
             RuleId: overlay.RuleId,
-            TenantId: input.MissionMetadata.TenantId,
+            TenantId: input.Metadata.MissionMetadata.TenantId,
             AlgorithmName: algorithmNameText));
         using var correlationBaggage = PipelineCorrelationBaggage.Push(
             new PipelineCorrelationContext(
-                TaskId: input.TaskId,
+                TaskId: input.Metadata.TaskId,
                 RequestId: input.RequestId,
                 ImageId: overlay.ImageId,
                 RuleId: overlay.RuleId,
-                TenantId: input.MissionMetadata.TenantId,
+                TenantId: input.Metadata.MissionMetadata.TenantId,
                 AlgorithmName: algorithmNameText));
 
         PipelineTelemetry.RecordBatchSize(PipelineStage.TbConsumer, PipelineItem.Tile, input.Tiles.Count);
@@ -244,11 +247,11 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
             try
             {
                 projectionActivity.AddPipelineContext(
-                    taskId: input.TaskId,
+                    taskId: input.Metadata.TaskId,
                     requestId: input.RequestId,
                     imageId: overlay.ImageId,
                     ruleId: overlay.RuleId,
-                    tenantId: input.MissionMetadata.TenantId,
+                    tenantId: input.Metadata.MissionMetadata.TenantId,
                     algorithmName: algorithmNameText);
                 if (projectionActivity?.IsAllDataRequested == true)
                 {
@@ -311,78 +314,23 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
         try
         {
             buildActivity.AddPipelineContext(
-                taskId: input.TaskId,
+                taskId: input.Metadata.TaskId,
                 requestId: input.RequestId,
                 imageId: overlay.ImageId,
                 ruleId: overlay.RuleId,
-                tenantId: input.MissionMetadata.TenantId,
+                tenantId: input.Metadata.MissionMetadata.TenantId,
                 algorithmName: algorithmNameText);
             if (buildActivity?.IsAllDataRequested == true)
             {
                 buildActivity.SetTag("imaging_pipeline.pipeline.tile.count", input.Tiles.Count);
             }
-            for (var i = 0; i < input.Tiles.Count; i++)
+
+            var envelopes = _embedderInputMessageBuilder.Build(input, batchMapped, _timeProvider.GetUtcNow());
+            for (var i = 0; i < envelopes.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var tile = input.Tiles[i];
-
-                double? lon = null;
-                double? lat = null;
-                var coordsList = new List<double[]>();
-
-                if (batchMapped[i] is { Count: >= 2 } mapped)
-                {
-                    lon = mapped[0];
-                    lat = mapped[1];
-
-                    for (var j = 0; j < mapped.Count - 1; j += 2)
-                    {
-                        coordsList.Add([mapped[j], mapped[j + 1]]);
-                    }
-                }
-
-                var tileCoordinates = new PolygonDto
-                {
-                    Coordinates = coordsList.ToArray()
-                };
-
-                double? tilesSizeMeters = null;
-                if (tile.Roi.Length >= 4 && overlay.ResolutionMPerPx > 0)
-                {
-                    var widthPx = System.Math.Abs(tile.Roi[2] - tile.Roi[0]);
-                    var heightPx = System.Math.Abs(tile.Roi[3] - tile.Roi[1]);
-                    tilesSizeMeters = System.Math.Max(widthPx, heightPx) * overlay.ResolutionMPerPx;
-                }
-
-                var embedderInput = new EmbedderInput
-                {
-                TileId = tile.TileIndex.ToString(),
-                Gid = input.RequestId,
-                ImagePath = tile.Uri,
-                Sensor = overlay.SensorName,
-                ImagingTime = overlay.ImageTime,
-                Resolution = overlay.ResolutionMPerPx,
-                TenantId = input.MissionMetadata.TenantId,
-                Algorithms = algorithmNames,
-                TileCoordinates = tileCoordinates,
-                Lon = lon,
-                Lat = lat,
-                TilesSizeMeters = tilesSizeMeters,
-                RequestTime = _timeProvider.GetUtcNow().UtcDateTime,
-                };
-
-                var envelope = new EmbedderInputDto
-                {
-                FrameMetadata = input.FrameMetadata,
-                ModelMetadata = input.ModelMetadata,
-                FocusedPxWkt = input.FocusedPxWkt,
-                MissionMetadata = input.MissionMetadata,
-                RequestId = input.RequestId,
-                TaskId = input.TaskId,
-                EmbedderInput = embedderInput
-                };
-
+                var envelope = envelopes[i];
                 var body = JsonSerializer.SerializeToUtf8Bytes(envelope, SerializerOptions);
                 PipelineTelemetry.RecordPayloadSize(PipelineStage.TbConsumer, PipelineDirection.Egress, body.LongLength);
                 var outgoing = new RabbitMqMessageEnvelope(
@@ -446,7 +394,7 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
 
     private static string? Validate(TbConsumerInputDto input)
     {
-        if (string.IsNullOrWhiteSpace(input.MissionMetadata.TenantId))
+        if (string.IsNullOrWhiteSpace(input.Metadata.MissionMetadata.TenantId))
         {
             return "Validation failed: tenantId is missing or empty.";
         }
@@ -456,7 +404,7 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
             return "Validation failed: Tiles batch is null or empty.";
         }
 
-        var matchedAlgorithms = input.MissionMetadata.Overlay.AlgorithmNames;
+        var matchedAlgorithms = input.Metadata.MissionMetadata.Overlay.AlgorithmNames;
         return matchedAlgorithms is not { Count: > 0 }
                || matchedAlgorithms.Any(algorithm => !Enum.IsDefined(algorithm))
                || matchedAlgorithms.Distinct().Count() != matchedAlgorithms.Count

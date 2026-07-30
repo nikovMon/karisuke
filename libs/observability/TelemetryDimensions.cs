@@ -73,7 +73,6 @@ public enum PipelineItem
     Rule,
     Match,
     TilingConfig,
-    GroundPoint,
     Coordinate,
     Tile,
     Document
@@ -217,7 +216,6 @@ internal static class TelemetryDimensionValues
         PipelineItem.Rule => "rule",
         PipelineItem.Match => "match",
         PipelineItem.TilingConfig => "tiling_config",
-        PipelineItem.GroundPoint => "ground_point",
         PipelineItem.Coordinate => "coordinate",
         PipelineItem.Tile => "tile",
         PipelineItem.Document => "document",
