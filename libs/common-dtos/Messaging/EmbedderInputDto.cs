@@ -23,9 +23,12 @@ public class EmbedderInputDto
     [JsonPropertyName("requestId")] 
     public string RequestId { get; set; } = string.Empty;
     
-    [JsonPropertyName("taskId")] 
+    [JsonPropertyName("taskId")]
     public string TaskId { get; set; } = string.Empty;
 
+    [JsonPropertyName("url")]
+    public string ImageUrl { get; set; } = string.Empty;
+
     [JsonPropertyName("embedder_input")]
-    public EmbedderInput EmbedderInput { get; set; } = new();
+    public EmbedderInputPayload EmbedderInput { get; set; } = new();
 }

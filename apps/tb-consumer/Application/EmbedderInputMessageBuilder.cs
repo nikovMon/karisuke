@@ -50,12 +50,11 @@ public sealed class EmbedderInputMessageBuilder
                 tileSizeMeters = Math.Max(widthPx, heightPx) * resolutionMPerPx;
             }
 
-            var embedderInput = new EmbedderInput
+            var embedderInput = new EmbedderInputPayload
             {
                 TileId = tile.TileIndex.ToString(),
                 Gid = input.RequestId,
                 ImagePath = tile.Uri,
-                ImageUrl = overlay.ImageUrl,
                 Sensor = overlay.SensorName,
                 ImagingTime = overlay.ImageTime,
                 Resolution = resolutionMPerPx,
@@ -76,6 +75,7 @@ public sealed class EmbedderInputMessageBuilder
                 MissionMetadata = metadata.MissionMetadata,
                 RequestId = input.RequestId,
                 TaskId = metadata.TaskId,
+                ImageUrl = overlay.ImageUrl,
                 EmbedderInput = embedderInput
             });
         }

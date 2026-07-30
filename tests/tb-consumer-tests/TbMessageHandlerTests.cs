@@ -310,7 +310,7 @@ public class TbMessageHandlerTests
         Assert.Equal("0", embedder.TileId);
         Assert.Equal("req-001", embedder.Gid);
         Assert.Equal("/tiles/tile_0.tiff", embedder.ImagePath);
-        Assert.Equal("/images/test.tiff", embedder.ImageUrl);
+        Assert.Equal("/images/test.tiff", dto.ImageUrl);
         Assert.Equal("sensor-x", embedder.Sensor);
         Assert.Equal(0.5, embedder.Resolution);
         Assert.Equal("tenant-1", embedder.TenantId);
