@@ -34,6 +34,7 @@ public sealed class TbPublisherOutputMessageBuilderTests
                 [AlgorithmName.FindAir, AlgorithmName.Rpn],
                 outputMessage.MissionMetadata.Overlay.AlgorithmNames);
             Assert.Equal("image-1", outputMessage.MissionMetadata.Overlay.ImageId);
+            Assert.Equal("region-alpha", outputMessage.MissionMetadata.Overlay.AreaOfInterest);
             Assert.Equal("image-1", outputMessage.FrameMetadata.General.Id);
             Assert.NotEmpty(outputMessage.TaskId);
         }
@@ -88,7 +89,7 @@ public sealed class TbPublisherOutputMessageBuilderTests
         ImageHeight = 3072,
         BestResolution = 100,
         SensorName = "sensor-1",
-        IntersectionArea = 0.001,
+        AreaOfInterest = "region-alpha",
         TilingConfigs =
         [
             new TilingConfig { TileSizeWidth = 110, TileSizeHeight = 110, TileOverlapWidth = 10, TileOverlapHeight = 10 },

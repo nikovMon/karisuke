@@ -77,7 +77,7 @@ public sealed class GatewayOutputMessageBuilder
         writer.WriteNumber("imageHeight", input.ImageHeight);
         writer.WriteNumber("bestResolution", input.BestResolution);
         writer.WriteString("sensorName", input.SensorName);
-        writer.WriteNumber("intersectionArea", match.IntersectionGeometry.Area);
+        writer.WriteString("areaOfInterest", input.AreaOfInterest);
         writer.WriteEndObject();
         writer.Flush();
         return buffer.WrittenSpan.ToArray();

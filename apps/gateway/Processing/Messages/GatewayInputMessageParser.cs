@@ -117,6 +117,7 @@ public sealed class GatewayInputMessageParser
             overlay.SensorType,
             registrationQuality,
             overlay.BestResolution,
+            overlay.AreaOfInterest,
             overlay.ImageUrl,
             overlay.ImageWidth,
             overlay.ImageHeight,

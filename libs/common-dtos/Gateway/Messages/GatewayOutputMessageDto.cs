@@ -50,8 +50,8 @@ public sealed class GatewayOutputMessageDto : IValidatableObject
     [JsonPropertyName("sensorName")]
     public required string SensorName { get; init; }
 
-    [JsonPropertyName("intersectionArea")]
-    public required double IntersectionArea { get; init; }
+    [JsonPropertyName("areaOfInterest")]
+    public required string AreaOfInterest { get; init; }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
@@ -144,13 +144,6 @@ public sealed class GatewayOutputMessageDto : IValidatableObject
         if (string.IsNullOrWhiteSpace(SensorName))
         {
             yield return new ValidationResult("sensorName cannot be empty.", [nameof(SensorName)]);
-        }
-
-        if (!double.IsFinite(IntersectionArea) || IntersectionArea < 0)
-        {
-            yield return new ValidationResult(
-                "intersectionArea must be a non-negative finite number.",
-                [nameof(IntersectionArea)]);
         }
     }
 }

@@ -22,7 +22,7 @@ public sealed class InputMessageValidatorTests
       "imageHeight": 3072,
       "bestResolution": 100,
       "sensorName": "sensor-1",
-      "intersectionArea": 0.001,
+      "areaOfInterest": "region-alpha",
       "tilingConfigs": [
         { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 32, "tileOverlapHeight": 32 }
       ]
@@ -96,7 +96,7 @@ public sealed class InputMessageValidatorTests
           "imageHeight": 3072,
           "bestResolution": 100,
           "sensorName": "sensor-1",
-          "intersectionArea": 0.001,
+          "areaOfInterest": "region-alpha",
           "tilingConfigs": [
             { "tileSizeWidth": 0, "tileSizeHeight": 512, "tileOverlapWidth": 0, "tileOverlapHeight": 0 }
           ]

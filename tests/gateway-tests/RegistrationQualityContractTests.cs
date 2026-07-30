@@ -76,6 +76,7 @@ public sealed class RegistrationQualityContractTests
                 "sensorType": "EO",
                 "registrationQuality": "accurate",
                 "bestResolution": 1,
+                "areaOfInterest": "region-alpha",
                 "imageUrl": "/images/image-1.tiff",
                 "imageWidth": 100,
                 "imageHeight": 100,

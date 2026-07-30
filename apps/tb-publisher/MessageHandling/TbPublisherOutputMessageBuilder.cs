@@ -48,6 +48,7 @@ public sealed class TbPublisherOutputMessageBuilder : ITbPublisherOutputMessageB
                     ImageUrl = message.ImageUrl,
                     RuleId = message.RuleId,
                     BestResolution = message.BestResolution,
+                    AreaOfInterest = message.AreaOfInterest,
                     AlgorithmNames = message.AlgorithmNames,
                     ImageWidth = message.ImageWidth,
                     ImageHeight = message.ImageHeight,

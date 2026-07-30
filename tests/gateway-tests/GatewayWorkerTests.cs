@@ -66,7 +66,7 @@ public sealed class GatewayWorkerTests
         Assert.Equal(3072, first.RootElement.GetProperty("imageHeight").GetInt32());
         Assert.Equal(25.9, first.RootElement.GetProperty("bestResolution").GetDouble());
         Assert.Equal("cam-001", first.RootElement.GetProperty("sensorName").GetString());
-        Assert.True(first.RootElement.GetProperty("intersectionArea").GetDouble() > 0);
+        Assert.Equal("region-alpha", first.RootElement.GetProperty("areaOfInterest").GetString());
         Assert.Equal("Polygon", first.RootElement.GetProperty("roiFootprint").GetProperty("type").GetString());
         Assert.Equal("message-1:gateway-task:rule-1:findair:1", second.RootElement.GetProperty("taskId").GetString());
         Assert.Equal("findair", second.RootElement.GetProperty("tenantId").GetString());
@@ -87,7 +87,7 @@ public sealed class GatewayWorkerTests
                 "imageHeight",
                 "bestResolution",
                 "sensorName",
-                "intersectionArea"
+                "areaOfInterest"
             ],
             first.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
         Assert.All(outputs, output =>
@@ -689,6 +689,7 @@ public sealed class GatewayWorkerTests
                 "sensorName": "cam-001",
                 "sensorType": "EO",
                 "bestResolution": 25.9,
+                "areaOfInterest": "region-alpha",
                 "imageUrl": "/images/image-1.tiff",
                 "imageWidth": 4096,
                 "imageHeight": 3072,
@@ -736,6 +737,7 @@ public sealed class GatewayWorkerTests
                 "sensorType": "EO",
                 "registrationQuality": "{{registrationQuality}}",
                 "bestResolution": 25.9,
+                "areaOfInterest": "region-alpha",
                 "imageUrl": "/images/image-1.tiff",
                 "imageWidth": 4096,
                 "imageHeight": 3072,
