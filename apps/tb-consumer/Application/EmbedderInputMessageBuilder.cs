@@ -41,13 +41,13 @@ public sealed class EmbedderInputMessageBuilder
             };
 
             double? tileSizeMeters = null;
-            double resolutionMPerPx = Math.Round(Convert.ToDouble(overlay.BestResolution), 2) / 100d;
+            double resolutionMPerPx = Math.Round(overlay.BestResolution, 2) / 100d;
 
             if (tile.Roi.Length >= 4 && resolutionMPerPx > 0)
             {
-                var widthPx = System.Math.Abs(tile.Roi[2] - tile.Roi[0]);
-                var heightPx = System.Math.Abs(tile.Roi[3] - tile.Roi[1]);
-                tileSizeMeters = System.Math.Max(widthPx, heightPx) * resolutionMPerPx;
+                var widthPx = Math.Abs(tile.Roi[2] - tile.Roi[0]);
+                var heightPx = Math.Abs(tile.Roi[3] - tile.Roi[1]);
+                tileSizeMeters = Math.Max(widthPx, heightPx) * resolutionMPerPx;
             }
 
             var embedderInput = new EmbedderInput
