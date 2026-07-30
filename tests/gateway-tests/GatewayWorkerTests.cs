@@ -691,8 +691,8 @@ public sealed class GatewayWorkerTests
                 "bestResolution": 25.9,
                 "areaOfInterest": "region-alpha",
                 "imageUrl": "/images/image-1.tiff",
-                "imageWidth": 4096,
-                "imageHeight": 3072,
+                "width": 4096,
+                "height": 3072,
                 "photoTime": "2026-06-30T06:54:07Z",
                 "roiFootprint": {
                   "type": "Polygon",
@@ -739,8 +739,8 @@ public sealed class GatewayWorkerTests
                 "bestResolution": 25.9,
                 "areaOfInterest": "region-alpha",
                 "imageUrl": "/images/image-1.tiff",
-                "imageWidth": 4096,
-                "imageHeight": 3072,
+                "width": 4096,
+                "height": 3072,
                 "photoTime": "2026-06-30T06:54:07Z",
                 "roiFootprint": {
                   "type": "Polygon",

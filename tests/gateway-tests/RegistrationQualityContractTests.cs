@@ -78,8 +78,8 @@ public sealed class RegistrationQualityContractTests
                 "bestResolution": 1,
                 "areaOfInterest": "region-alpha",
                 "imageUrl": "/images/image-1.tiff",
-                "imageWidth": 100,
-                "imageHeight": 100,
+                "width": 100,
+                "height": 100,
                 "photoTime": "2026-07-27T10:00:00Z",
                 "roiFootprint": {
                   "type": "Polygon",

@@ -32,10 +32,10 @@ public sealed class GatewayInputOverlayDto
     [JsonPropertyName("imageUrl")]
     public required string ImageUrl { get; init; }
 
-    [JsonPropertyName("imageWidth")]
+    [JsonPropertyName("width")]
     public required int ImageWidth { get; init; }
 
-    [JsonPropertyName("imageHeight")]
+    [JsonPropertyName("height")]
     public required int ImageHeight { get; init; }
 
     [JsonPropertyName("photoTime")]
