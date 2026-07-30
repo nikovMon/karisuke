@@ -143,6 +143,15 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                 }
             }
 
+            var overlay = input.MissionMetadata.Overlay;
+            Activity.Current.AddPipelineContext(
+                taskId: input.TaskId,
+                requestId: input.RequestId,
+                imageId: overlay.ImageId,
+                ruleId: overlay.RuleId,
+                tenantId: input.MissionMetadata.TenantId,
+                algorithmName: string.Join(",", overlay.AlgorithmNames));
+
             var result = await HandleValidatedMessageAsync(input, message, cancellationToken, processingState);
             outcome = processingState.Outcome;
             error = processingState.Error;

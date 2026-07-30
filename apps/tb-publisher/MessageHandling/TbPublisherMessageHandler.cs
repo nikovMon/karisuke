@@ -7,6 +7,7 @@ using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbPublisher.Errors;
 using ImagingPipeline.TbPublisher.Processing;
 using Microsoft.Extensions.Logging;
+using OpenTelemetry;
 
 namespace ImagingPipeline.TbPublisher.MessageHandling;
 
@@ -104,8 +105,18 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                 }
             }
 
+            var requestId = Baggage.Current.GetBaggage(TelemetryAttributeNames.PipelineRequestId);
+            Activity.Current.AddPipelineContext(
+                taskId: inputMessage.TaskId,
+                requestId: requestId,
+                imageId: inputMessage.ImageId,
+                ruleId: inputMessage.RuleId,
+                tenantId: inputMessage.TenantId,
+                algorithmName: algorithmNameText);
+
             using var pipelineScope = _logger.BeginTelemetryScope(new TelemetryLogContext(
                 TaskId: inputMessage.TaskId,
+                RequestId: requestId,
                 ImageId: inputMessage.ImageId,
                 RuleId: inputMessage.RuleId,
                 TenantId: inputMessage.TenantId,

@@ -12,8 +12,9 @@ public static class Program
 {
     public static async Task Main(string[] args)
     {
-        var builder = Host.CreateApplicationBuilder(args);
+        var builder = WebApplication.CreateBuilder(args);
         builder.AddImagingPipelineObservability(ObservabilityServiceNames.TbPublisher);
+        builder.ConfigureImagingPipelinePrometheusListener();
 
         builder.Services.AddRabbitMqConsumer(builder.Configuration);
         builder.Services.AddProjectionMapperClient(builder.Configuration);
@@ -25,6 +26,9 @@ public static class Program
 
         builder.Services.AddHostedService<Worker>();
 
-        await builder.Build().RunAsync();
+        var app = builder.Build();
+        app.MapImagingPipelinePrometheusScrapingEndpoint();
+
+        await app.RunAsync();
     }
 }

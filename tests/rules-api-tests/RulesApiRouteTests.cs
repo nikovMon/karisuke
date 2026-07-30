@@ -153,6 +153,25 @@ public sealed class RulesApiRouteTests
     }
 
     [Fact]
+    public async Task ModelValidationFailureLogsMatchedRouteTemplate()
+    {
+        using var loggerProvider = new RecordingLoggerProvider();
+        using var factory = new RulesApiFactory(
+            new InMemoryRuleRepository(),
+            loggerProvider: loggerProvider);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/rules?isActive=not-a-boolean");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var entry = Assert.Single(
+            loggerProvider.Entries,
+            log => log.EventId.Id == 1001);
+        Assert.Equal("/rules", entry.Properties["RequestRoute"]);
+        Assert.DoesNotContain("RequestPath", entry.Properties.Keys);
+    }
+
+    [Fact]
     public async Task GetByIdReturnsRuleOrNotFound()
     {
         using var context = CreateContext(ValidRule("rule-1", "one"));
@@ -792,6 +811,27 @@ public sealed class RulesApiRouteTests
         Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
         Assert.Contains("Elasticsearch dependency is unavailable.", body, StringComparison.Ordinal);
         Assert.DoesNotContain("Sensitive Elasticsearch failure details.", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RepositoryFailureLogsMatchedRouteTemplateWithoutRuleName()
+    {
+        const string sensitiveRuleName = "do-not-log-this-rule-name";
+        using var loggerProvider = new RecordingLoggerProvider();
+        using var factory = new RulesApiFactory(
+            new ThrowingRuleRepository(),
+            loggerProvider: loggerProvider);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync($"/rules/name/{sensitiveRuleName}");
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        var entry = Assert.Single(
+            loggerProvider.Entries,
+            log => log.EventId.Id == 1002);
+        Assert.Equal("/rules/name/{ruleName}", entry.Properties["RequestRoute"]);
+        Assert.DoesNotContain("RequestPath", entry.Properties.Keys);
+        Assert.DoesNotContain(sensitiveRuleName, entry.Message, StringComparison.Ordinal);
     }
 
     [Fact]

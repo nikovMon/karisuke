@@ -64,7 +64,8 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
             GatewayTelemetry.RecordCacheRefresh(
                 TelemetryTiming.ElapsedSeconds(started),
                 TelemetryOutcome.Success,
-                initialRules.Length);
+                initialRules.Length,
+                skippedRules: skippedCount);
             if (activity?.IsAllDataRequested == true)
             {
                 activity.SetTag("imaging_pipeline.gateway.rule_cache.entries", initialRules.Length);
@@ -149,7 +150,8 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
             GatewayTelemetry.RecordCacheRefresh(
                 TelemetryTiming.ElapsedSeconds(started),
                 TelemetryOutcome.Success,
-                rules.Length);
+                rules.Length,
+                skippedRules: skippedCount);
             if (activity?.IsAllDataRequested == true)
             {
                 activity.SetTag("imaging_pipeline.gateway.rule_cache.entries", rules.Length);

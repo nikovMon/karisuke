@@ -9,8 +9,9 @@ public static class Program
 {
     public static async Task Main(string[] args)
     {
-        var builder = Host.CreateApplicationBuilder(args);
+        var builder = WebApplication.CreateBuilder(args);
         builder.AddImagingPipelineObservability(ObservabilityServiceNames.TbConsumer);
+        builder.ConfigureImagingPipelinePrometheusListener();
 
         // RabbitMQ consumer services (also registers IRabbitMqPublisher)
         builder.Services.AddRabbitMqConsumer(builder.Configuration);
@@ -24,6 +25,9 @@ public static class Program
 
         builder.Services.AddHostedService<Worker>();
 
-        await builder.Build().RunAsync();
+        var app = builder.Build();
+        app.MapImagingPipelinePrometheusScrapingEndpoint();
+
+        await app.RunAsync();
     }
 }

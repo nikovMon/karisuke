@@ -182,7 +182,8 @@ public sealed class ElasticsearchDocumentClientTests
         Assert.Equal(ActivityStatusCode.Error, stoppedActivity.Status);
         Assert.Equal("404", stoppedActivity.GetTagItem("db.response.status_code"));
         Assert.Equal("404", stoppedActivity.GetTagItem("error.type"));
-        Assert.Contains("404", metricErrorTypes);
+        Assert.Contains("dependency", metricErrorTypes);
+        Assert.DoesNotContain("404", metricErrorTypes);
     }
 
     [Fact]
@@ -513,6 +514,7 @@ public sealed class ElasticsearchDocumentClientTests
         Assert.NotNull(stoppedActivity);
         Assert.Equal("get rules", stoppedActivity.DisplayName);
         Assert.Equal(ActivityKind.Client, stoppedActivity.Kind);
+        Assert.Equal("elasticsearch", stoppedActivity.GetTagItem("db.system"));
         Assert.Equal("elasticsearch", stoppedActivity.GetTagItem("db.system.name"));
         Assert.Equal("get", stoppedActivity.GetTagItem("db.operation.name"));
         Assert.Equal("rules", stoppedActivity.GetTagItem("db.collection.name"));
@@ -522,7 +524,6 @@ public sealed class ElasticsearchDocumentClientTests
         Assert.Equal(9200, stoppedActivity.GetTagItem("server.port"));
         Assert.Equal("span-only-id", stoppedActivity.GetTagItem("elasticsearch.document.id"));
         Assert.Equal(1L, stoppedActivity.GetTagItem("elasticsearch.response.document.count"));
-        Assert.Null(stoppedActivity.GetTagItem("db.system"));
         Assert.Null(stoppedActivity.GetTagItem("db.namespace"));
         Assert.Null(stoppedActivity.GetTagItem("db.query.text"));
         Assert.Null(stoppedActivity.GetTagItem("db.statement"));

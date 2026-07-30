@@ -132,6 +132,8 @@ public sealed class GatewayWorkerTests
     {
         await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
         using var activities = new TelemetryActivityCollector(TelemetrySourceNames.Gateway);
+        using var handlerActivity = new Activity("rabbitmq handler").Start();
+        handlerActivity.IsAllDataRequested = true;
 
         var result = await harness.GatewayWorker.HandleAsync(
             InputMessage(messageId: "telemetry-message"));
@@ -146,6 +148,12 @@ public sealed class GatewayWorkerTests
         Assert.All(
             activities.Activities,
             activity => Assert.Equal(ActivityStatusCode.Ok, activity.Status));
+        Assert.Equal("image-1", handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineImageId));
+        Assert.Equal(1, handlerActivity.GetTagItem("imaging_pipeline.gateway.rules.evaluated"));
+        Assert.Equal(1, handlerActivity.GetTagItem("imaging_pipeline.gateway.rules.matched"));
+        Assert.Equal(1, handlerActivity.GetTagItem("imaging_pipeline.pipeline.output.count"));
+        Assert.Null(handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineRuleId));
+        Assert.Null(handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineTenantId));
     }
 
     [Fact]

@@ -6,6 +6,7 @@ namespace ImagingPipeline.Observability;
 public static class GatewayTelemetry
 {
     private static long _ruleCacheEntries;
+    private static long _ruleCacheSkippedRules;
     private static long _lastSuccessfulRefreshUnixMilliseconds;
 
     private static readonly Counter<long> CacheRefreshes = TelemetryMeters.Gateway.CreateCounter<long>(
@@ -25,6 +26,11 @@ public static class GatewayTelemetry
             "{rule}",
             "Rules in this pod's active snapshot.");
         TelemetryMeters.Gateway.CreateObservableGauge(
+            TelemetryMetricNames.GatewayRuleCacheSkippedRules,
+            static () => Volatile.Read(ref _ruleCacheSkippedRules),
+            "{rule}",
+            "Invalid rules skipped while building this pod's active snapshot.");
+        TelemetryMeters.Gateway.CreateObservableGauge(
             TelemetryMetricNames.GatewayRuleCacheAge,
             ObserveCacheAgeSeconds,
             "s",
@@ -35,7 +41,8 @@ public static class GatewayTelemetry
         double durationSeconds,
         TelemetryOutcome outcome,
         int entries,
-        TelemetryErrorCategory error = TelemetryErrorCategory.None)
+        TelemetryErrorCategory error = TelemetryErrorCategory.None,
+        int skippedRules = 0)
     {
         var tags = new TagList { { TelemetryAttributeNames.PipelineOutcome, outcome.Value() } };
         if (error != TelemetryErrorCategory.None)
@@ -48,6 +55,7 @@ public static class GatewayTelemetry
         if (outcome == TelemetryOutcome.Success)
         {
             Volatile.Write(ref _ruleCacheEntries, Math.Max(0, entries));
+            Volatile.Write(ref _ruleCacheSkippedRules, Math.Max(0, skippedRules));
             Volatile.Write(ref _lastSuccessfulRefreshUnixMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         }
     }
