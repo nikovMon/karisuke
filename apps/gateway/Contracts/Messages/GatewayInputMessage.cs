@@ -9,7 +9,6 @@ public sealed record GatewayInputMessage(
     string SensorType,
     RegistrationQuality RegistrationQuality,
     double BestResolution,
-    double ResolutionMPerPx,
     string ImageUrl,
     int ImageWidth,
     int ImageHeight,

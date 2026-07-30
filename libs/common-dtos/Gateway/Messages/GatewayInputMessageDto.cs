@@ -26,9 +26,6 @@ public sealed class GatewayInputOverlayDto
     [JsonPropertyName("bestResolution")]
     public required double BestResolution { get; init; }
 
-    [JsonPropertyName("resolutionMPerPx")]
-    public required double ResolutionMPerPx { get; init; }
-
     [JsonPropertyName("imageUrl")]
     public required string ImageUrl { get; init; }
 

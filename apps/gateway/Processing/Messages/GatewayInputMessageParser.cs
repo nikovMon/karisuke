@@ -80,10 +80,6 @@ public sealed class GatewayInputMessageParser
             overlay.BestResolution,
             "Input best resolution is required and must be a positive finite number.",
             "gateway.invalid_best_resolution");
-        ValidatePositiveFinite(
-            overlay.ResolutionMPerPx,
-            "Input resolutionMPerPx is required and must be a positive finite number.",
-            "gateway.invalid_resolution_m_per_px");
 
         if (string.IsNullOrWhiteSpace(overlay.ImageUrl))
         {
@@ -121,7 +117,6 @@ public sealed class GatewayInputMessageParser
             overlay.SensorType,
             registrationQuality,
             overlay.BestResolution,
-            overlay.ResolutionMPerPx,
             overlay.ImageUrl,
             overlay.ImageWidth,
             overlay.ImageHeight,
