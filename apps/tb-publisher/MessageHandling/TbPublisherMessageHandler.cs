@@ -135,7 +135,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                 PipelineItem.TilingConfig,
                 inputMessage.TilingConfigs.Count);
 
-            IReadOnlyList<IReadOnlyList<double>> groundPoints;
+            IReadOnlyList<IReadOnlyList<double>> roiCoordinates;
             using (var geometryActivity = StartStageActivity("geometry"))
             {
                 try
@@ -146,12 +146,12 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                         ruleId: inputMessage.RuleId,
                         tenantId: inputMessage.TenantId,
                         algorithmName: algorithmNameText);
-                    groundPoints = _geometryConverter.ExtractGroundPoints(inputMessage.RoiFootprint);
+                    roiCoordinates = _geometryConverter.ExtractCoordinates(inputMessage.RoiFootprint);
                     if (geometryActivity?.IsAllDataRequested == true)
                     {
                         geometryActivity.SetTag(
                             "imaging_pipeline.pipeline.ground_point.count",
-                            groundPoints.Count);
+                            roiCoordinates.Count);
                     }
                     geometryActivity.SetTelemetrySuccess();
                 }
@@ -178,7 +178,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                 }
             }
 
-            PipelineTelemetry.RecordBatchSize(PipelineStage.TbPublisher, PipelineItem.GroundPoint, groundPoints.Count);
+            PipelineTelemetry.RecordBatchSize(PipelineStage.TbPublisher, PipelineItem.GroundPoint, roiCoordinates.Count);
 
             string focusedPxWkt;
             IReadOnlyList<IReadOnlyList<double>> coordinates;
@@ -192,7 +192,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                         ruleId: inputMessage.RuleId,
                         tenantId: inputMessage.TenantId,
                         algorithmName: algorithmNameText);
-                    var request = new ProjectionMapperRequestDto { GroundPoints = groundPoints };
+                    var request = new ProjectionMapperRequestDto { Coordinates = roiCoordinates };
                     coordinates = await _projectionMapperClient.MapAsync(inputMessage.ImageId, request, cancellationToken);
                     if (projectionActivity?.IsAllDataRequested == true)
                     {
@@ -270,6 +270,16 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                             ? null
                             : new Dictionary<string, object?>(message.Headers, StringComparer.Ordinal),
                         CorrelationId: message.CorrelationId ?? message.MessageId);
+                    using var outputLogScope = _logger.BeginTelemetryScope(
+                        new TelemetryLogContext(RequestId: ingestMessage.RequestId));
+                    using var outputCorrelationBaggage = PipelineCorrelationBaggage.Push(
+                        new PipelineCorrelationContext(
+                            TaskId: inputMessage.TaskId,
+                            RequestId: ingestMessage.RequestId,
+                            ImageId: inputMessage.ImageId,
+                            RuleId: inputMessage.RuleId,
+                            TenantId: inputMessage.TenantId,
+                            AlgorithmName: algorithmNameText));
                     try
                     {
                         await _publisher.PublishToOutputAsync(outputEnvelope, cancellationToken);
@@ -320,7 +330,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                 PipelineDirection.Egress,
                 TelemetryOutcome.Success,
                 count: publishedCount);
-            _logger.MessageProcessed(groundPoints.Count, inputMessage.TilingConfigs.Count, outputCount);
+            _logger.MessageProcessed(roiCoordinates.Count, inputMessage.TilingConfigs.Count, outputCount);
             return new RabbitMqMessageProcessingResult(true, null, null);
         }
         catch (OperationCanceledException)

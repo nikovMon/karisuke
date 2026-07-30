@@ -50,8 +50,9 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
           "imageUrl": "/images/image-1.tiff",
           "imageWidth": 4096,
           "imageHeight": 3072,
-          "resolutionMPerPx": 0.4,
+          "bestResolution": 100,
           "sensorName": "sensor-1",
+          "areaOfInterest": "region-alpha",
           "tilingConfigs": [
             { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 32, "tileOverlapHeight": 32 }
           ]
@@ -123,8 +124,9 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
           "imageUrl": "/images/image-1.tiff",
           "imageWidth": 4096,
           "imageHeight": 3072,
-          "resolutionMPerPx": 0.4,
+          "bestResolution": 100,
           "sensorName": "sensor-1",
+          "areaOfInterest": "region-alpha",
           "tilingConfigs": [
             { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 32, "tileOverlapHeight": 32 }
           ]
@@ -168,7 +170,7 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
             ["RabbitMq:PublisherChannelPoolSize"] = "2",
             ["RabbitMq:ReconnectDelaySeconds"] = "1",
             ["ProjectionMapper:Host"] = projectionMapperBaseUrl,
-            ["ProjectionMapper:Endpoints:g2iMultiPoints"] = "/flare/g2i-by-id",
+            ["ProjectionMapper:Endpoints:G2IMultiPoints"] = "/flare/g2i-by-id",
             ["ProjectionMapper:SendingSystem"] = "flare",
             ["ProjectionMapper:TimeoutSeconds"] = "10"
         }).Build();

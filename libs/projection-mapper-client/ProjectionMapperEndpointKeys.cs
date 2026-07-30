@@ -2,6 +2,6 @@ namespace ImagingPipeline.ProjectionMapperClient;
 
 public static class ProjectionMapperEndpointKeys
 {
-    public const string G2IMultiPoints = "g2i-multipoints";
-    public const string I2GById = "i2gById";
+    public const string G2IMultiPoints = "G2IMultiPoints";
+    public const string I2GById = "I2GById";
 }

@@ -6,7 +6,7 @@ namespace ImagingPipeline.TbPublisher.Processing;
 
 public sealed class TbPublisherGeometryConverter
 {
-    public IReadOnlyList<IReadOnlyList<double>> ExtractGroundPoints(JsonElement roiFootprint)
+    public IReadOnlyList<IReadOnlyList<double>> ExtractCoordinates(JsonElement roiFootprint)
     {
         try
         {

@@ -19,7 +19,7 @@ public sealed class ProjectionMapperClientTests
         });
         var client = CreateClient(handler);
 
-        var result = await client.MapAsync("image-1", new ProjectionMapperRequestDto { GroundPoints = [[1, 2]] });
+        var result = await client.MapAsync("image-1", new ProjectionMapperRequestDto { Coordinates = [[1, 2]] });
 
         Assert.Equal(2, result.Count);
         Assert.Equal([3, 4], result[1]);
@@ -36,7 +36,7 @@ public sealed class ProjectionMapperClientTests
         var client = CreateClient(handler);
 
         await Assert.ThrowsAsync<ProjectionMapperClientException>(
-            () => client.MapAsync("image-1", new ProjectionMapperRequestDto { GroundPoints = [] }));
+            () => client.MapAsync("image-1", new ProjectionMapperRequestDto { Coordinates = [] }));
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public sealed class ProjectionMapperClientTests
         var client = CreateClient(handler);
 
         await Assert.ThrowsAsync<ProjectionMapperClientException>(
-            () => client.MapAsync("image-1", new ProjectionMapperRequestDto { GroundPoints = [] }));
+            () => client.MapAsync("image-1", new ProjectionMapperRequestDto { Coordinates = [] }));
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public sealed class ProjectionMapperClientTests
         await cts.CancelAsync();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => client.MapAsync("image-1", new ProjectionMapperRequestDto { GroundPoints = [[1, 2]] }, cts.Token));
+            () => client.MapAsync("image-1", new ProjectionMapperRequestDto { Coordinates = [[1, 2]] }, cts.Token));
     }
 
     [Fact]
@@ -100,7 +100,7 @@ public sealed class ProjectionMapperClientTests
 
         await client.MapAsync(
             "overlay-with-high-cardinality-id",
-            new ProjectionMapperRequestDto { GroundPoints = [[1, 2], [3, 4]] });
+            new ProjectionMapperRequestDto { Coordinates = [[1, 2], [3, 4]] });
 
         var span = Assert.IsType<Activity>(completed);
         Assert.Equal(ActivityKind.Internal, span.Kind);
@@ -133,7 +133,7 @@ public sealed class ProjectionMapperClientTests
         }));
         await client.MapAsync(
             "overlay-must-not-be-a-metric-label",
-            new ProjectionMapperRequestDto { GroundPoints = [[1, 2], [3, 4]] });
+            new ProjectionMapperRequestDto { Coordinates = [[1, 2], [3, 4]] });
 
         Assert.NotEmpty(measurements);
         Assert.DoesNotContain(
@@ -143,6 +143,9 @@ public sealed class ProjectionMapperClientTests
         Assert.Contains(measurements, static measurement =>
             measurement.Name == "imaging_pipeline.dependency.batch.size" &&
             measurement.Value == 2 &&
+            measurement.Tags.Any(tag =>
+                tag.Key == "imaging_pipeline.pipeline.item" &&
+                Equals(tag.Value, "ground_point")) &&
             measurement.Tags.Any(tag =>
                 tag.Key == "imaging_pipeline.dependency.operation" &&
                 Equals(tag.Value, "ground_to_image")));

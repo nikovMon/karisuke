@@ -26,16 +26,16 @@ public sealed class GatewayInputOverlayDto
     [JsonPropertyName("bestResolution")]
     public required double BestResolution { get; init; }
 
-    [JsonPropertyName("resolutionMPerPx")]
-    public required double ResolutionMPerPx { get; init; }
+    [JsonPropertyName("areaOfInterest")]
+    public required string AreaOfInterest { get; init; }
 
     [JsonPropertyName("imageUrl")]
     public required string ImageUrl { get; init; }
 
-    [JsonPropertyName("imageWidth")]
+    [JsonPropertyName("width")]
     public required int ImageWidth { get; init; }
 
-    [JsonPropertyName("imageHeight")]
+    [JsonPropertyName("height")]
     public required int ImageHeight { get; init; }
 
     [JsonPropertyName("photoTime")]

@@ -21,6 +21,7 @@ public sealed class WorkerTests
         var logger = new SignalingLogger<Worker>(eventId: 4003);
         var handler = new TbMessageHandler(
             Mock.Of<IProjectionMapperClient>(),
+            new EmbedderInputMessageBuilder(),
             Mock.Of<IRabbitMqPublisher>(),
             TimeProvider.System,
             NullLogger<TbMessageHandler>.Instance);

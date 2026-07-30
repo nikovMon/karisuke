@@ -21,6 +21,7 @@ public static class Program
 
         // Core Pipeline
         builder.Services.AddSingleton(TimeProvider.System);
+        builder.Services.AddSingleton<EmbedderInputMessageBuilder>();
         builder.Services.AddSingleton<TbMessageHandler>();
 
         builder.Services.AddHostedService<Worker>();
