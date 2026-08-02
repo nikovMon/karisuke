@@ -145,7 +145,7 @@ public class TbMessageHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_RoiBoundingBox_SendsSingleCenterPointToProjectionMapper()
+    public async Task HandleAsync_RoiBoundingBox_SendsFourCornersToProjectionMapper()
     {
         var input = CreateValidInput();
         input.Tiles[0].Roi = [100.0, 200.0, 300.0, 400.0];
@@ -157,18 +157,19 @@ public class TbMessageHandlerTests
                 It.IsAny<CancellationToken>()))
             .Callback<string, IReadOnlyList<IReadOnlyList<double>>, CancellationToken>(
                 (_, coordinates, _) => capturedCoordinates = coordinates)
-            .ReturnsAsync([[34.8, 32.1]]);
+            .ReturnsAsync([[34.8, 32.1, 34.81, 32.1, 34.81, 32.11, 34.8, 32.11]]);
 
         var result = await _handler.HandleAsync(ToEnvelope(input));
 
         Assert.True(result.IsSuccess);
         Assert.NotNull(capturedCoordinates);
-        var center = Assert.Single(capturedCoordinates);
-        Assert.Equal([200.0, 300.0], center);
+        var corners = Assert.Single(capturedCoordinates);
+        // top-left, top-right, bottom-right, bottom-left, flattened as [x, y] pairs.
+        Assert.Equal([100.0, 200.0, 300.0, 200.0, 300.0, 400.0, 100.0, 400.0], corners);
     }
 
     [Fact]
-    public async Task HandleAsync_MultipleTiles_BatchesOneUnroundedCenterPerTileAndMapsResultsInOrder()
+    public async Task HandleAsync_MultipleTiles_BatchesFourCornersPerTileAndMapsResultsInOrder()
     {
         var input = CreateValidInput(2);
         input.Tiles[0].Roi = [100.0, 200.0, 301.0, 401.0];
@@ -183,8 +184,9 @@ public class TbMessageHandlerTests
                 (_, coordinates, _) => capturedCoordinates = coordinates)
             .ReturnsAsync(
             [
-                [34.75, 32.125],
-                [35.5, 33.25]
+                // top-left, top-right, bottom-right, bottom-left ground coordinates.
+                [34.5, 32.0, 34.9, 32.05, 35.0, 32.25, 34.55, 32.2],
+                [35.0, 33.0, 35.6, 33.05, 36.0, 33.5, 35.4, 33.45]
             ]);
 
         var published = new List<EmbedderInputDto>();
@@ -205,9 +207,9 @@ public class TbMessageHandlerTests
         Assert.True(result.IsSuccess);
         Assert.NotNull(capturedCoordinates);
         Assert.Equal(2, capturedCoordinates.Count);
-        Assert.All(capturedCoordinates, center => Assert.Equal(2, center.Count));
-        Assert.Equal([200.5, 300.5], capturedCoordinates[0]);
-        Assert.Equal([20.0, 40.0], capturedCoordinates[1]);
+        Assert.All(capturedCoordinates, corners => Assert.Equal(8, corners.Count));
+        Assert.Equal([100.0, 200.0, 301.0, 200.0, 301.0, 401.0, 100.0, 401.0], capturedCoordinates[0]);
+        Assert.Equal([10.0, 20.0, 30.0, 20.0, 30.0, 60.0, 10.0, 60.0], capturedCoordinates[1]);
 
         Assert.Equal(2, published.Count);
         Assert.Equal("0", published[0].EmbedderInput.TileId);
@@ -308,7 +310,7 @@ public class TbMessageHandlerTests
         // Verify EmbedderInput sub-object
         var embedder = dto!.EmbedderInput;
         Assert.Equal("0", embedder.TileId);
-        Assert.Equal("req-001", embedder.Gid);
+        Assert.Equal("img-001", embedder.Gid);
         Assert.Equal("/tiles/tile_0.tiff", embedder.ImagePath);
         Assert.Equal("/images/test.tiff", dto.ImageUrl);
         Assert.Equal("sensor-x", embedder.Sensor);

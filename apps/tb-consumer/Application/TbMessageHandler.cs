@@ -233,11 +233,13 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
         outgoingHeaders["algorithm_name"] = algorithmNameText;
         var headers = new ReadOnlyDictionary<string, object?>(outgoingHeaders);
 
-        var tileCenters = input.Tiles
+        var tileCorners = input.Tiles
             .Select(tile => (IReadOnlyList<double>)
             [
-                (tile.Roi[0] + tile.Roi[2]) / 2.0,
-                (tile.Roi[1] + tile.Roi[3]) / 2.0
+                tile.Roi[0], tile.Roi[1], // top-left
+                tile.Roi[2], tile.Roi[1], // top-right
+                tile.Roi[2], tile.Roi[3], // bottom-right
+                tile.Roi[0], tile.Roi[3], // bottom-left
             ])
             .ToList();
 
@@ -261,7 +263,7 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                 }
                 batchMapped = await _projectionMapper.ProcessBatchAsync(
                     overlay.ImageId,
-                    tileCenters,
+                    tileCorners,
                     cancellationToken);
 
                 if (batchMapped.Count != input.Tiles.Count)

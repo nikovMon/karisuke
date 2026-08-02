@@ -22,38 +22,33 @@ public sealed class EmbedderInputMessageBuilder
 
             double? lon = null;
             double? lat = null;
-            var coordsList = new List<double[]>();
+            var corners = new List<double[]>();
 
-            if (mappedCoordinates[i] is { Count: >= 2 } mapped)
+            if (mappedCoordinates[i] is { Count: >= 8 } mapped)
             {
-                lon = mapped[0];
-                lat = mapped[1];
-
                 for (var j = 0; j < mapped.Count - 1; j += 2)
                 {
-                    coordsList.Add([mapped[j], mapped[j + 1]]);
+                    corners.Add([mapped[j], mapped[j + 1]]);
                 }
+
+                lon = (corners[0][0] + corners[2][0]) / 2.0;
+                lat = (corners[0][1] + corners[2][1]) / 2.0;
             }
 
             var tileCoordinates = new PolygonDto
             {
-                Coordinates = coordsList.ToArray()
+                Coordinates = corners.ToArray()
             };
 
-            double? tileSizeMeters = null;
             double resolutionMPerPx = Math.Round(overlay.BestResolution, 2) / 100d;
 
-            if (tile.Roi.Length >= 4 && resolutionMPerPx > 0)
-            {
-                var widthPx = Math.Abs(tile.Roi[2] - tile.Roi[0]);
-                var heightPx = Math.Abs(tile.Roi[3] - tile.Roi[1]);
-                tileSizeMeters = Math.Max(widthPx, heightPx) * resolutionMPerPx;
-            }
+            var pixelSize = Math.Abs(tile.Roi[2] - tile.Roi[0]);
+            var tileSizeMeters = pixelSize * resolutionMPerPx;
 
             var embedderInput = new EmbedderInputPayload
             {
                 TileId = tile.TileIndex.ToString(),
-                Gid = input.RequestId,
+                Gid = overlay.ImageId,
                 ImagePath = tile.Uri,
                 Sensor = overlay.SensorName,
                 ImagingTime = overlay.ImageTime,
