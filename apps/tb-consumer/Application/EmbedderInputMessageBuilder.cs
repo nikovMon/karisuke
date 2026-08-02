@@ -26,7 +26,7 @@ public sealed class EmbedderInputMessageBuilder
 
             if (mappedCoordinates[i] is { Count: >= 8 } mapped)
             {
-                for (var j = 0; j < mapped.Count - 1; j += 2)
+                for (var j = 0; corners.Count < 4; j += 2)
                 {
                     corners.Add([mapped[j], mapped[j + 1]]);
                 }

@@ -169,6 +169,37 @@ public class TbMessageHandlerTests
     }
 
     [Fact]
+    public async Task HandleAsync_ProjectionMapperReturnsExtraValues_TileCoordinatesStillHasFourCorners()
+    {
+        var input = CreateValidInput();
+        _projectionMapperMock
+            .Setup(m => m.ProcessBatchAsync(
+                "img-001",
+                It.IsAny<IReadOnlyList<IReadOnlyList<double>>>(),
+                It.IsAny<CancellationToken>()))
+            // 10 values (5 pairs) instead of the expected 8 (4 corners).
+            .ReturnsAsync([[34.5, 32.0, 34.9, 32.05, 35.0, 32.25, 34.55, 32.2, 34.6, 32.3]]);
+
+        RabbitMqMessageEnvelope? captured = null;
+        _publisherMock
+            .Setup(p => p.PublishToOutputAsync(It.IsAny<RabbitMqMessageEnvelope>(), It.IsAny<CancellationToken>()))
+            .Callback<RabbitMqMessageEnvelope, CancellationToken>((envelope, _) => captured = envelope)
+            .Returns(Task.CompletedTask);
+
+        var result = await _handler.HandleAsync(ToEnvelope(input));
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(captured);
+        var dto = JsonSerializer.Deserialize<EmbedderInputDto>(
+            captured!.BodyAsUtf8(),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+
+        Assert.Equal(4, dto.EmbedderInput.TileCoordinates.Coordinates.Length);
+        Assert.Equal(34.75, dto.EmbedderInput.Lon);
+        Assert.Equal(32.125, dto.EmbedderInput.Lat);
+    }
+
+    [Fact]
     public async Task HandleAsync_MultipleTiles_BatchesFourCornersPerTileAndMapsResultsInOrder()
     {
         var input = CreateValidInput(2);
