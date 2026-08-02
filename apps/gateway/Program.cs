@@ -43,6 +43,7 @@ public static class Program
         builder.Services.AddSingleton<GatewayGeometryConverter>();
         builder.Services.AddSingleton<GatewayInputMessageParser>();
         builder.Services.AddSingleton<GatewayOutputMessageBuilder>();
+        builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<RuleMatcher>();
         builder.Services.AddSingleton<IRuleRepository, ElasticsearchRuleRepository>();
         builder.Services.AddSingleton<ActiveRuleCache>();

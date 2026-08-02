@@ -6,6 +6,31 @@ namespace ImagingPipeline.Observability.Tests;
 public sealed class GatewayTelemetryTests
 {
     [Fact]
+    public void PhotoAgeFilteredRuleCounterRecordsOnlyPositiveCounts()
+    {
+        var measurements = new ConcurrentQueue<long>();
+        using var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, meterListener) =>
+            {
+                if (instrument.Meter.Name == TelemetrySourceNames.Gateway &&
+                    instrument.Name == TelemetryMetricNames.GatewayRulesFilteredPhotoAge)
+                {
+                    meterListener.EnableMeasurementEvents(instrument);
+                }
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, measurement, _, _) =>
+            measurements.Enqueue(measurement));
+        listener.Start();
+
+        GatewayTelemetry.RecordPhotoAgeFilteredRules(0);
+        GatewayTelemetry.RecordPhotoAgeFilteredRules(3);
+
+        Assert.Equal(3, Assert.Single(measurements));
+    }
+
+    [Fact]
     public void InvalidRuleGaugeTracksOnlyTheLastSuccessfullyPublishedSnapshot()
     {
         var measurements = new ConcurrentQueue<long>();

@@ -414,6 +414,7 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
             BuildTenantSnapshot(rule.TenantsInfo),
             rule.MinimumResolution,
             rule.MaximumResolution,
+            rule.IsPhotoOld is true,
             geometry);
 
     private static IReadOnlyDictionary<string, int> BuildSensorSnapshot(

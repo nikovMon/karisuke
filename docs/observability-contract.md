@@ -166,6 +166,7 @@ fields and active telemetry scope.
 | `2000`–`2003` | Gateway | Worker lifecycle/restart | restart delay and exception where applicable |
 | `2010` | Gateway | Message processed (`Debug`) | rules evaluated/matched and output count |
 | `2011`–`2012` | Gateway | Reject/retry | validation/error category and exception where applicable |
+| `2013` | Gateway | Old-photo rule exclusion | filtered-rule count, image age, configured maximum age, photo time |
 | `2020`–`2023` | Gateway | Rule-cache lifecycle | active/skipped/retained counts and bounded failed-rule sample |
 | `3000`–`3003` | TB Publisher | Worker lifecycle/restart | restart delay and exception where applicable |
 | `3010`–`3013` | TB Publisher | Validation/projection rejection | bounded validation reason and exception where applicable |
@@ -331,6 +332,7 @@ names verbatim into PromQL.
 | `imaging_pipeline.gateway.rule_cache.refresh.duration` | outcome, optional error |
 | `imaging_pipeline.gateway.rules.evaluated` | none |
 | `imaging_pipeline.gateway.rules.matched` | none |
+| `imaging_pipeline.gateway.rules.filtered_photo_age` | none |
 
 ### Rules API
 

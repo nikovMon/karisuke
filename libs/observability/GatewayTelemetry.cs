@@ -17,6 +17,10 @@ public static class GatewayTelemetry
         TelemetryMetricNames.GatewayRulesEvaluated, "{rule}", "Rules evaluated for one input message.");
     private static readonly Histogram<long> RulesMatched = TelemetryMeters.Gateway.CreateHistogram<long>(
         TelemetryMetricNames.GatewayRulesMatched, "{rule}", "Rules matched for one input message.");
+    private static readonly Counter<long> RulesFilteredPhotoAge = TelemetryMeters.Gateway.CreateCounter<long>(
+        TelemetryMetricNames.GatewayRulesFilteredPhotoAge,
+        "{rule}",
+        "Rules excluded because an image exceeded the configured maximum photo age.");
 
     static GatewayTelemetry()
     {
@@ -64,6 +68,14 @@ public static class GatewayTelemetry
     {
         RulesEvaluated.Record(Math.Max(0, evaluated));
         RulesMatched.Record(Math.Max(0, matched));
+    }
+
+    public static void RecordPhotoAgeFilteredRules(long count)
+    {
+        if (count > 0)
+        {
+            RulesFilteredPhotoAge.Add(count);
+        }
     }
 
     private static double ObserveCacheAgeSeconds()

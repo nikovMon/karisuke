@@ -77,6 +77,7 @@ public static class TelemetryMetricNames
     public const string GatewayRuleCacheRefreshDuration = "imaging_pipeline.gateway.rule_cache.refresh.duration";
     public const string GatewayRulesEvaluated = "imaging_pipeline.gateway.rules.evaluated";
     public const string GatewayRulesMatched = "imaging_pipeline.gateway.rules.matched";
+    public const string GatewayRulesFilteredPhotoAge = "imaging_pipeline.gateway.rules.filtered_photo_age";
 
     public const string RulesOperations = "imaging_pipeline.rules.operations";
     public const string RulesOperationDuration = "imaging_pipeline.rules.operation.duration";
