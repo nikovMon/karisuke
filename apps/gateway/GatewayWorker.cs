@@ -179,6 +179,8 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
                 }
             }
 
+            Activity.Current.AddPipelineContext(imageId: input.ImageId);
+
             using var pipelineScope = _logger.BeginTelemetryScope(new TelemetryLogContext(
                 ImageId: input.ImageId));
 
@@ -242,6 +244,13 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
                         recordException: false);
                     throw;
                 }
+            }
+
+            if (Activity.Current?.IsAllDataRequested == true)
+            {
+                Activity.Current.SetTag("imaging_pipeline.gateway.rules.evaluated", rulesEvaluated);
+                Activity.Current.SetTag("imaging_pipeline.gateway.rules.matched", rulesMatched);
+                Activity.Current.SetTag("imaging_pipeline.pipeline.output.count", outputCount);
             }
 
             var correlationId = message.CorrelationId ?? message.MessageId;

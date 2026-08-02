@@ -1,0 +1,29 @@
+# FRAGMENT ONLY: merge this receiver and these processors into the existing
+# OpenTelemetry Collector configuration. The outbound Fleet-managed Elastic APM
+# exporter is intentionally not defined in this repository.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 15
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      # Replace this with the exporter name already used by the Collector for
+      # Fleet-managed Elastic APM.
+      exporters: [YOUR_EXISTING_FLEET_APM_EXPORTER]

@@ -10,6 +10,7 @@ using ImagingPipeline.Rules.Api.Services;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
+using Microsoft.AspNetCore.Routing;
 
 namespace ImagingPipeline.Rules.Api;
 
@@ -61,7 +62,7 @@ public sealed partial class Program
                 LogRequestModelValidationFailed(
                     logger,
                     context.HttpContext.Request.Method,
-                    context.HttpContext.Request.Path.Value,
+                    ResolveRequestRoute(context.HttpContext),
                     totalInvalidFieldsCount,
                     totalErrorsCount,
                     fieldsToLog.Length,
@@ -112,7 +113,7 @@ public sealed partial class Program
                         app.Logger,
                         persistenceException,
                         context.Request.Method,
-                        context.Request.Path.Value);
+                        ResolveRequestRoute(context));
                     context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
                     await context.Response.WriteAsJsonAsync(new { error = "Elasticsearch dependency is unavailable." });
                     return;
@@ -126,7 +127,7 @@ public sealed partial class Program
                     app.Logger,
                     exception,
                     context.Request.Method,
-                    context.Request.Path.Value);
+                    ResolveRequestRoute(context));
                 context.Response.StatusCode = StatusCodes.Status500InternalServerError;
                 await context.Response.WriteAsJsonAsync(new { error = "Unexpected server error." });
             });
@@ -147,17 +148,36 @@ public sealed partial class Program
                         statusCode: StatusCodes.Status503ServiceUnavailable);
             });
 
+        app.MapImagingPipelinePrometheusScrapingEndpoint();
         await app.RunAsync();
+    }
+
+    private static string ResolveRequestRoute(HttpContext context)
+    {
+        var endpoint = context.Features.Get<IExceptionHandlerFeature>()?.Endpoint
+            ?? context.GetEndpoint();
+        if (endpoint is not RouteEndpoint routeEndpoint)
+        {
+            return "<unmatched>";
+        }
+
+        var route = routeEndpoint.RoutePattern.RawText;
+        if (string.IsNullOrWhiteSpace(route))
+        {
+            return "<unmatched>";
+        }
+
+        return route.StartsWith('/') ? route : $"/{route}";
     }
 
     [LoggerMessage(
         EventId = 1001,
         Level = LogLevel.Warning,
-        Message = "Request model validation failed for {RequestMethod} {RequestPath}. Total invalid fields: {TotalInvalidFieldsCount}. Total errors: {TotalErrorsCount}. Showing first {ShownFieldsCount} fields: {Fields}")]
+        Message = "Request model validation failed for {RequestMethod} {RequestRoute}. Total invalid fields: {TotalInvalidFieldsCount}. Total errors: {TotalErrorsCount}. Showing first {ShownFieldsCount} fields: {Fields}")]
     private static partial void LogRequestModelValidationFailed(
         ILogger logger,
         string requestMethod,
-        string? requestPath,
+        string requestRoute,
         int totalInvalidFieldsCount,
         int totalErrorsCount,
         int shownFieldsCount,
@@ -166,20 +186,20 @@ public sealed partial class Program
     [LoggerMessage(
         EventId = 1002,
         Level = LogLevel.Error,
-        Message = "Elasticsearch persistence operation failed for {RequestMethod} {RequestPath}")]
+        Message = "Elasticsearch persistence operation failed for {RequestMethod} {RequestRoute}")]
     private static partial void LogPersistenceFailure(
         ILogger logger,
         Exception exception,
         string requestMethod,
-        string? requestPath);
+        string requestRoute);
 
     [LoggerMessage(
         EventId = 1003,
         Level = LogLevel.Error,
-        Message = "Unexpected server error for {RequestMethod} {RequestPath}")]
+        Message = "Unexpected server error for {RequestMethod} {RequestRoute}")]
     private static partial void LogUnexpectedServerError(
         ILogger logger,
         Exception? exception,
         string requestMethod,
-        string? requestPath);
+        string requestRoute);
 }

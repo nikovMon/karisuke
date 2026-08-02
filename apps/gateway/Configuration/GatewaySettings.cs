@@ -7,6 +7,7 @@ public sealed class GatewaySettings
     public int ShutdownTimeoutSeconds { get; set; } = 30;
     public int RuleRefreshIntervalSeconds { get; set; } = 60;
     public int RuleRefreshJitterSeconds { get; set; }
+    public int MaxPhotoAgeDays { get; set; } = 30;
 
     internal bool IsValid(out string error)
     {
@@ -25,6 +26,12 @@ public sealed class GatewaySettings
         if (RuleRefreshJitterSeconds < 0)
         {
             error = "Gateway RuleRefreshJitterSeconds must be greater than or equal to zero.";
+            return false;
+        }
+
+        if (MaxPhotoAgeDays <= 0 || MaxPhotoAgeDays > TimeSpan.MaxValue.TotalDays)
+        {
+            error = "Gateway MaxPhotoAgeDays must be greater than zero and within the supported TimeSpan range.";
             return false;
         }
 

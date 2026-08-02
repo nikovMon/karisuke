@@ -35,6 +35,7 @@ public static class TelemetryMeters
             .InformationalVersion ?? "1.0.0";
 
     public static readonly Meter RabbitMq = new(TelemetrySourceNames.RabbitMq, InstrumentationVersion);
+    public static readonly Meter Observability = new(TelemetrySourceNames.Observability, InstrumentationVersion);
     public static readonly Meter Dependencies = new(TelemetrySourceNames.Dependencies, InstrumentationVersion);
     public static readonly Meter Pipeline = new(TelemetrySourceNames.Pipeline, InstrumentationVersion);
     public static readonly Meter Gateway = new(TelemetrySourceNames.Gateway, InstrumentationVersion);

@@ -18,6 +18,9 @@ namespace ImagingPipeline.Gateway.Tests;
 
 public sealed class GatewayWorkerTests
 {
+    private static readonly DateTimeOffset InputPhotoTime =
+        new(2026, 6, 30, 6, 54, 7, TimeSpan.Zero);
+
     [Fact]
     public async Task HandleAsyncReturnsOneOutputPerMatchedRuleTenant()
     {
@@ -134,6 +137,8 @@ public sealed class GatewayWorkerTests
     {
         await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
         using var activities = new TelemetryActivityCollector(TelemetrySourceNames.Gateway);
+        using var handlerActivity = new Activity("rabbitmq handler").Start();
+        handlerActivity.IsAllDataRequested = true;
 
         var result = await harness.GatewayWorker.HandleAsync(
             InputMessage(messageId: "telemetry-message"));
@@ -148,6 +153,68 @@ public sealed class GatewayWorkerTests
         Assert.All(
             activities.Activities,
             activity => Assert.Equal(ActivityStatusCode.Ok, activity.Status));
+        Assert.Equal("image-1", handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineImageId));
+        Assert.Equal(1, handlerActivity.GetTagItem("imaging_pipeline.gateway.rules.evaluated"));
+        Assert.Equal(1, handlerActivity.GetTagItem("imaging_pipeline.gateway.rules.matched"));
+        Assert.Equal(1, handlerActivity.GetTagItem("imaging_pipeline.pipeline.output.count"));
+        Assert.Null(handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineRuleId));
+        Assert.Null(handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineTenantId));
+    }
+
+    [Fact]
+    public async Task HandleAsyncFiltersOldPhotoWhenRuleEnablesPhotoAgeFilter()
+    {
+        var rule = MatchingRule();
+        rule.IsPhotoOld = true;
+        var logger = new global::ImagingPipeline.Gateway.Tests.RecordingLogger<RuleMatcher>();
+        await using var harness = await GatewayWorkerHarness.CreateAsync(
+            [rule],
+            gatewaySettings: new GatewaySettings
+            {
+                RuleRefreshIntervalSeconds = 3600,
+                MaxPhotoAgeDays = 30
+            },
+            timeProvider: new FixedTimeProvider(InputPhotoTime.AddDays(31)),
+            ruleMatcherLogger: logger);
+
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage());
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(OutputMessages(result));
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(2013, log.EventId.Id);
+        Assert.Equal(LogLevel.Information, log.Level);
+        Assert.Equal(1, log.Properties["FilteredRuleCount"]);
+        Assert.Equal(31d, log.Properties["ImageAgeDays"]);
+        Assert.Equal(30, log.Properties["MaxPhotoAgeDays"]);
+        Assert.Equal(InputPhotoTime, log.Properties["PhotoTime"]);
+    }
+
+    [Theory]
+    [InlineData(true, 30)]
+    [InlineData(false, 31)]
+    public async Task HandleAsyncDoesNotFilterAtExactLimitOrWhenRuleFlagIsDisabled(
+        bool isPhotoOld,
+        int imageAgeDays)
+    {
+        var rule = MatchingRule();
+        rule.IsPhotoOld = isPhotoOld;
+        var logger = new global::ImagingPipeline.Gateway.Tests.RecordingLogger<RuleMatcher>();
+        await using var harness = await GatewayWorkerHarness.CreateAsync(
+            [rule],
+            gatewaySettings: new GatewaySettings
+            {
+                RuleRefreshIntervalSeconds = 3600,
+                MaxPhotoAgeDays = 30
+            },
+            timeProvider: new FixedTimeProvider(InputPhotoTime.AddDays(imageAgeDays)),
+            ruleMatcherLogger: logger);
+
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage());
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(OutputMessages(result));
+        Assert.Empty(logger.Entries);
     }
 
     [Fact]
@@ -812,6 +879,11 @@ public sealed class GatewayWorkerTests
         return document.RootElement.GetProperty("taskId").GetString();
     }
 
+    private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
+    }
+
     private sealed class GatewayWorkerHarness : IAsyncDisposable
     {
         private GatewayWorkerHarness(GatewayWorker gatewayWorker, ActiveRuleCache ruleCache)
@@ -826,19 +898,23 @@ public sealed class GatewayWorkerTests
         public static async Task<GatewayWorkerHarness> CreateAsync(
             IReadOnlyList<RuleDto> rules,
             IRabbitMqConsumer? consumer = null,
-            TimeSpan? consumerRestartDelay = null)
+            TimeSpan? consumerRestartDelay = null,
+            GatewaySettings? gatewaySettings = null,
+            TimeProvider? timeProvider = null,
+            ILogger<RuleMatcher>? ruleMatcherLogger = null)
         {
             var health = new GatewayHealthState();
+            gatewaySettings ??= new GatewaySettings
+            {
+                RuleRefreshIntervalSeconds = 3600
+            };
             var geometry = new GatewayGeometryConverter();
             var inputParser = new GatewayInputMessageParser(geometry);
             var outputBuilder = new GatewayOutputMessageBuilder(geometry);
             var ruleCache = new ActiveRuleCache(
                 new StaticRuleRepository(rules),
                 geometry,
-                Options.Create(new GatewaySettings
-                {
-                    RuleRefreshIntervalSeconds = 3600
-                }),
+                Options.Create(gatewaySettings),
                 health,
                 NullLogger<ActiveRuleCache>.Instance);
             await ruleCache.StartAsync(CancellationToken.None);
@@ -847,7 +923,10 @@ public sealed class GatewayWorkerTests
                 consumer ?? new NoopConsumer(),
                 ruleCache,
                 inputParser,
-                new RuleMatcher(),
+                new RuleMatcher(
+                    Options.Create(gatewaySettings),
+                    timeProvider ?? TimeProvider.System,
+                    ruleMatcherLogger ?? NullLogger<RuleMatcher>.Instance),
                 outputBuilder,
                 health,
                 NullLogger<GatewayWorker>.Instance,

@@ -1,0 +1,130 @@
+# FRAGMENT ONLY: merge these labels, annotations, ports, and environment
+# variables into each application Deployment.
+#
+# This example is a worker (Gateway, TB Publisher, or TB Consumer), whose
+# Kestrel metrics endpoint listens on port 9464. For Rules API:
+#   * use prometheus.io/port: "8080";
+#   * reuse its existing HTTP container port 8080;
+#
+# Replace every REPLACE_* value. Keep the app.kubernetes.io/name and
+# app.kubernetes.io/version labels because Prometheus turns them into bounded
+# service_name and service_version labels.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: REPLACE_DEPLOYMENT_NAME
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: REPLACE_SERVICE_NAME
+        app.kubernetes.io/version: REPLACE_SERVICE_VERSION
+        app.kubernetes.io/part-of: imaging-pipeline
+        environment: production
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "9464"
+    spec:
+      containers:
+        - name: REPLACE_CONTAINER_NAME
+          ports:
+            - name: metrics
+              containerPort: 9464
+              protocol: TCP
+          env:
+            - name: Observability__Enabled
+              value: "true"
+            - name: Observability__ServiceNamespace
+              value: imaging-pipeline
+            - name: Observability__DeploymentEnvironment
+              value: production
+
+            - name: Observability__Traces__Enabled
+              value: "true"
+            - name: Observability__Traces__OtlpEnabled
+              value: "true"
+            - name: OTEL_SERVICE_NAME
+              value: REPLACE_SERVICE_NAME
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://otel-collector:4317
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: grpc
+            - name: OTEL_TRACES_SAMPLER
+              value: parentbased_always_on
+
+            - name: Observability__Metrics__Enabled
+              value: "true"
+            - name: Observability__Metrics__Prometheus__Enabled
+              value: "true"
+            - name: Observability__Metrics__Prometheus__Port
+              value: "9464"
+            - name: Observability__Metrics__Prometheus__Path
+              value: /metrics
+            - name: OTEL_METRICS_EXPORTER
+              value: none
+
+            - name: Observability__Logs__Enabled
+              value: "true"
+            - name: Observability__Logs__ConsoleEnabled
+              value: "false"
+            - name: Observability__Logs__Logstash__Enabled
+              value: "true"
+            - name: Observability__Logs__Logstash__Endpoint
+              value: http://logstash:8081/
+            - name: Observability__Logs__Logstash__QueueCapacity
+              value: "10000"
+            - name: Observability__Logs__Logstash__PriorityQueueCapacity
+              value: "1000"
+            - name: Observability__Logs__Logstash__BatchSize
+              value: "100"
+            - name: Observability__Logs__Logstash__FlushIntervalMilliseconds
+              value: "1000"
+            - name: Observability__Logs__Logstash__RequestTimeoutSeconds
+              value: "5"
+            - name: Observability__Logs__Logstash__MaxRetryAttempts
+              value: "3"
+            - name: Observability__Logs__Logstash__RetryBaseDelayMilliseconds
+              value: "200"
+            - name: Observability__Logs__Logstash__ShutdownFlushTimeoutSeconds
+              value: "5"
+            - name: Observability__Logs__Logstash__MaxAttributeCount
+              value: "64"
+            - name: Observability__Logs__Logstash__MaxCollectionCount
+              value: "32"
+            - name: Observability__Logs__Logstash__MaxStringLength
+              value: "8192"
+            - name: Observability__Logs__DataStream__Dataset
+              value: findair
+            - name: Observability__Logs__DataStream__Namespace
+              value: production
+            - name: OTEL_LOGS_EXPORTER
+              value: none
+
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CONTAINER_NAME
+              value: REPLACE_CONTAINER_NAME
+            - name: DEPLOYMENT_NAME
+              value: REPLACE_DEPLOYMENT_NAME
+            - name: SERVICE_VERSION
+              value: REPLACE_SERVICE_VERSION
+            - name: DEPLOYMENT_ENVIRONMENT
+              value: production
+            - name: CLUSTER_NAME
+              value: REPLACE_OPENSHIFT_CLUSTER_NAME

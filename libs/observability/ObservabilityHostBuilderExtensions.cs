@@ -1,11 +1,13 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -53,6 +55,11 @@ public static class ObservabilityHostBuilderExtensions
             return builder;
         }
 
+        if (settings.TracesEnabled && settings.TracesOtlpEnabled)
+        {
+            ValidateTraceExporterConfiguration(builder.Configuration);
+        }
+
         Action<ResourceBuilder> configureResource = resource => resource
             .AddService(
                 serviceName: settings.ServiceName,
@@ -90,17 +97,25 @@ public static class ObservabilityHostBuilderExtensions
                     tracing.AddAspNetCoreInstrumentation(options =>
                     {
                         options.RecordException = settings.RecordExceptions;
-                        if (settings.ExcludeHealthChecks)
+                        options.Filter = context =>
                         {
-                            options.Filter = static context =>
-                                !context.Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase)
-                                && !context.Request.Path.StartsWithSegments("/live", StringComparison.OrdinalIgnoreCase)
-                                && !context.Request.Path.StartsWithSegments("/ready", StringComparison.OrdinalIgnoreCase);
-                        }
+                            if (settings.PrometheusEnabled &&
+                                context.Request.Path.StartsWithSegments(
+                                    settings.PrometheusPath,
+                                    StringComparison.OrdinalIgnoreCase))
+                            {
+                                return false;
+                            }
+
+                            return !settings.ExcludeHealthChecks ||
+                                (!context.Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase)
+                                 && !context.Request.Path.StartsWithSegments("/live", StringComparison.OrdinalIgnoreCase)
+                                 && !context.Request.Path.StartsWithSegments("/ready", StringComparison.OrdinalIgnoreCase));
+                        };
                     });
                 }
 
-                if (settings.OtlpEnabled)
+                if (settings.TracesOtlpEnabled)
                 {
                     tracing.AddOtlpExporter();
                 }
@@ -123,51 +138,55 @@ public static class ObservabilityHostBuilderExtensions
                 }
 
                 AddHistogramViews(metrics);
-                if (settings.OtlpEnabled)
+                if (settings.PrometheusEnabled)
                 {
-                    metrics.AddOtlpExporter();
+                    metrics.AddPrometheusExporter(options =>
+                    {
+                        options.ScrapeEndpointPath = settings.PrometheusPath;
+                    });
                 }
             });
         }
 
-        if (settings.LogsEnabled)
-        {
-            builder.Logging.ClearProviders();
-            if (settings.ConsoleLogsEnabled)
-            {
-                // The JSON-console path needs explicit identifiers. OTLP LogRecord already
-                // carries native trace/span IDs, so adding these scopes there duplicates data.
-                builder.Logging.Configure(options =>
-                {
-                    options.ActivityTrackingOptions =
-                        ActivityTrackingOptions.TraceId |
-                        ActivityTrackingOptions.SpanId;
-                });
-                builder.Logging.AddJsonConsole(options =>
-                {
-                    options.IncludeScopes = settings.IncludeLogScopes;
-                    options.UseUtcTimestamp = true;
-                    options.TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.fff'Z'";
-                });
-            }
-
-            var logResource = ResourceBuilder.CreateDefault();
-            configureResource(logResource);
-
-            builder.Logging.AddOpenTelemetry(options =>
-            {
-                options.SetResourceBuilder(logResource);
-                options.IncludeFormattedMessage = settings.IncludeFormattedLogMessage;
-                options.IncludeScopes = settings.IncludeLogScopes;
-                options.ParseStateValues = settings.ParseLogStateValues;
-                if (settings.OtlpLogsEnabled)
-                {
-                    options.AddOtlpExporter();
-                }
-            });
-        }
+        EcsLoggingRegistration.Configure(
+            builder,
+            settings.ResourceIdentity,
+            settings.LogsEnabled);
 
         return builder;
+    }
+
+    public static WebApplicationBuilder ConfigureImagingPipelinePrometheusListener(
+        this WebApplicationBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        var settings = PrometheusRuntimeSettings.Read(builder.Configuration);
+        if (RuntimeObservabilitySettings.IsSdkEnabled(builder.Configuration) &&
+            RuntimeObservabilitySettings.IsMetricsEnabled(builder.Configuration) &&
+            settings.Enabled)
+        {
+            builder.WebHost.ConfigureKestrel(options => options.ListenAnyIP(settings.Port));
+        }
+        return builder;
+    }
+
+    public static WebApplication MapImagingPipelinePrometheusScrapingEndpoint(
+        this WebApplication app)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+
+        var settings = PrometheusRuntimeSettings.Read(app.Configuration);
+        if (!RuntimeObservabilitySettings.IsSdkEnabled(app.Configuration) ||
+            !RuntimeObservabilitySettings.IsMetricsEnabled(app.Configuration) ||
+            !settings.Enabled)
+        {
+            return app;
+        }
+
+        app.MapPrometheusScrapingEndpoint(settings.Path)
+            .DisableHttpMetrics();
+        return app;
     }
 
     private static void AddHistogramViews(MeterProviderBuilder metrics)
@@ -196,6 +215,7 @@ public static class ObservabilityHostBuilderExtensions
                      TelemetryMetricNames.RabbitMqChannelWaitDuration,
                      TelemetryMetricNames.DependencyDuration,
                      TelemetryMetricNames.PipelineStageDuration,
+                     TelemetryMetricNames.LogExportDuration,
                      TelemetryMetricNames.GatewayRuleCacheRefreshDuration,
                      TelemetryMetricNames.RulesOperationDuration
                  })
@@ -238,27 +258,105 @@ public static class ObservabilityHostBuilderExtensions
         }
     }
 
+    private static bool ReadStrictBoolean(
+        IConfiguration configuration,
+        string key,
+        bool defaultValue)
+    {
+        var raw = configuration[key];
+        if (raw is null)
+        {
+            return defaultValue;
+        }
+
+        return bool.TryParse(raw, out var value)
+            ? value
+            : throw new InvalidOperationException($"Configuration value '{key}' must be 'true' or 'false'.");
+    }
+
+    private static void ValidateTraceExporterConfiguration(IConfiguration configuration)
+    {
+        const string signalEndpointKey = "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT";
+        const string baseEndpointKey = "OTEL_EXPORTER_OTLP_ENDPOINT";
+        const string signalProtocolKey = "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL";
+        const string baseProtocolKey = "OTEL_EXPORTER_OTLP_PROTOCOL";
+
+        var endpointKey = !string.IsNullOrWhiteSpace(configuration[signalEndpointKey])
+            ? signalEndpointKey
+            : baseEndpointKey;
+        var endpointValue = configuration[endpointKey];
+        if (string.IsNullOrWhiteSpace(endpointValue))
+        {
+            throw new InvalidOperationException(
+                $"Trace OTLP export is enabled, but neither '{signalEndpointKey}' nor '{baseEndpointKey}' is configured.");
+        }
+
+        if (!Uri.TryCreate(endpointValue, UriKind.Absolute, out var endpoint)
+            || endpoint.Scheme is not ("http" or "https")
+            || string.IsNullOrWhiteSpace(endpoint.Host))
+        {
+            throw new InvalidOperationException(
+                $"Configuration value '{endpointKey}' must be an absolute HTTP or HTTPS URL.");
+        }
+
+        if (!string.IsNullOrEmpty(endpoint.UserInfo))
+        {
+            throw new InvalidOperationException(
+                $"Configuration value '{endpointKey}' must not contain credentials.");
+        }
+
+        var protocolKey = !string.IsNullOrWhiteSpace(configuration[signalProtocolKey])
+            ? signalProtocolKey
+            : baseProtocolKey;
+        var protocol = configuration[protocolKey];
+        if (string.IsNullOrWhiteSpace(protocol))
+        {
+            throw new InvalidOperationException(
+                $"Trace OTLP export is enabled, but neither '{signalProtocolKey}' nor '{baseProtocolKey}' is configured. Use 'grpc' or 'http/protobuf'.");
+        }
+
+        if (!protocol.Equals("grpc", StringComparison.OrdinalIgnoreCase)
+            && !protocol.Equals("http/protobuf", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Configuration value '{protocolKey}' must be 'grpc' or 'http/protobuf'.");
+        }
+    }
+
     private sealed record RuntimeObservabilitySettings(
         bool Enabled,
         string ServiceName,
         string ServiceNamespace,
         string ServiceVersion,
+        string DeploymentEnvironment,
         string ServiceInstanceId,
         IReadOnlyList<KeyValuePair<string, object>> ResourceAttributes,
+        ObservabilityResourceIdentity ResourceIdentity,
         bool TracesEnabled,
         bool RecordExceptions,
         bool ExcludeHealthChecks,
+        bool TracesOtlpEnabled,
         bool SamplerConfigured,
         double DefaultSamplingRatio,
         bool MetricsEnabled,
-        bool LogsEnabled,
-        bool ConsoleLogsEnabled,
-        bool IncludeFormattedLogMessage,
-        bool IncludeLogScopes,
-        bool ParseLogStateValues,
-        bool OtlpEnabled,
-        bool OtlpLogsEnabled)
+        bool PrometheusEnabled,
+        string PrometheusPath,
+        int PrometheusPort,
+        bool LogsEnabled)
     {
+        public static bool IsSdkEnabled(IConfiguration configuration)
+        {
+            var prefix = ImagingPipelineObservabilityOptions.SectionName;
+            return ReadBoolean(configuration, $"{prefix}:Enabled", true)
+                && !ReadBoolean(configuration, "OTEL_SDK_DISABLED", false);
+        }
+
+        public static bool IsMetricsEnabled(IConfiguration configuration)
+        {
+            var prefix = ImagingPipelineObservabilityOptions.SectionName;
+            return ReadBoolean(configuration, $"{prefix}:Metrics:Enabled", true);
+        }
+
         public static RuntimeObservabilitySettings Read(IConfiguration configuration, string defaultServiceName)
         {
             var prefix = ImagingPipelineObservabilityOptions.SectionName;
@@ -271,61 +369,87 @@ public static class ObservabilityHostBuilderExtensions
                 ObservabilityServiceNames.Namespace)!;
             var serviceVersion = FirstNonEmpty(
                 configuration[$"{prefix}:ServiceVersion"],
-                Environment.GetEnvironmentVariable("SERVICE_VERSION"),
+                configuration["SERVICE_VERSION"],
                 Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
                 "unknown")!;
             var deploymentEnvironment = FirstNonEmpty(
                 configuration[$"{prefix}:DeploymentEnvironment"],
-                Environment.GetEnvironmentVariable("DEPLOYMENT_ENVIRONMENT"),
+                configuration["DEPLOYMENT_ENVIRONMENT"],
                 configuration["DOTNET_ENVIRONMENT"],
-                configuration["ASPNETCORE_ENVIRONMENT"]);
+                configuration["ASPNETCORE_ENVIRONMENT"],
+                "unknown")!;
 
-            var podUid = Environment.GetEnvironmentVariable("POD_UID");
-            var podName = Environment.GetEnvironmentVariable("POD_NAME");
+            var podUid = configuration["POD_UID"];
+            var podName = configuration["POD_NAME"];
+            var podNamespace = configuration["POD_NAMESPACE"];
+            var deploymentName = configuration["DEPLOYMENT_NAME"];
+            var nodeName = configuration["NODE_NAME"];
+            var containerName = configuration["CONTAINER_NAME"];
             var serviceInstanceId = FirstNonEmpty(
                 podUid,
                 podName,
                 $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}")!;
 
-            var attributes = BuildOpenShiftResourceAttributes(deploymentEnvironment, podName, podUid);
-            var otlpEnabled = ReadBoolean(configuration, $"{prefix}:Otlp:Enabled", true);
-            return new RuntimeObservabilitySettings(
-                ReadBoolean(configuration, $"{prefix}:Enabled", true)
-                    && !ReadBoolean(configuration, "OTEL_SDK_DISABLED", false),
+            var resourceIdentity = new ObservabilityResourceIdentity(
                 serviceName,
                 serviceNamespace,
                 serviceVersion,
+                deploymentEnvironment,
+                serviceInstanceId,
+                podName,
+                podUid,
+                podNamespace,
+                deploymentName,
+                nodeName,
+                containerName);
+            var attributes = BuildResourceAttributes(
+                resourceIdentity,
+                configuration["CLUSTER_NAME"]);
+            var prometheus = PrometheusRuntimeSettings.Read(configuration);
+            return new RuntimeObservabilitySettings(
+                IsSdkEnabled(configuration),
+                serviceName,
+                serviceNamespace,
+                serviceVersion,
+                deploymentEnvironment,
                 serviceInstanceId,
                 attributes,
+                resourceIdentity,
                 ReadBoolean(configuration, $"{prefix}:Traces:Enabled", true),
                 ReadBoolean(configuration, $"{prefix}:Traces:RecordExceptions", true),
                 ReadBoolean(configuration, $"{prefix}:Traces:ExcludeHealthChecks", true),
+                ReadStrictBoolean(configuration, $"{prefix}:Traces:OtlpEnabled", true),
                 !string.IsNullOrWhiteSpace(configuration["OTEL_TRACES_SAMPLER"]),
                 ReadSamplingRatio(configuration, $"{prefix}:Traces:DefaultSamplingRatio"),
-                ReadBoolean(configuration, $"{prefix}:Metrics:Enabled", true),
-                ReadBoolean(configuration, $"{prefix}:Logs:Enabled", true),
-                ReadBoolean(configuration, $"{prefix}:Logs:ConsoleEnabled", false),
-                ReadBoolean(configuration, $"{prefix}:Logs:IncludeFormattedMessage", true),
-                ReadBoolean(configuration, $"{prefix}:Logs:IncludeScopes", true),
-                ReadBoolean(configuration, $"{prefix}:Logs:ParseStateValues", true),
-                otlpEnabled,
-                otlpEnabled && ReadBoolean(configuration, $"{prefix}:Logs:OtlpEnabled", true));
+                IsMetricsEnabled(configuration),
+                prometheus.Enabled,
+                prometheus.Path,
+                prometheus.Port,
+                ReadBoolean(configuration, $"{prefix}:Logs:Enabled", true));
         }
 
-        private static IReadOnlyList<KeyValuePair<string, object>> BuildOpenShiftResourceAttributes(
-            string? deploymentEnvironment,
-            string? podName,
-            string? podUid)
+        private static IReadOnlyList<KeyValuePair<string, object>> BuildResourceAttributes(
+            ObservabilityResourceIdentity resource,
+            string? clusterName)
         {
-            var attributes = new List<KeyValuePair<string, object>>();
-            AddIfPresent(attributes, "deployment.environment.name", deploymentEnvironment);
-
-            AddIfPresent(attributes, "k8s.namespace.name", Environment.GetEnvironmentVariable("POD_NAMESPACE"));
-            AddIfPresent(attributes, "k8s.deployment.name", Environment.GetEnvironmentVariable("DEPLOYMENT_NAME"));
-            AddIfPresent(attributes, "k8s.pod.name", podName);
-            AddIfPresent(attributes, "k8s.pod.uid", podUid);
-            AddIfPresent(attributes, "k8s.node.name", Environment.GetEnvironmentVariable("NODE_NAME"));
-            AddIfPresent(attributes, "k8s.container.name", Environment.GetEnvironmentVariable("CONTAINER_NAME"));
+            var attributes = new List<KeyValuePair<string, object>>
+            {
+                new("deployment.environment", resource.DeploymentEnvironment),
+                new("deployment.environment.name", resource.DeploymentEnvironment),
+                new("host.name", resource.HostName),
+                new("process.pid", resource.ProcessId),
+                new("process.runtime.name", resource.RuntimeName),
+                new("process.runtime.version", resource.RuntimeVersion),
+                new("process.runtime.description", resource.RuntimeDescription)
+            };
+            AddIfPresent(attributes, "service.node.name", resource.PodName);
+            AddIfPresent(attributes, "k8s.cluster.name", clusterName);
+            AddIfPresent(attributes, "k8s.namespace.name", resource.PodNamespace);
+            AddIfPresent(attributes, "k8s.deployment.name", resource.DeploymentName);
+            AddIfPresent(attributes, "k8s.pod.name", resource.PodName);
+            AddIfPresent(attributes, "k8s.pod.uid", resource.PodUid);
+            AddIfPresent(attributes, "k8s.node.name", resource.NodeName);
+            AddIfPresent(attributes, "k8s.container.name", resource.ContainerName);
             return attributes;
         }
 
@@ -341,14 +465,14 @@ public static class ObservabilityHostBuilderExtensions
         }
 
         private static bool ReadBoolean(IConfiguration configuration, string key, bool defaultValue) =>
-            bool.TryParse(configuration[key], out var value) ? value : defaultValue;
+            ReadStrictBoolean(configuration, key, defaultValue);
 
         private static double ReadSamplingRatio(IConfiguration configuration, string key)
         {
             var raw = configuration[key];
             if (string.IsNullOrWhiteSpace(raw))
             {
-                return 0.10;
+                return 1.0;
             }
 
             if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var ratio)
@@ -362,5 +486,66 @@ public static class ObservabilityHostBuilderExtensions
 
         private static string? FirstNonEmpty(params string?[] values) =>
             values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
+    }
+
+    private sealed record PrometheusRuntimeSettings(
+        bool Enabled,
+        string Path,
+        int Port)
+    {
+        private const string DefaultPath = "/metrics";
+        private const int DefaultPort = 9464;
+
+        public static PrometheusRuntimeSettings Read(IConfiguration configuration)
+        {
+            var prefix = $"{ImagingPipelineObservabilityOptions.SectionName}:Metrics:Prometheus";
+            var enabled = ReadStrictBoolean(configuration, $"{prefix}:Enabled", true);
+            var path = ReadPath(configuration, $"{prefix}:Path");
+            var port = ReadPort(configuration, $"{prefix}:Port");
+            return new PrometheusRuntimeSettings(enabled, path, port);
+        }
+
+        private static string ReadPath(IConfiguration configuration, string key)
+        {
+            var raw = configuration[key];
+            if (raw is null)
+            {
+                return DefaultPath;
+            }
+
+            if (string.IsNullOrWhiteSpace(raw) ||
+                raw[0] != '/' ||
+                raw.Length == 1 ||
+                raw.IndexOfAny(['?', '#', '{', '}', '*']) >= 0 ||
+                raw.Any(char.IsWhiteSpace))
+            {
+                throw new InvalidOperationException(
+                    $"Configuration value '{key}' must be an absolute HTTP path such as '/metrics'.");
+            }
+
+            return raw;
+        }
+
+        private static int ReadPort(IConfiguration configuration, string key)
+        {
+            var raw = configuration[key];
+            if (raw is null)
+            {
+                return DefaultPort;
+            }
+
+            if (int.TryParse(
+                    raw,
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out var port) &&
+                port is >= 1 and <= 65_535)
+            {
+                return port;
+            }
+
+            throw new InvalidOperationException(
+                $"Configuration value '{key}' must be an integer from 1 through 65535.");
+        }
     }
 }
