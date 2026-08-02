@@ -74,7 +74,7 @@ public class TbMessageHandlerTests
             .Select(i => new TileBuilderTileOutput
             {
                 Roi = [0.0, 0.0, 1.0, 1.0],
-                Uri = $"/tiles/tile_{i}.tiff",
+                Uri = $"http://s3-prod/int.tiles/tile_{i}.tiff",
                 TileIndex = i
             }).ToList()
     };
@@ -317,8 +317,9 @@ public class TbMessageHandlerTests
         var embedder = dto!.EmbedderInput;
         Assert.Equal("0", embedder.TileId);
         Assert.Equal("req-001", embedder.Gid);
-        Assert.Equal("/tiles/tile_0.tiff", embedder.ImagePath);
-        Assert.Equal("/images/test.tiff", dto.ImageUrl);
+        Assert.Equal("http://s3-prod/int.tiles/tile_0.tiff", embedder.ImagePath);
+        Assert.Equal("http://s3-prod/int.tiles/tile_0.tiff", dto.ImageUrl);
+        Assert.Equal("s3://int.tiles/tile_0.tiff", dto.S3Uri);
         Assert.Equal("sensor-x", embedder.Sensor);
         Assert.Equal(0.5, embedder.Resolution);
         Assert.Equal("tenant-1", embedder.TenantId);
@@ -334,6 +335,37 @@ public class TbMessageHandlerTests
         Assert.Equal("task-001", dto.TaskId);
         Assert.Equal("tenant-1", dto.MissionMetadata.TenantId);
         Assert.Equal("mission-1", dto.MissionMetadata.MissionId);
+    }
+
+    [Fact]
+    public async Task HandleAsync_PresignedTileUri_S3UriStripsQueryString()
+    {
+        // Arrange
+        var input = CreateValidInput(1);
+        input.Tiles[0].Uri = "http://s3-prod/int.tiles/tile_0.tiff?X-Amz-Signature=abc&X-Amz-Expires=300";
+        var envelope = ToEnvelope(input);
+        SetupProjectionMapperPassthrough();
+
+        RabbitMqMessageEnvelope? captured = null;
+        _publisherMock
+            .Setup(p => p.PublishToOutputAsync(It.IsAny<RabbitMqMessageEnvelope>(), It.IsAny<CancellationToken>()))
+            .Callback<RabbitMqMessageEnvelope, CancellationToken>((env, _) => captured = env)
+            .Returns(Task.CompletedTask);
+
+        // Act
+        await _handler.HandleAsync(envelope);
+
+        // Assert
+        Assert.NotNull(captured);
+        var dto = JsonSerializer.Deserialize<EmbedderInputDto>(
+            captured!.BodyAsUtf8(),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+        Assert.NotNull(dto);
+        Assert.Equal(
+            "http://s3-prod/int.tiles/tile_0.tiff?X-Amz-Signature=abc&X-Amz-Expires=300",
+            dto!.ImageUrl);
+        Assert.Equal("s3://int.tiles/tile_0.tiff", dto.S3Uri);
     }
 
     [Fact]

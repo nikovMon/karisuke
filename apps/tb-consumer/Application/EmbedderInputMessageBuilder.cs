@@ -75,11 +75,22 @@ public sealed class EmbedderInputMessageBuilder
                 MissionMetadata = metadata.MissionMetadata,
                 RequestId = input.RequestId,
                 TaskId = metadata.TaskId,
-                ImageUrl = overlay.ImageUrl,
+                ImageUrl = tile.Uri,
+                S3Uri = ToS3Uri(tile.Uri),
                 EmbedderInput = embedderInput
             });
         }
 
         return outputs;
+    }
+
+    private static string ToS3Uri(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var parsed))
+        {
+            return url;
+        }
+
+        return $"s3://{parsed.AbsolutePath.TrimStart('/')}";
     }
 }
