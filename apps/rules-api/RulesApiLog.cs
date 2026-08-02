@@ -4,13 +4,6 @@ namespace ImagingPipeline.Rules.Api;
 
 internal static partial class RulesApiLog
 {
-    [LoggerMessage(5000, LogLevel.Debug, "Starting rule operation {Operation}. RuleId: {RuleId}; RuleName: {RuleName}")]
-    public static partial void RuleOperationStartingWithName(
-        this ILogger logger,
-        string operation,
-        string ruleId,
-        string ruleName);
-
     [LoggerMessage(5001, LogLevel.Debug, "Starting rule operation {Operation}. RuleId: {RuleId}; UpdatedFields: {UpdatedFields}")]
     public static partial void RuleOperationStartingWithFields(
         this ILogger logger,
@@ -38,19 +31,17 @@ internal static partial class RulesApiLog
         string ruleId,
         bool? isActive);
 
-    [LoggerMessage(5005, LogLevel.Debug, "Starting rule operation {Operation}. RequestedCount: {RequestedCount}; SensorName: {SensorName}; SensorValueCount: {SensorValueCount}")]
+    [LoggerMessage(5005, LogLevel.Debug, "Starting rule operation {Operation}. RequestedCount: {RequestedCount}; SensorValueCount: {SensorValueCount}")]
     public static partial void RuleSensorOperationStarting(
         this ILogger logger,
         string operation,
         int requestedCount,
-        string sensorName,
         int sensorValueCount);
 
-    [LoggerMessage(5010, LogLevel.Warning, "Rule operation {Operation} failed because ruleName {RuleName} already exists. RuleId: {RuleId}")]
+    [LoggerMessage(5010, LogLevel.Warning, "Rule operation {Operation} failed because the rule name already exists. RuleId: {RuleId}")]
     public static partial void RuleNameConflict(
         this ILogger logger,
         string operation,
-        string ruleName,
         string ruleId);
 
     [LoggerMessage(5011, LogLevel.Warning, "Rule operation {Operation} failed because the rule was not found. RuleId: {RuleId}")]
@@ -65,12 +56,11 @@ internal static partial class RulesApiLog
         string operation,
         int ruleCount);
 
-    [LoggerMessage(5020, LogLevel.Debug, "Rule operation {Operation} succeeded. RuleId: {RuleId}; RuleName: {RuleName}")]
+    [LoggerMessage(5020, LogLevel.Debug, "Rule operation {Operation} succeeded. RuleId: {RuleId}")]
     public static partial void RuleCreated(
         this ILogger logger,
         string operation,
-        string ruleId,
-        string ruleName);
+        string ruleId);
 
     [LoggerMessage(5021, LogLevel.Debug, "Rule operation {Operation} succeeded. RuleId: {RuleId}; UpdatedFieldCount: {UpdatedFieldCount}")]
     public static partial void RuleUpdated(
@@ -93,23 +83,21 @@ internal static partial class RulesApiLog
         int errorCount,
         string validationErrors);
 
-    [LoggerMessage(5024, LogLevel.Debug, "Rule operation {Operation} completed. RequestedCount: {RequestedCount}; SuccessCount: {SuccessCount}; FailureCount: {FailureCount}; SensorName: {SensorName}")]
+    [LoggerMessage(5024, LogLevel.Debug, "Rule operation {Operation} completed. RequestedCount: {RequestedCount}; SuccessCount: {SuccessCount}; FailureCount: {FailureCount}")]
     public static partial void BulkRuleOperationSucceeded(
         this ILogger logger,
         string operation,
         int requestedCount,
         int successCount,
-        int failureCount,
-        string? sensorName);
+        int failureCount);
 
-    [LoggerMessage(5025, LogLevel.Warning, "Rule operation {Operation} completed. RequestedCount: {RequestedCount}; SuccessCount: {SuccessCount}; FailureCount: {FailureCount}; SensorName: {SensorName}; FailedIdSample: {FailedIdSample}; OmittedFailureCount: {OmittedFailureCount}")]
+    [LoggerMessage(5025, LogLevel.Warning, "Rule operation {Operation} completed. RequestedCount: {RequestedCount}; SuccessCount: {SuccessCount}; FailureCount: {FailureCount}; FailedIdSample: {FailedIdSample}; OmittedFailureCount: {OmittedFailureCount}")]
     public static partial void BulkRuleOperationCompletedWithFailures(
         this ILogger logger,
         string operation,
         int requestedCount,
         int successCount,
         int failureCount,
-        string? sensorName,
         string failedIdSample,
         int omittedFailureCount);
 

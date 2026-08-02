@@ -15,8 +15,9 @@ public static class Program
     {
         RegistrationQualityContract.EnsureValid();
 
-        var builder = Host.CreateApplicationBuilder(args);
+        var builder = WebApplication.CreateBuilder(args);
         builder.AddImagingPipelineObservability(ObservabilityServiceNames.Gateway);
+        builder.ConfigureImagingPipelinePrometheusListener();
 
         var shutdownTimeoutSeconds = 30;
         var configuredShutdownTimeout = builder.Configuration["Gateway:ShutdownTimeoutSeconds"];
@@ -42,6 +43,7 @@ public static class Program
         builder.Services.AddSingleton<GatewayGeometryConverter>();
         builder.Services.AddSingleton<GatewayInputMessageParser>();
         builder.Services.AddSingleton<GatewayOutputMessageBuilder>();
+        builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<RuleMatcher>();
         builder.Services.AddSingleton<IRuleRepository, ElasticsearchRuleRepository>();
         builder.Services.AddSingleton<ActiveRuleCache>();
@@ -49,6 +51,9 @@ public static class Program
         builder.Services.AddSingleton<GatewayWorker>();
         builder.Services.AddHostedService(provider => provider.GetRequiredService<GatewayWorker>());
 
-        await builder.Build().RunAsync();
+        var app = builder.Build();
+        app.MapImagingPipelinePrometheusScrapingEndpoint();
+
+        await app.RunAsync();
     }
 }

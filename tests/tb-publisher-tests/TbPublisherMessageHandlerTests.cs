@@ -119,7 +119,10 @@ public sealed class TbPublisherMessageHandlerTests
             FakeProjectionMapperClient.ReturningSuccess(Coordinates),
             new FakeRabbitMqPublisher());
         using var activities = new TelemetryActivityCollector(TelemetrySourceNames.TbPublisher);
+        using var baggage = PipelineCorrelationBaggage.Push(
+            new PipelineCorrelationContext(RequestId: "request-1"));
         using var testRoot = new Activity("tb-publisher-test").Start();
+        testRoot.IsAllDataRequested = true;
 
         var result = await handler.HandleAsync(
             RabbitMqMessageEnvelope.FromUtf8(Encoding.UTF8.GetString(ValidBody), "telemetry-message"));
@@ -133,6 +136,12 @@ public sealed class TbPublisherMessageHandlerTests
             testActivities.Select(activity => activity.DisplayName).ToArray());
         Assert.All(testActivities, activity => Assert.Equal(ActivityKind.Internal, activity.Kind));
         Assert.All(testActivities, activity => Assert.Equal(ActivityStatusCode.Ok, activity.Status));
+        Assert.Equal("msg-1", testRoot.GetTagItem(TelemetryAttributeNames.PipelineTaskId));
+        Assert.Equal("request-1", testRoot.GetTagItem(TelemetryAttributeNames.PipelineRequestId));
+        Assert.Equal("image-1", testRoot.GetTagItem(TelemetryAttributeNames.PipelineImageId));
+        Assert.Equal("rule-1", testRoot.GetTagItem(TelemetryAttributeNames.PipelineRuleId));
+        Assert.Equal("tenant-1", testRoot.GetTagItem(TelemetryAttributeNames.PipelineTenantId));
+        Assert.Equal("FindAir,Rpn", testRoot.GetTagItem(TelemetryAttributeNames.PipelineAlgorithmName));
     }
 
     [Fact]
@@ -238,17 +247,27 @@ public sealed class TbPublisherMessageHandlerTests
 
             Assert.True(result.IsSuccess);
             Assert.Equal(2, publisher.BaggageSnapshots.Count);
-            Assert.All(publisher.BaggageSnapshots, baggage =>
+            var outputMessages = publisher.PublishedToOutput
+                .Select(envelope => JsonSerializer.Deserialize<TbPublisherOutputMessageDto>(
+                    envelope.Body,
+                    new JsonSerializerOptions(JsonSerializerDefaults.Web))!)
+                .ToArray();
+            Assert.Equal(2, outputMessages.Select(output => output.RequestId).Distinct().Count());
+            for (var index = 0; index < outputMessages.Length; index++)
             {
+                var baggage = publisher.BaggageSnapshots[index];
                 Assert.Equal("msg-1", baggage[TelemetryAttributeNames.PipelineTaskId]);
-                Assert.Equal("upstream-request", baggage[TelemetryAttributeNames.PipelineRequestId]);
+                Assert.Equal(
+                    outputMessages[index].RequestId,
+                    baggage[TelemetryAttributeNames.PipelineRequestId]);
                 Assert.Equal("image-1", baggage[TelemetryAttributeNames.PipelineImageId]);
                 Assert.Equal("rule-1", baggage[TelemetryAttributeNames.PipelineRuleId]);
                 Assert.Equal("tenant-1", baggage[TelemetryAttributeNames.PipelineTenantId]);
                 Assert.Equal("FindAir,Rpn", baggage[TelemetryAttributeNames.PipelineAlgorithmName]);
                 Assert.DoesNotContain("secret", baggage.Keys);
-            });
+            }
             Assert.Equal("spoofed-task", Baggage.Current.GetBaggage(TelemetryAttributeNames.PipelineTaskId));
+            Assert.Equal("upstream-request", Baggage.Current.GetBaggage(TelemetryAttributeNames.PipelineRequestId));
             Assert.Equal("do-not-forward", Baggage.Current.GetBaggage("secret"));
         }
         finally

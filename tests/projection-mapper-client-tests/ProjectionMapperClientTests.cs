@@ -144,6 +144,9 @@ public sealed class ProjectionMapperClientTests
             measurement.Name == "imaging_pipeline.dependency.batch.size" &&
             measurement.Value == 2 &&
             measurement.Tags.Any(tag =>
+                tag.Key == "imaging_pipeline.pipeline.item" &&
+                Equals(tag.Value, "ground_point")) &&
+            measurement.Tags.Any(tag =>
                 tag.Key == "imaging_pipeline.dependency.operation" &&
                 Equals(tag.Value, "ground_to_image")));
         Assert.Contains(measurements, static measurement =>

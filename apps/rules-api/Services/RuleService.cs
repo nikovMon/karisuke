@@ -99,10 +99,7 @@ public sealed class RuleService : IRuleService
     {
         var rule = request.ToRuleDto();
         rule.Id = string.Empty;
-        _logger.RuleOperationStartingWithName(
-            "create",
-            rule.Id,
-            rule.RuleName);
+        _logger.RuleOperationStarting("create", rule.Id);
 
         var errors = RuleValidation.ValidateRule(rule).ToList();
         if (!string.IsNullOrWhiteSpace(rule.LocationWkt))
@@ -127,7 +124,6 @@ public sealed class RuleService : IRuleService
         {
             _logger.RuleNameConflict(
                 "create",
-                rule.RuleName,
                 rule.Id);
             return RuleOperationResult<RuleDto>.Conflict($"Rule with ruleName '{rule.RuleName}' already exists.");
         }
@@ -140,8 +136,7 @@ public sealed class RuleService : IRuleService
         await SaveAsync(rule, cancellationToken);
         _logger.RuleCreated(
             "create",
-            rule.Id,
-            rule.RuleName);
+            rule.Id);
         return RuleOperationResult<RuleDto>.Success(rule);
     }
 
@@ -202,7 +197,6 @@ public sealed class RuleService : IRuleService
         {
             _logger.RuleNameConflict(
                 operation,
-                request.RuleName!,
                 id);
             return RuleOperationResult<RuleDto>.Conflict($"Rule with ruleName '{request.RuleName}' already exists.");
         }
@@ -333,7 +327,6 @@ public sealed class RuleService : IRuleService
         _logger.RuleSensorOperationStarting(
             operation,
             ids.Count,
-            request.SensorName,
             request.Values?.Count ?? 0);
 
         var errors = RuleValidation.ValidateIds(ids)
@@ -371,7 +364,7 @@ public sealed class RuleService : IRuleService
             result.SuccessIds.Add(id);
         }
 
-        LogBulkOutcome(operation, ids.Count, result, request.SensorName);
+        LogBulkOutcome(operation, ids.Count, result);
         return BuildBulkOperationResult(result);
     }
 
@@ -601,8 +594,7 @@ public sealed class RuleService : IRuleService
     private void LogBulkOutcome(
         string operation,
         int requestedCount,
-        BulkOperationResult result,
-        string? sensorName = null)
+        BulkOperationResult result)
     {
         if (result.FailedIds.Count > 0)
         {
@@ -618,7 +610,6 @@ public sealed class RuleService : IRuleService
                     requestedCount,
                     result.SuccessIds.Count,
                     result.FailedIds.Count,
-                    sensorName,
                     failedIdSample,
                     Math.Max(0, result.FailedIds.Count - FailedIdLogSampleLimit));
             }
@@ -630,8 +621,7 @@ public sealed class RuleService : IRuleService
             operation,
             requestedCount,
             result.SuccessIds.Count,
-            result.FailedIds.Count,
-            sensorName);
+            result.FailedIds.Count);
     }
 
     private sealed class RuleNameProjection

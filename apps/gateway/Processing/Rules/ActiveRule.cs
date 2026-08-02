@@ -10,4 +10,5 @@ public sealed record ActiveRule(
     IReadOnlyList<TenantInfo> TenantsInfo,
     double MinimumResolution,
     double MaximumResolution,
+    bool IsPhotoOld,
     Geometry Geometry);

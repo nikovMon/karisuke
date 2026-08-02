@@ -128,6 +128,7 @@ public sealed class ElasticsearchRuleRepositoryTests
         var warning = Assert.Single(logger.Entries);
         Assert.Equal(LogLevel.Warning, warning.Level);
         Assert.Same(client.CloseFailure, warning.Exception);
+        Assert.DoesNotContain("pit-1", warning.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -148,7 +149,7 @@ public sealed class ElasticsearchRuleRepositoryTests
         var warning = Assert.Single(logger.Entries);
         Assert.Equal(LogLevel.Warning, warning.Level);
         Assert.Same(client.CloseFailure, warning.Exception);
-        Assert.Contains("pit-2", warning.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("pit-2", warning.Message, StringComparison.Ordinal);
     }
 
     private static ElasticsearchRuleRepository CreateRepository(

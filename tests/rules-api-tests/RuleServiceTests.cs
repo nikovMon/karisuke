@@ -32,11 +32,18 @@ public sealed class RuleServiceTests
     {
         var repository = new InMemoryRuleRepository();
         repository.Add(ValidRule("rule-1", "same-name"));
-        var service = CreateService(repository);
+        var logger = new RecordingLogger<RuleService>();
+        var service = new RuleService(
+            repository,
+            Options.Create(new RulesElasticsearchOptions { IndexName = "rules" }),
+            logger);
 
         var result = await service.CreateAsync(ValidCreateRequest("same-name"));
 
         Assert.Equal(RuleOperationStatus.Conflict, result.Status);
+        var warning = Assert.Single(logger.Entries, entry => entry.EventId.Id == 5010);
+        Assert.DoesNotContain("RuleName", warning.Properties.Keys);
+        Assert.DoesNotContain("same-name", warning.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -295,7 +302,7 @@ public sealed class RuleServiceTests
         Assert.Equal(13, warning.Properties["RequestedCount"]);
         Assert.Equal(1, warning.Properties["SuccessCount"]);
         Assert.Equal(12, warning.Properties["FailureCount"]);
-        Assert.Null(warning.Properties["SensorName"]);
+        Assert.DoesNotContain("SensorName", warning.Properties.Keys);
         Assert.Equal(2, warning.Properties["OmittedFailureCount"]);
         Assert.Equal(
             missingIds.Take(10),
@@ -392,7 +399,8 @@ public sealed class RuleServiceTests
         Assert.Equal(12, warning.Properties["RequestedCount"]);
         Assert.Equal(0, warning.Properties["SuccessCount"]);
         Assert.Equal(12, warning.Properties["FailureCount"]);
-        Assert.Equal("camera", warning.Properties["SensorName"]);
+        Assert.DoesNotContain("SensorName", warning.Properties.Keys);
+        Assert.DoesNotContain("camera", warning.Message, StringComparison.Ordinal);
         Assert.Equal(2, warning.Properties["OmittedFailureCount"]);
         Assert.Equal(
             missingIds.Take(10),
@@ -522,7 +530,8 @@ public sealed class RuleServiceTests
             item => item.EventId.Id == 5020 && item.Level == LogLevel.Debug);
         Assert.Equal("create", entry.Properties["Operation"]);
         Assert.Equal(result.Value?.Id, entry.Properties["RuleId"]);
-        Assert.Equal("observed-rule", entry.Properties["RuleName"]);
+        Assert.DoesNotContain("RuleName", entry.Properties.Keys);
+        Assert.DoesNotContain("observed-rule", entry.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(logger.Entries, item => item.Level == LogLevel.Information);
     }
 

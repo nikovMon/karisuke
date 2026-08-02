@@ -6,6 +6,7 @@ namespace ImagingPipeline.Observability;
 public static class GatewayTelemetry
 {
     private static long _ruleCacheEntries;
+    private static long _ruleCacheSkippedRules;
     private static long _lastSuccessfulRefreshUnixMilliseconds;
 
     private static readonly Counter<long> CacheRefreshes = TelemetryMeters.Gateway.CreateCounter<long>(
@@ -16,6 +17,10 @@ public static class GatewayTelemetry
         TelemetryMetricNames.GatewayRulesEvaluated, "{rule}", "Rules evaluated for one input message.");
     private static readonly Histogram<long> RulesMatched = TelemetryMeters.Gateway.CreateHistogram<long>(
         TelemetryMetricNames.GatewayRulesMatched, "{rule}", "Rules matched for one input message.");
+    private static readonly Counter<long> RulesFilteredPhotoAge = TelemetryMeters.Gateway.CreateCounter<long>(
+        TelemetryMetricNames.GatewayRulesFilteredPhotoAge,
+        "{rule}",
+        "Rules excluded because an image exceeded the configured maximum photo age.");
 
     static GatewayTelemetry()
     {
@@ -24,6 +29,11 @@ public static class GatewayTelemetry
             static () => Volatile.Read(ref _ruleCacheEntries),
             "{rule}",
             "Rules in this pod's active snapshot.");
+        TelemetryMeters.Gateway.CreateObservableGauge(
+            TelemetryMetricNames.GatewayRuleCacheSkippedRules,
+            static () => Volatile.Read(ref _ruleCacheSkippedRules),
+            "{rule}",
+            "Invalid rules skipped while building this pod's active snapshot.");
         TelemetryMeters.Gateway.CreateObservableGauge(
             TelemetryMetricNames.GatewayRuleCacheAge,
             ObserveCacheAgeSeconds,
@@ -35,7 +45,8 @@ public static class GatewayTelemetry
         double durationSeconds,
         TelemetryOutcome outcome,
         int entries,
-        TelemetryErrorCategory error = TelemetryErrorCategory.None)
+        TelemetryErrorCategory error = TelemetryErrorCategory.None,
+        int skippedRules = 0)
     {
         var tags = new TagList { { TelemetryAttributeNames.PipelineOutcome, outcome.Value() } };
         if (error != TelemetryErrorCategory.None)
@@ -48,6 +59,7 @@ public static class GatewayTelemetry
         if (outcome == TelemetryOutcome.Success)
         {
             Volatile.Write(ref _ruleCacheEntries, Math.Max(0, entries));
+            Volatile.Write(ref _ruleCacheSkippedRules, Math.Max(0, skippedRules));
             Volatile.Write(ref _lastSuccessfulRefreshUnixMilliseconds, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         }
     }
@@ -56,6 +68,14 @@ public static class GatewayTelemetry
     {
         RulesEvaluated.Record(Math.Max(0, evaluated));
         RulesMatched.Record(Math.Max(0, matched));
+    }
+
+    public static void RecordPhotoAgeFilteredRules(long count)
+    {
+        if (count > 0)
+        {
+            RulesFilteredPhotoAge.Add(count);
+        }
     }
 
     private static double ObserveCacheAgeSeconds()

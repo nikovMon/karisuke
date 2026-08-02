@@ -269,6 +269,8 @@ public class TbMessageHandlerTests
         var input = CreateValidInput(2);
         SetupProjectionMapperPassthrough();
         using var activities = new TelemetryActivityCollector(TelemetrySourceNames.TbConsumer);
+        using var handlerActivity = new Activity("rabbitmq handler").Start();
+        handlerActivity.IsAllDataRequested = true;
 
         var result = await _handler.HandleAsync(ToEnvelope(input));
 
@@ -278,6 +280,12 @@ public class TbMessageHandlerTests
             activities.Activities.Select(activity => activity.DisplayName).ToArray());
         Assert.All(activities.Activities, activity => Assert.Equal(ActivityKind.Internal, activity.Kind));
         Assert.All(activities.Activities, activity => Assert.Equal(ActivityStatusCode.Ok, activity.Status));
+        Assert.Equal("task-001", handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineTaskId));
+        Assert.Equal("req-001", handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineRequestId));
+        Assert.Equal("img-001", handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineImageId));
+        Assert.Equal("rule-1", handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineRuleId));
+        Assert.Equal("tenant-1", handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineTenantId));
+        Assert.Equal("FindAir,Rpn", handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineAlgorithmName));
     }
 
     [Fact]
