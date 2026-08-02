@@ -19,10 +19,9 @@ public static class DependencyTelemetry
         DependencyOperation operation,
         double durationSeconds,
         TelemetryOutcome outcome,
-        TelemetryErrorCategory error = TelemetryErrorCategory.None,
-        string? errorType = null)
+        TelemetryErrorCategory error = TelemetryErrorCategory.None)
     {
-        var tags = Tags(dependency, operation, outcome, error, errorType);
+        var tags = Tags(dependency, operation, outcome, error);
         Operations.Add(1, tags);
         Duration.Record(Math.Max(0, durationSeconds), tags);
     }
@@ -53,16 +52,13 @@ public static class DependencyTelemetry
         DependencyName dependency,
         DependencyOperation operation,
         TelemetryOutcome outcome,
-        TelemetryErrorCategory error,
-        string? errorType)
+        TelemetryErrorCategory error)
     {
         var tags = BaseTags(dependency, operation);
         tags.Add(TelemetryAttributeNames.PipelineOutcome, outcome.Value());
         if (error != TelemetryErrorCategory.None)
         {
-            tags.Add(
-                "error.type",
-                string.IsNullOrWhiteSpace(errorType) ? error.Value() : errorType);
+            tags.Add("error.type", error.Value());
         }
 
         return tags;

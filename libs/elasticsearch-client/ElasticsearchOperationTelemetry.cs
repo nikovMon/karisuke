@@ -34,6 +34,9 @@ internal sealed class ElasticsearchOperationTelemetry : IDisposable
             return;
         }
 
+        // Elastic APM 8.15 still classifies database spans using the legacy key.
+        // Keep the newer semantic-convention key as well for forward compatibility.
+        _activity.SetTag("db.system", ElasticsearchSystemName);
         _activity.SetTag("db.system.name", ElasticsearchSystemName);
         _activity.SetTag("db.operation.name", operationName);
         if (!string.IsNullOrWhiteSpace(indexName))
@@ -158,8 +161,7 @@ internal sealed class ElasticsearchOperationTelemetry : IDisposable
                 _operation,
                 TelemetryTiming.ElapsedSeconds(_startedAt),
                 TelemetryOutcome.Failure,
-                category,
-                errorType);
+                category);
         }
         else
         {
@@ -215,8 +217,7 @@ internal sealed class ElasticsearchOperationTelemetry : IDisposable
             _operation,
             TelemetryTiming.ElapsedSeconds(_startedAt),
             outcome,
-            category,
-            errorType);
+            category);
     }
 
     public void Dispose() => _activity?.Dispose();

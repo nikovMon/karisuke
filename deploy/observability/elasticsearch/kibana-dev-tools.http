@@ -1,0 +1,88 @@
+# Run these requests in Kibana Dev Tools against the shared Elasticsearch 8.15
+# cluster.
+#
+# Dataset:
+#   findair
+#
+# Data streams:
+#   logs-findair-production
+#   logs-findair-integration
+#   logs-findair-development
+#
+# Configure and validate production first. Create the integration and
+# development streams only when their Logstash pipelines are ready.
+
+# Elasticsearch 8.15 supplies these ECS/logging component templates. Verify
+# that all three exist before creating the specific index template. Keep these
+# as separate requests so a missing component is immediately visible.
+GET _component_template/logs@mappings
+
+GET _component_template/logs@settings
+
+GET _component_template/ecs@mappings
+
+PUT _component_template/findair_logs_lifecycle
+{
+  "template": {
+    "settings": {
+      "index.lifecycle.prefer_ilm": false
+    },
+    "lifecycle": {
+      "data_retention": "7d"
+    }
+  },
+  "_meta": {
+    "description": "Seven-day data-stream lifecycle for FindAir application logs"
+  }
+}
+
+PUT _index_template/findair_logs
+{
+  "index_patterns": ["logs-findair-*"],
+  "data_stream": {},
+  "priority": 250,
+  "composed_of": [
+    "logs@mappings",
+    "logs@settings",
+    "ecs@mappings",
+    "findair_logs_lifecycle"
+  ],
+  "_meta": {
+    "description": "ECS application logs for FindAir in all environments"
+  }
+}
+
+# Production is the first rollout target. Confirm template resolution before
+# creating its stream.
+POST _index_template/_simulate_index/logs-findair-production
+
+# Optional: create the stream before starting production applications.
+# Otherwise, the first successful production Logstash write creates it.
+PUT _data_stream/logs-findair-production
+
+GET _data_stream/logs-findair-production
+
+GET _data_stream/logs-findair-production/_lifecycle
+
+GET .ds-logs-findair-production-*/_lifecycle/explain?expand_wildcards=all
+
+# Run these requests later, when the integration and development pipelines in
+# the integration Logstash deployment are ready.
+POST _index_template/_simulate_index/logs-findair-integration
+
+PUT _data_stream/logs-findair-integration
+
+GET _data_stream/logs-findair-integration
+
+GET _data_stream/logs-findair-integration/_lifecycle
+
+POST _index_template/_simulate_index/logs-findair-development
+
+PUT _data_stream/logs-findair-development
+
+GET _data_stream/logs-findair-development
+
+GET _data_stream/logs-findair-development/_lifecycle
+
+# Verify lifecycle status for backing indices from all three environments.
+GET .ds-logs-findair-*/_lifecycle/explain?expand_wildcards=all

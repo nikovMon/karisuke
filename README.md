@@ -50,23 +50,29 @@ remain visible only in its telemetry backend.
 
 ## Observability
 
-All runnable applications export traces, metrics, and correlated structured logs through OTLP to an OpenTelemetry Collector. Configure the Collector endpoint with standard OpenTelemetry environment variables:
+All runnable applications use the same correlation contract, but each signal follows its own production path:
+
+- traces use OTLP to an OpenTelemetry Collector and then Elastic APM;
+- ECS structured logs use HTTP to Logstash and then Elasticsearch data streams;
+- application and .NET runtime metrics are exposed on `/metrics` for Prometheus scraping.
+
+Configure the trace exporter with standard OpenTelemetry environment variables:
 
 ```text
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
 OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 OTEL_TRACES_SAMPLER=parentbased_traceidratio
-OTEL_TRACES_SAMPLER_ARG=0.10
+OTEL_TRACES_SAMPLER_ARG=1.0
 ```
 
-RabbitMQ carries W3C trace context, trace state, bounded allowlisted baggage, and a stable pipeline-origin timestamp across services. The applications emit aggregate stage spans and bounded-cardinality latency, throughput, payload-size, fan-out, batch, dependency, runtime, and messaging metrics. Broker queue depth and OpenShift container/node metrics belong in Collector RabbitMQ and kubelet receivers so they are collected once rather than once per application pod.
+RabbitMQ carries W3C trace context, trace state, bounded allowlisted baggage, and a stable pipeline-origin timestamp across services. The applications emit aggregate stage spans and bounded-cardinality latency, throughput, payload-size, fan-out, batch, dependency, runtime, and messaging metrics. Broker queue depth and OpenShift container/node metrics should be scraped once from their Prometheus-compatible exporters rather than emitted by every application pod.
 
-The checked-in fallback samples 10% of new root traces with parent-based decisions when
+The checked-in fallback samples 100% of new root traces with parent-based decisions when
 `OTEL_TRACES_SAMPLER` is absent. Production still needs the Collector endpoint and an
 explicit, capacity-tested sampler in the external OpenShift deployment configuration;
-this repository contains no deployment manifests.
+the checked-in fragments are examples rather than complete deployment manifests.
 
-See [libs/observability/README.md](libs/observability/README.md) for signal controls, OpenShift resource attributes, Collector guidance, performance rules, and the metric contract.
+See [deploy/observability/README.md](deploy/observability/README.md) for the complete Collector, Logstash, Prometheus, Elasticsearch data-stream, and OpenShift configuration, and [libs/observability/README.md](libs/observability/README.md) for the runtime contract.
 
 ## Install
 

@@ -1,0 +1,80 @@
+# FRAGMENT ONLY: merge into the existing production Logstash Deployment and
+# Service. The ConfigMap must contain pipelines.yml (from the production
+# example), the unchanged legacy pipeline.conf, and findair-production.conf.
+# Keep the normal Logstash entrypoint so pipelines.yml is loaded.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logstash
+spec:
+  template:
+    spec:
+      containers:
+        - name: logstash
+          ports:
+            - name: legacy-http
+              containerPort: 8080
+              protocol: TCP
+            - name: findair-logs
+              containerPort: 8081
+              protocol: TCP
+          env:
+            - name: FINDAIR_LOGS_ELASTICSEARCH_HOST
+              value: https://REPLACE_WITH_SHARED_ELASTICSEARCH_HOST:443
+            - name: FINDAIR_LOGS_ELASTICSEARCH_USER
+              valueFrom:
+                secretKeyRef:
+                  name: logstash-elasticsearch
+                  key: username
+            - name: FINDAIR_LOGS_ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: logstash-elasticsearch
+                  key: password
+            - name: FINDAIR_LOGS_ELASTICSEARCH_CA
+              value: /etc/logstash/elasticsearch-ca/ca.crt
+          volumeMounts:
+            - name: logstash-pipeline-config
+              mountPath: /usr/share/logstash/config/pipelines.yml
+              subPath: pipelines.yml
+              readOnly: true
+            - name: logstash-pipeline-config
+              mountPath: /usr/share/logstash/pipeline/pipeline.conf
+              subPath: pipeline.conf
+              readOnly: true
+            - name: logstash-pipeline-config
+              mountPath: /usr/share/logstash/pipeline/findair-production.conf
+              subPath: findair-production.conf
+              readOnly: true
+            - name: logstash-data
+              mountPath: /usr/share/logstash/data
+            - name: logstash-elasticsearch-ca
+              mountPath: /etc/logstash/elasticsearch-ca
+              readOnly: true
+      volumes:
+        - name: logstash-pipeline-config
+          configMap:
+            name: logstash-pipelines
+        - name: logstash-data
+          persistentVolumeClaim:
+            claimName: logstash-data
+        - name: logstash-elasticsearch-ca
+          secret:
+            secretName: logstash-elasticsearch-ca
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash
+spec:
+  ports:
+    - name: legacy-http
+      port: 8080
+      targetPort: legacy-http
+      protocol: TCP
+    - name: findair-logs
+      port: 8081
+      targetPort: findair-logs
+      protocol: TCP

@@ -38,6 +38,14 @@ internal static partial class GatewayLog
         Exception exception,
         string errorCategory);
 
+    [LoggerMessage(2013, LogLevel.Information, "Gateway excluded {FilteredRuleCount} rules from matching because image photo age {ImageAgeDays} days exceeded the configured maximum of {MaxPhotoAgeDays} days. PhotoTime: {PhotoTime}")]
+    public static partial void OldPhotoRulesFiltered(
+        this ILogger logger,
+        int filteredRuleCount,
+        double imageAgeDays,
+        int maxPhotoAgeDays,
+        DateTimeOffset photoTime);
+
     [LoggerMessage(2020, LogLevel.Information, "Gateway initialized its active-rule cache with {EntryCount} rules; {SkippedCount} invalid rules were skipped.")]
     public static partial void RuleCacheInitialized(
         this ILogger logger,

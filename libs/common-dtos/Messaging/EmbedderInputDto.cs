@@ -29,6 +29,9 @@ public class EmbedderInputDto
     [JsonPropertyName("url")]
     public string ImageUrl { get; set; } = string.Empty;
 
+    [JsonPropertyName("s3Uri")]
+    public string S3Uri { get; set; } = string.Empty;
+
     [JsonPropertyName("embedder_input")]
     public EmbedderInputPayload EmbedderInput { get; set; } = new();
 }

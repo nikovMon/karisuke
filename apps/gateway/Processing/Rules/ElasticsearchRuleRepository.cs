@@ -166,8 +166,7 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
                 {
                     _logger.LogWarning(
                         ex,
-                        "Failed to close Elasticsearch point in time {PointInTimeId}; it will expire after {PointInTimeKeepAlive}.",
-                        pointInTimeId,
+                        "Failed to close Elasticsearch point in time; it will expire after {PointInTimeKeepAlive}.",
                         PointInTimeKeepAlive);
                 }
             }

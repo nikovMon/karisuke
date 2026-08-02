@@ -7,6 +7,7 @@ using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbPublisher.Errors;
 using ImagingPipeline.TbPublisher.Processing;
 using Microsoft.Extensions.Logging;
+using OpenTelemetry;
 
 namespace ImagingPipeline.TbPublisher.MessageHandling;
 
@@ -104,8 +105,18 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                 }
             }
 
+            var requestId = Baggage.Current.GetBaggage(TelemetryAttributeNames.PipelineRequestId);
+            Activity.Current.AddPipelineContext(
+                taskId: inputMessage.TaskId,
+                requestId: requestId,
+                imageId: inputMessage.ImageId,
+                ruleId: inputMessage.RuleId,
+                tenantId: inputMessage.TenantId,
+                algorithmName: algorithmNameText);
+
             using var pipelineScope = _logger.BeginTelemetryScope(new TelemetryLogContext(
                 TaskId: inputMessage.TaskId,
+                RequestId: requestId,
                 ImageId: inputMessage.ImageId,
                 RuleId: inputMessage.RuleId,
                 TenantId: inputMessage.TenantId,
@@ -139,7 +150,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                     if (geometryActivity?.IsAllDataRequested == true)
                     {
                         geometryActivity.SetTag(
-                            "imaging_pipeline.pipeline.coordinate.count",
+                            "imaging_pipeline.pipeline.ground_point.count",
                             roiCoordinates.Count);
                     }
                     geometryActivity.SetTelemetrySuccess();
@@ -167,7 +178,7 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                 }
             }
 
-            PipelineTelemetry.RecordBatchSize(PipelineStage.TbPublisher, PipelineItem.Coordinate, roiCoordinates.Count);
+            PipelineTelemetry.RecordBatchSize(PipelineStage.TbPublisher, PipelineItem.GroundPoint, roiCoordinates.Count);
 
             string focusedPxWkt;
             IReadOnlyList<IReadOnlyList<double>> coordinates;
@@ -259,6 +270,16 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                             ? null
                             : new Dictionary<string, object?>(message.Headers, StringComparer.Ordinal),
                         CorrelationId: message.CorrelationId ?? message.MessageId);
+                    using var outputLogScope = _logger.BeginTelemetryScope(
+                        new TelemetryLogContext(RequestId: ingestMessage.RequestId));
+                    using var outputCorrelationBaggage = PipelineCorrelationBaggage.Push(
+                        new PipelineCorrelationContext(
+                            TaskId: inputMessage.TaskId,
+                            RequestId: ingestMessage.RequestId,
+                            ImageId: inputMessage.ImageId,
+                            RuleId: inputMessage.RuleId,
+                            TenantId: inputMessage.TenantId,
+                            AlgorithmName: algorithmNameText));
                     try
                     {
                         await _publisher.PublishToOutputAsync(outputEnvelope, cancellationToken);

@@ -36,6 +36,11 @@ public static class TelemetrySourceNames
 
 public static class TelemetryMetricNames
 {
+    public const string LogsDropped = "imaging_pipeline.logs.dropped";
+    public const string LogExportRequests = "imaging_pipeline.logs.export.requests";
+    public const string LogExportDuration = "imaging_pipeline.logs.export.duration";
+    public const string LogQueueSize = "imaging_pipeline.logs.queue.size";
+
     public const string MessagingSent = "messaging.client.sent.messages";
     public const string MessagingConsumed = "messaging.client.consumed.messages";
     public const string MessagingClientDuration = "messaging.client.operation.duration";
@@ -66,11 +71,13 @@ public static class TelemetryMetricNames
     public const string InvalidTimingHeaders = "imaging_pipeline.telemetry.invalid_timing_headers";
 
     public const string GatewayRuleCacheEntries = "imaging_pipeline.gateway.rule_cache.entries";
+    public const string GatewayRuleCacheSkippedRules = "imaging_pipeline.gateway.rule_cache.skipped_rules";
     public const string GatewayRuleCacheAge = "imaging_pipeline.gateway.rule_cache.age";
     public const string GatewayRuleCacheRefreshes = "imaging_pipeline.gateway.rule_cache.refreshes";
     public const string GatewayRuleCacheRefreshDuration = "imaging_pipeline.gateway.rule_cache.refresh.duration";
     public const string GatewayRulesEvaluated = "imaging_pipeline.gateway.rules.evaluated";
     public const string GatewayRulesMatched = "imaging_pipeline.gateway.rules.matched";
+    public const string GatewayRulesFilteredPhotoAge = "imaging_pipeline.gateway.rules.filtered_photo_age";
 
     public const string RulesOperations = "imaging_pipeline.rules.operations";
     public const string RulesOperationDuration = "imaging_pipeline.rules.operation.duration";

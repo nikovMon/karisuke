@@ -44,7 +44,7 @@ public sealed class TelemetryContractTests
             ["Observability:Traces:DefaultSamplingRatio"] = "0",
             ["Observability:Metrics:Enabled"] = "false",
             ["Observability:Logs:Enabled"] = "false",
-            ["Observability:Otlp:Enabled"] = "false"
+            ["Observability:Traces:OtlpEnabled"] = "false"
         });
         builder.AddImagingPipelineObservability(ObservabilityServiceNames.Gateway);
 
@@ -53,6 +53,99 @@ public sealed class TelemetryContractTests
         using var activity = TelemetrySources.Gateway.StartActivity("sampling-test");
 
         Assert.True(activity is null || !activity.IsAllDataRequested);
+    }
+
+    [Fact]
+    public void MissingSamplerEnvironment_DefaultsToParentBasedAlwaysOn()
+    {
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+        {
+            DisableDefaults = true
+        });
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["OTEL_TRACES_SAMPLER"] = string.Empty,
+            ["Observability:Traces:OtlpEnabled"] = "false",
+            ["Observability:Metrics:Enabled"] = "false",
+            ["Observability:Logs:Enabled"] = "false"
+        });
+        builder.AddImagingPipelineObservability(ObservabilityServiceNames.Gateway);
+
+        using var host = builder.Build();
+        host.Start();
+        using var activity = TelemetrySources.Gateway.StartActivity("default-sampling-test");
+
+        Assert.NotNull(activity);
+        Assert.True(activity.Recorded);
+    }
+
+    [Fact]
+    public void EnabledTraceExporterWithoutEndpoint_FailsWithConfigurationKeys()
+    {
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+        {
+            DisableDefaults = true
+        });
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["OTEL_EXPORTER_OTLP_ENDPOINT"] = string.Empty,
+            ["OTEL_EXPORTER_OTLP_PROTOCOL"] = "grpc",
+            ["Observability:Metrics:Enabled"] = "false",
+            ["Observability:Logs:Enabled"] = "false"
+        });
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => builder.AddImagingPipelineObservability(ObservabilityServiceNames.Gateway));
+
+        Assert.Contains(
+            "OTEL_EXPORTER_OTLP_ENDPOINT",
+            exception.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EnabledTraceExporterWithoutProtocol_FailsWithConfigurationKeys()
+    {
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+        {
+            DisableDefaults = true
+        });
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://collector:4317",
+            ["OTEL_EXPORTER_OTLP_PROTOCOL"] = string.Empty,
+            ["Observability:Metrics:Enabled"] = "false",
+            ["Observability:Logs:Enabled"] = "false"
+        });
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => builder.AddImagingPipelineObservability(ObservabilityServiceNames.Gateway));
+
+        Assert.Contains(
+            "OTEL_EXPORTER_OTLP_PROTOCOL",
+            exception.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("grpc")]
+    [InlineData("http/protobuf")]
+    public void EnabledTraceExporter_AcceptsSupportedProtocols(string protocol)
+    {
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+        {
+            DisableDefaults = true
+        });
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://collector:4317",
+            ["OTEL_EXPORTER_OTLP_PROTOCOL"] = protocol,
+            ["Observability:Metrics:Enabled"] = "false",
+            ["Observability:Logs:Enabled"] = "false"
+        });
+
+        builder.AddImagingPipelineObservability(ObservabilityServiceNames.Gateway);
+        using var host = builder.Build();
     }
 
     [Fact]
@@ -233,8 +326,7 @@ public sealed class TelemetryContractTests
         {
             ["Observability:Traces:Enabled"] = "false",
             ["Observability:Metrics:Enabled"] = "false",
-            ["Observability:Logs:ConsoleEnabled"] = "false",
-            ["Observability:Otlp:Enabled"] = "false"
+            ["Observability:Logs:Enabled"] = "false"
         });
         builder.AddImagingPipelineObservability(ObservabilityServiceNames.Gateway);
         builder.Logging.AddOpenTelemetry(options =>

@@ -1,0 +1,32 @@
+# Install as /usr/share/logstash/config/pipelines.yml in integration. Keep the
+# normal entrypoint: -e and -f make Logstash ignore pipelines.yml.
+
+# Existing pipeline: retain its current file and settings unchanged.
+- pipeline.id: existing-system
+  path.config: /usr/share/logstash/pipeline/pipeline.conf
+  pipeline.ecs_compatibility: disabled
+  pipeline.workers: 1
+  pipeline.batch.size: 50
+  pipeline.batch.delay: 10000
+
+- pipeline.id: findair-integration
+  path.config: /usr/share/logstash/pipeline/findair-integration.conf
+  pipeline.ecs_compatibility: v8
+  pipeline.workers: 2
+  pipeline.batch.size: 125
+  pipeline.batch.delay: 50
+  queue.type: persisted
+  queue.max_bytes: 1gb
+  queue.checkpoint.writes: 1024
+  dead_letter_queue.enable: true
+
+- pipeline.id: findair-development
+  path.config: /usr/share/logstash/pipeline/findair-development.conf
+  pipeline.ecs_compatibility: v8
+  pipeline.workers: 2
+  pipeline.batch.size: 125
+  pipeline.batch.delay: 50
+  queue.type: persisted
+  queue.max_bytes: 1gb
+  queue.checkpoint.writes: 1024
+  dead_letter_queue.enable: true
