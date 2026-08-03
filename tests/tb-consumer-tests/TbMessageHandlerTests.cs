@@ -254,10 +254,10 @@ public class TbMessageHandlerTests
         Assert.Equal([10.0, 60.0], capturedCoordinates[7]);
 
         Assert.Equal(2, published.Count);
-        Assert.Equal("0", published[0].EmbedderInput.TileId);
+        Assert.Equal("task-001_100_200_201", published[0].EmbedderInput.TileId);
         Assert.Equal(34.75, published[0].EmbedderInput.Lon);
         Assert.Equal(32.125, published[0].EmbedderInput.Lat);
-        Assert.Equal("1", published[1].EmbedderInput.TileId);
+        Assert.Equal("task-001_10_20_20", published[1].EmbedderInput.TileId);
         Assert.Equal(35.5, published[1].EmbedderInput.Lon);
         Assert.Equal(33.25, published[1].EmbedderInput.Lat);
     }
@@ -359,7 +359,7 @@ public class TbMessageHandlerTests
 
         // Verify EmbedderInput sub-object
         var embedder = dto!.EmbedderInput;
-        Assert.Equal("0", embedder.TileId);
+        Assert.Equal("task-001_0_0_1", embedder.TileId);
         Assert.Equal("img-001", embedder.Gid);
         Assert.Equal("http://s3-prod/int.tiles/tile_0.tiff", embedder.ImagePath);
         Assert.Equal("http://s3-prod/int.tiles/tile_0.tiff", dto.ImageUrl);

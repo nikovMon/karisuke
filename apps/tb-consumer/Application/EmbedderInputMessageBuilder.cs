@@ -50,7 +50,7 @@ public sealed class EmbedderInputMessageBuilder
 
             var embedderInput = new EmbedderInputPayload
             {
-                TileId = tile.TileIndex.ToString(),
+                TileId = $"{metadata.TaskId}_{tile.Roi[0]}_{tile.Roi[1]}_{pixelSize}",
                 Gid = overlay.ImageId,
                 ImagePath = tile.Uri,
                 Sensor = overlay.SensorName,
