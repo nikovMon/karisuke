@@ -6,7 +6,7 @@ Nx is the monorepo task orchestrator. `dotnet` and MSBuild perform the actual re
 
 ## Prerequisites
 
-- .NET SDK 10.0.301.
+- .NET SDK 10.0.300.
 - Node.js 24.18.0 or newer 24.x LTS.
 - npm 11 or newer.
 - Docker, when container builds or Compose are needed.
