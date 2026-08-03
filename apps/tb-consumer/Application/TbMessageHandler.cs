@@ -243,13 +243,13 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
         var headers = new ReadOnlyDictionary<string, object?>(outgoingHeaders);
 
         var tileCorners = input.Tiles
-            .Select(tile => (IReadOnlyList<double>)
-            [
-                tile.Roi[0], tile.Roi[1], // top-left
-                tile.Roi[2], tile.Roi[1], // top-right
-                tile.Roi[2], tile.Roi[3], // bottom-right
-                tile.Roi[0], tile.Roi[3], // bottom-left
-            ])
+            .SelectMany(tile => new IReadOnlyList<double>[]
+            {
+                [tile.Roi[0], tile.Roi[1]], // top-left
+                [tile.Roi[2], tile.Roi[1]], // top-right
+                [tile.Roi[2], tile.Roi[3]], // bottom-right
+                [tile.Roi[0], tile.Roi[3]], // bottom-left
+            })
             .ToList();
 
         IReadOnlyList<IReadOnlyList<double>> batchMapped;
@@ -275,7 +275,7 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                     tileCorners,
                     cancellationToken);
 
-                if (batchMapped.Count != input.Tiles.Count)
+                if (batchMapped.Count != input.Tiles.Count * 4)
                 {
                     var failureReason =
                         $"Projection mapper returned {batchMapped.Count} results for {input.Tiles.Count} requested tiles.";
