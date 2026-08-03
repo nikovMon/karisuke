@@ -42,4 +42,7 @@ public class EmbedderInputPayload
 
     [JsonPropertyName("algorithms")]
     public List<string> Algorithms { get; set; } = new();
+
+    [JsonPropertyName("pixel_roi")]
+    public double[] PixelRoi { get; set; } = [];
 }

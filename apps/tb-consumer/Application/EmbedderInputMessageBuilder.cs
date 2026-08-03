@@ -63,6 +63,7 @@ public sealed class EmbedderInputMessageBuilder
                 Lat = lat,
                 TilesSizeMeters = tileSizeMeters,
                 RequestTime = requestTime.UtcDateTime,
+                PixelRoi = tile.Roi,
             };
 
             outputs.Add(new EmbedderInputDto
