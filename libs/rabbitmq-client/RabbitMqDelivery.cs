@@ -43,6 +43,6 @@ internal static class RabbitMqDeliveryFactory
             return messageId;
         }
 
-        return $"body-sha256:{Convert.ToHexString(SHA256.HashData(body.Span))}";
+        return Convert.ToHexString(SHA256.HashData(body.Span));
     }
 }

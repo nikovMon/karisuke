@@ -42,7 +42,7 @@ public sealed class RabbitMqMessageEnvelopeTests
 
         var delivery = RabbitMqDeliveryFactory.Create(args);
 
-        Assert.Equal($"body-sha256:{Convert.ToHexString(SHA256.HashData(body))}", delivery.Message.MessageId);
+        Assert.Equal(Convert.ToHexString(SHA256.HashData(body)), delivery.Message.MessageId);
     }
 
     [Fact]
