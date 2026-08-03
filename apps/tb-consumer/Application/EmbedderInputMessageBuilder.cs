@@ -24,11 +24,14 @@ public sealed class EmbedderInputMessageBuilder
             double? lat = null;
             var corners = new List<double[]>();
 
-            if (mappedCoordinates[i] is { Count: >= 8 } mapped)
+            var baseIndex = i * 4;
+            if (baseIndex + 3 < mappedCoordinates.Count
+                && mappedCoordinates[baseIndex] is { Count: >= 2 })
             {
-                for (var j = 0; corners.Count < 4; j += 2)
+                for (var j = 0; j < 4; j++)
                 {
-                    corners.Add([mapped[j], mapped[j + 1]]);
+                    var point = mappedCoordinates[baseIndex + j];
+                    corners.Add([point[0], point[1]]);
                 }
 
                 lon = (corners[0][0] + corners[2][0]) / 2.0;

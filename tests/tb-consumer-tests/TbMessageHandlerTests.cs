@@ -157,19 +157,22 @@ public class TbMessageHandlerTests
                 It.IsAny<CancellationToken>()))
             .Callback<string, IReadOnlyList<IReadOnlyList<double>>, CancellationToken>(
                 (_, coordinates, _) => capturedCoordinates = coordinates)
-            .ReturnsAsync([[34.8, 32.1, 34.81, 32.1, 34.81, 32.11, 34.8, 32.11]]);
+            .ReturnsAsync([[34.8, 32.1], [34.81, 32.1], [34.81, 32.11], [34.8, 32.11]]);
 
         var result = await _handler.HandleAsync(ToEnvelope(input));
 
         Assert.True(result.IsSuccess);
         Assert.NotNull(capturedCoordinates);
-        var corners = Assert.Single(capturedCoordinates);
-        // top-left, top-right, bottom-right, bottom-left, flattened as [x, y] pairs.
-        Assert.Equal([100.0, 200.0, 300.0, 200.0, 300.0, 400.0, 100.0, 400.0], corners);
+        Assert.Equal(4, capturedCoordinates.Count);
+        // top-left, top-right, bottom-right, bottom-left as individual [x, y] points.
+        Assert.Equal([100.0, 200.0], capturedCoordinates[0]);
+        Assert.Equal([300.0, 200.0], capturedCoordinates[1]);
+        Assert.Equal([300.0, 400.0], capturedCoordinates[2]);
+        Assert.Equal([100.0, 400.0], capturedCoordinates[3]);
     }
 
     [Fact]
-    public async Task HandleAsync_ProjectionMapperReturnsExtraValues_TileCoordinatesStillHasFourCorners()
+    public async Task HandleAsync_ProjectionMapperReturnsFourCorners_TileCoordinatesHasFourCorners()
     {
         var input = CreateValidInput();
         _projectionMapperMock
@@ -177,8 +180,7 @@ public class TbMessageHandlerTests
                 "img-001",
                 It.IsAny<IReadOnlyList<IReadOnlyList<double>>>(),
                 It.IsAny<CancellationToken>()))
-            // 10 values (5 pairs) instead of the expected 8 (4 corners).
-            .ReturnsAsync([[34.5, 32.0, 34.9, 32.05, 35.0, 32.25, 34.55, 32.2, 34.6, 32.3]]);
+            .ReturnsAsync([[34.5, 32.0], [34.9, 32.05], [35.0, 32.25], [34.55, 32.2]]);
 
         RabbitMqMessageEnvelope? captured = null;
         _publisherMock
@@ -215,9 +217,10 @@ public class TbMessageHandlerTests
                 (_, coordinates, _) => capturedCoordinates = coordinates)
             .ReturnsAsync(
             [
-                // top-left, top-right, bottom-right, bottom-left ground coordinates.
-                [34.5, 32.0, 34.9, 32.05, 35.0, 32.25, 34.55, 32.2],
-                [35.0, 33.0, 35.6, 33.05, 36.0, 33.5, 35.4, 33.45]
+                // Tile 0: top-left, top-right, bottom-right, bottom-left ground coordinates.
+                [34.5, 32.0], [34.9, 32.05], [35.0, 32.25], [34.55, 32.2],
+                // Tile 1: top-left, top-right, bottom-right, bottom-left ground coordinates.
+                [35.0, 33.0], [35.6, 33.05], [36.0, 33.5], [35.4, 33.45]
             ]);
 
         var published = new List<EmbedderInputDto>();
@@ -237,10 +240,18 @@ public class TbMessageHandlerTests
 
         Assert.True(result.IsSuccess);
         Assert.NotNull(capturedCoordinates);
-        Assert.Equal(2, capturedCoordinates.Count);
-        Assert.All(capturedCoordinates, corners => Assert.Equal(8, corners.Count));
-        Assert.Equal([100.0, 200.0, 301.0, 200.0, 301.0, 401.0, 100.0, 401.0], capturedCoordinates[0]);
-        Assert.Equal([10.0, 20.0, 30.0, 20.0, 30.0, 60.0, 10.0, 60.0], capturedCoordinates[1]);
+        Assert.Equal(8, capturedCoordinates.Count); // 2 tiles * 4 corners
+        Assert.All(capturedCoordinates, point => Assert.Equal(2, point.Count));
+        // Tile 0 corners
+        Assert.Equal([100.0, 200.0], capturedCoordinates[0]);
+        Assert.Equal([301.0, 200.0], capturedCoordinates[1]);
+        Assert.Equal([301.0, 401.0], capturedCoordinates[2]);
+        Assert.Equal([100.0, 401.0], capturedCoordinates[3]);
+        // Tile 1 corners
+        Assert.Equal([10.0, 20.0], capturedCoordinates[4]);
+        Assert.Equal([30.0, 20.0], capturedCoordinates[5]);
+        Assert.Equal([30.0, 60.0], capturedCoordinates[6]);
+        Assert.Equal([10.0, 60.0], capturedCoordinates[7]);
 
         Assert.Equal(2, published.Count);
         Assert.Equal("0", published[0].EmbedderInput.TileId);
