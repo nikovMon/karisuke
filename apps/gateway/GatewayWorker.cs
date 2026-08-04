@@ -222,7 +222,7 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
             {
                 try
                 {
-                    outputs = _outputBuilder.BuildOutputs(message.MessageId, input, matches);
+                    outputs = _outputBuilder.BuildOutputs(input, matches);
                     outputCount = outputs.Count;
                     buildActivity.AddPipelineContext(imageId: input.ImageId);
                     if (buildActivity?.IsAllDataRequested == true)
@@ -261,7 +261,7 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
                 outputMessages[outputIndex] =
                     message with
                     {
-                        MessageId = CreateOutputMessageId(message.MessageId, outputs[outputIndex], outputIndex),
+                        MessageId = CreateOutputMessageId(input.ImageId, outputs[outputIndex]),
                         Body = outputs[outputIndex].Body,
                         ContentType = "application/json",
                         CorrelationId = correlationId
@@ -340,8 +340,7 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
     }
 
     private static string CreateOutputMessageId(
-        string inputMessageId,
-        GatewayOutputMessage output,
-        int outputIndex) =>
-        $"{inputMessageId}:gateway-output:{output.RuleId}:{output.TenantId}:{outputIndex}";
+        string imageId,
+        GatewayOutputMessage output) =>
+        $"{imageId}:gateway-output:{output.RuleId}:{output.TenantId}";
 }

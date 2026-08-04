@@ -18,13 +18,11 @@ public sealed class GatewayOutputMessageBuilder
     }
 
     public IReadOnlyList<GatewayOutputMessage> BuildOutputs(
-        string inputMessageId,
         GatewayInputMessage input,
         IReadOnlyList<RuleMatchResult> matches)
     {
         var outputCount = matches.Sum(match => match.Rule.TenantsInfo.Count);
         var outputs = new List<GatewayOutputMessage>(outputCount);
-        var outputIndex = 0;
 
         foreach (var match in matches)
         {
@@ -33,10 +31,9 @@ public sealed class GatewayOutputMessageBuilder
             foreach (var tenant in match.Rule.TenantsInfo)
             {
                 outputs.Add(new GatewayOutputMessage(
-                    BuildOutput(inputMessageId, input, match, tenant, roiFootprint, outputIndex),
+                    BuildOutput(input, match, tenant, roiFootprint),
                     match.Rule.Id,
                     tenant.TenantId));
-                outputIndex++;
             }
         }
 
@@ -44,19 +41,17 @@ public sealed class GatewayOutputMessageBuilder
     }
 
     private byte[] BuildOutput(
-        string inputMessageId,
         GatewayInputMessage input,
         RuleMatchResult match,
         TenantInfo tenant,
-        ReadOnlySpan<byte> roiFootprint,
-        int outputIndex)
+        ReadOnlySpan<byte> roiFootprint)
     {
         var buffer = new ArrayBufferWriter<byte>();
         using var writer = new Utf8JsonWriter(buffer);
         writer.WriteStartObject();
         writer.WriteString(
             "taskId",
-            CreateTaskId(inputMessageId, match.Rule.Id, tenant.TenantId, outputIndex));
+            CreateTaskId(input.ImageId, match.Rule.Id, tenant.TenantId));
         writer.WriteString("ruleId", match.Rule.Id);
         writer.WriteStartArray("algorithmName");
         foreach (var algorithmName in match.Rule.AlgorithmNames)
@@ -84,9 +79,8 @@ public sealed class GatewayOutputMessageBuilder
     }
 
     private static string CreateTaskId(
-        string inputMessageId,
+        string imageId,
         string ruleId,
-        string tenantId,
-        int outputIndex) =>
-        $"{inputMessageId}:gateway-task:{ruleId}:{tenantId}:{outputIndex}";
+        string tenantId) =>
+        $"{imageId}:gateway-task:{ruleId}:{tenantId}";
 }
