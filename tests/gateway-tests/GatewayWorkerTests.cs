@@ -51,7 +51,7 @@ public sealed class GatewayWorkerTests
 
         using var first = JsonDocument.Parse(outputs[0].Body);
         using var second = JsonDocument.Parse(outputs[1].Body);
-        Assert.Equal("message-1:gateway-task:rule-1:der:0", first.RootElement.GetProperty("taskId").GetString());
+        Assert.Equal("image-1:gateway-task:rule-1:der", first.RootElement.GetProperty("taskId").GetString());
         Assert.Equal("rule-1", first.RootElement.GetProperty("ruleId").GetString());
         Assert.Equal(
             ["FindAir", "Rpn"],
@@ -71,7 +71,7 @@ public sealed class GatewayWorkerTests
         Assert.Equal("cam-001", first.RootElement.GetProperty("sensorName").GetString());
         Assert.Equal("region-alpha", first.RootElement.GetProperty("areaOfInterest").GetString());
         Assert.Equal("Polygon", first.RootElement.GetProperty("roiFootprint").GetProperty("type").GetString());
-        Assert.Equal("message-1:gateway-task:rule-1:findair:1", second.RootElement.GetProperty("taskId").GetString());
+        Assert.Equal("image-1:gateway-task:rule-1:findair", second.RootElement.GetProperty("taskId").GetString());
         Assert.Equal("findair", second.RootElement.GetProperty("tenantId").GetString());
         Assert.Equal(2, second.RootElement.GetProperty("tilingConfigs").GetArrayLength());
         Assert.Equal(
@@ -100,8 +100,8 @@ public sealed class GatewayWorkerTests
             Assert.Equal("preserved", output.Headers["business-header"]);
             Assert.True(output.Headers.ContainsKey("x-pipeline-start-unix-ms"));
         });
-        Assert.Equal("message-1:gateway-output:rule-1:der:0", outputs[0].MessageId);
-        Assert.Equal("message-1:gateway-output:rule-1:findair:1", outputs[1].MessageId);
+        Assert.Equal("image-1:gateway-output:rule-1:der", outputs[0].MessageId);
+        Assert.Equal("image-1:gateway-output:rule-1:findair", outputs[1].MessageId);
 
         var sharedContract = JsonSerializer.Deserialize<GatewayOutputMessageDto>(
             outputs[0].Body,
@@ -118,7 +118,7 @@ public sealed class GatewayWorkerTests
     }
 
     [Fact]
-    public async Task HandleAsyncCreatesDifferentTaskIdsForDifferentInputMessages()
+    public async Task HandleAsyncCreatesSameTaskIdForSameImageRegardlessOfMessageId()
     {
         await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
 
@@ -127,8 +127,22 @@ public sealed class GatewayWorkerTests
 
         var firstTaskId = OutputTaskId(firstResult);
         var secondTaskId = OutputTaskId(secondResult);
-        Assert.Equal("message-1:gateway-task:rule-1:der:0", firstTaskId);
-        Assert.Equal("message-2:gateway-task:rule-1:der:0", secondTaskId);
+        Assert.Equal("image-1:gateway-task:rule-1:der", firstTaskId);
+        Assert.Equal(firstTaskId, secondTaskId);
+    }
+
+    [Fact]
+    public async Task HandleAsyncCreatesDifferentTaskIdsForDifferentImages()
+    {
+        await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
+
+        var firstResult = await harness.GatewayWorker.HandleAsync(InputMessage(imageId: "image-1"));
+        var secondResult = await harness.GatewayWorker.HandleAsync(InputMessage(imageId: "image-2"));
+
+        var firstTaskId = OutputTaskId(firstResult);
+        var secondTaskId = OutputTaskId(secondResult);
+        Assert.Equal("image-1:gateway-task:rule-1:der", firstTaskId);
+        Assert.Equal("image-2:gateway-task:rule-1:der", secondTaskId);
         Assert.NotEqual(firstTaskId, secondTaskId);
     }
 
@@ -794,12 +808,13 @@ public sealed class GatewayWorkerTests
     private static RabbitMqMessageEnvelope InputMessage(
         string sensorName = "cam-001",
         string registrationQuality = "Accurate",
-        string messageId = "message-1") =>
+        string messageId = "message-1",
+        string imageId = "image-1") =>
         RabbitMqMessageEnvelope.FromUtf8(
             $$"""
             {
               "overlay": {
-                "id": "image-1",
+                "id": "{{imageId}}",
                 "sensorName": "{{sensorName}}",
                 "sensorType": "EO",
                 "registrationQuality": "{{registrationQuality}}",
