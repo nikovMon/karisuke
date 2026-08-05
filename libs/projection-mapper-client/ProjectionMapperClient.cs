@@ -56,6 +56,25 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
             cancellationToken);
     }
 
+    public Task<IReadOnlyList<IReadOnlyList<double>>> ProcessBatchByRegistrationAsync(
+        string overlayId,
+        IReadOnlyList<IReadOnlyList<double>> coordinates,
+        string gridType,
+        string? gridUri,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(overlayId);
+        ArgumentNullException.ThrowIfNull(coordinates);
+        ArgumentException.ThrowIfNullOrWhiteSpace(gridType);
+
+        return ExecuteByRegistrationAsync(
+            overlayId,
+            coordinates,
+            gridType,
+            gridUri,
+            cancellationToken);
+    }
+
     private async Task<IReadOnlyList<IReadOnlyList<double>>> ExecuteAsync<TRequest>(
         string overlayId,
         string endpointKey,
@@ -63,7 +82,8 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
         PipelineItem batchItem,
         int batchSize,
         TRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool includeQueryParams = true)
     {
         var spanName = operation == DependencyOperation.GroundToImage
             ? "projection_mapper ground_to_image"
@@ -100,8 +120,9 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
                     $"ProjectionMapper endpoint '{endpointKey}' is not configured.");
             }
 
-            var requestUri =
-                $"{endpoint}?overlayId={Uri.EscapeDataString(overlayId)}&useCache={(_options.UseCache ? "true" : "false")}";
+            var requestUri = includeQueryParams
+                ? $"{endpoint}?overlayId={Uri.EscapeDataString(overlayId)}&useCache={(_options.UseCache ? "true" : "false")}"
+                : endpoint;
             using var requestMessage = new HttpRequestMessage(HttpMethod.Post, requestUri)
             {
                 Content = JsonContent.Create(request),
@@ -201,6 +222,34 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
                 outcome,
                 error);
         }
+    }
+
+    private async Task<IReadOnlyList<IReadOnlyList<double>>> ExecuteByRegistrationAsync(
+        string overlayId,
+        IReadOnlyList<IReadOnlyList<double>> coordinates,
+        string gridType,
+        string? gridUri,
+        CancellationToken cancellationToken)
+    {
+        var request = new I2GByRegistrationRequestDto
+        {
+            OverlayId = overlayId,
+            ReturnAltitude = false,
+            PixelPoints = coordinates,
+            GridType = gridType,
+            GridUri = gridUri,
+            UseCache = _options.UseCache
+        };
+
+        return await ExecuteAsync(
+            overlayId,
+            ProjectionMapperEndpointKeys.I2GByRegistration,
+            DependencyOperation.ImageToGround,
+            PipelineItem.Coordinate,
+            coordinates.Count,
+            request,
+            cancellationToken,
+            includeQueryParams: false);
     }
 
     private static TelemetryErrorCategory ClassifyStatusCode(HttpStatusCode statusCode)

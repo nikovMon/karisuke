@@ -39,6 +39,12 @@ public class OverlayDto
     [JsonPropertyName("sensor_name")] 
     public string SensorName { get; set; } = string.Empty;
     
-    [JsonPropertyName("sensor_type")] 
+    [JsonPropertyName("sensor_type")]
     public string SensorType { get; set; } = string.Empty;
+
+    [JsonPropertyName("grid_type")]
+    public string GridType { get; set; } = string.Empty;
+
+    [JsonPropertyName("grid_uri")]
+    public string? GridUri { get; set; }
 }

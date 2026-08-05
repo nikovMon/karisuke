@@ -23,6 +23,7 @@ public sealed class InputMessageValidatorTests
       "bestResolution": 100,
       "sensorName": "sensor-1",
       "areaOfInterest": "region-alpha",
+      "gridType": "EO",
       "tilingConfigs": [
         { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 32, "tileOverlapHeight": 32 }
       ]
@@ -97,6 +98,7 @@ public sealed class InputMessageValidatorTests
           "bestResolution": 100,
           "sensorName": "sensor-1",
           "areaOfInterest": "region-alpha",
+          "gridType": "EO",
           "tilingConfigs": [
             { "tileSizeWidth": 0, "tileSizeHeight": 512, "tileOverlapWidth": 0, "tileOverlapHeight": 0 }
           ]

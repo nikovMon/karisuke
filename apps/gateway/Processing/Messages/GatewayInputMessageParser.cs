@@ -111,6 +111,13 @@ public sealed class GatewayInputMessageParser
 
         var geometry = _geometry.ReadGeoJson(overlay.RoiFootprint, "input roiFootprint");
 
+        if (string.IsNullOrWhiteSpace(overlay.GridType))
+        {
+            throw new GatewayValidationException(
+                "Input grid type is required and must be a non-empty string.",
+                "gateway.missing_grid_type");
+        }
+
         return new GatewayInputMessage(
             overlay.Id,
             overlay.SensorName,
@@ -122,7 +129,9 @@ public sealed class GatewayInputMessageParser
             overlay.ImageWidth,
             overlay.ImageHeight,
             overlay.PhotoTime.ToUniversalTime(),
-            geometry);
+            geometry,
+            overlay.GridType,
+            overlay.GridUri);
     }
 
     private static void ValidatePositiveFinite(

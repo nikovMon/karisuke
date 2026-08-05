@@ -84,7 +84,8 @@ public sealed class RegistrationQualityContractTests
                 "roiFootprint": {
                   "type": "Polygon",
                   "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
-                }
+                },
+                "gridType": "EO"
               }
             }
             """);

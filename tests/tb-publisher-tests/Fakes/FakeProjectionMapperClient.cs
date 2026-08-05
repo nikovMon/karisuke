@@ -58,4 +58,23 @@ public sealed class FakeProjectionMapperClient : IProjectionMapperClient
 
         return Task.FromResult(_result!);
     }
+
+    public Task<IReadOnlyList<IReadOnlyList<double>>> ProcessBatchByRegistrationAsync(
+        string overlayId,
+        IReadOnlyList<IReadOnlyList<double>> coordinates,
+        string gridType,
+        string? gridUri,
+        CancellationToken cancellationToken = default)
+    {
+        LastOverlayId = overlayId;
+        LastCoordinates = coordinates;
+        LastCancellationToken = cancellationToken;
+
+        if (_exception is not null)
+        {
+            throw _exception;
+        }
+
+        return Task.FromResult(_result!);
+    }
 }

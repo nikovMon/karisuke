@@ -53,6 +53,12 @@ public sealed class GatewayOutputMessageDto : IValidatableObject
     [JsonPropertyName("areaOfInterest")]
     public required string AreaOfInterest { get; init; }
 
+    [JsonPropertyName("gridType")]
+    public required string GridType { get; init; }
+
+    [JsonPropertyName("gridURI")]
+    public string? GridUri { get; init; }
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         if (string.IsNullOrWhiteSpace(TaskId))
@@ -144,6 +150,11 @@ public sealed class GatewayOutputMessageDto : IValidatableObject
         if (string.IsNullOrWhiteSpace(SensorName))
         {
             yield return new ValidationResult("sensorName cannot be empty.", [nameof(SensorName)]);
+        }
+
+        if (string.IsNullOrWhiteSpace(GridType))
+        {
+            yield return new ValidationResult("gridType cannot be empty.", [nameof(GridType)]);
         }
     }
 }

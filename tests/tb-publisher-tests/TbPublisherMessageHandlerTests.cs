@@ -33,6 +33,7 @@ public sealed class TbPublisherMessageHandlerTests
       "bestResolution": 100,
       "sensorName": "sensor-1",
       "areaOfInterest": "region-alpha",
+      "gridType": "EO",
       "tilingConfigs": [
         { "tileSizeWidth": 512, "tileSizeHeight": 384, "tileOverlapWidth": 32, "tileOverlapHeight": 24 },
         { "tileSizeWidth": 256, "tileSizeHeight": 128, "tileOverlapWidth": 16, "tileOverlapHeight": 8 }
@@ -198,6 +199,7 @@ public sealed class TbPublisherMessageHandlerTests
           "bestResolution": 100,
           "sensorName": "sensor-1",
           "areaOfInterest": "region-alpha",
+          "gridType": "EO",
           "tilingConfigs": [
             { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 512, "tileOverlapHeight": 0 }
           ]
