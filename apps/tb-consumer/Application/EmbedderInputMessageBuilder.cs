@@ -69,10 +69,6 @@ public sealed class EmbedderInputMessageBuilder
             outputs.Add(new EmbedderInputDto
             {
                 FrameMetadata = metadata.FrameMetadata,
-                ModelMetadata = metadata.ModelMetadata,
-                FocusedPxWkt = metadata.FocusedPxWkt,
-                MissionMetadata = metadata.MissionMetadata,
-                RequestId = input.RequestId,
                 TaskId = metadata.TaskId,
                 ImageUrl = tile.Uri,
                 S3Uri = ToS3Uri(tile.Uri),
