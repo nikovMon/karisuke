@@ -48,5 +48,5 @@ public sealed class GatewayInputOverlayDto
     public required string GridType { get; init; }
 
     [JsonPropertyName("gridURI")]
-    public string? GridUri { get; init; }
+    public required string GridUri { get; init; }
 }

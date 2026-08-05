@@ -118,6 +118,13 @@ public sealed class GatewayInputMessageParser
                 "gateway.missing_grid_type");
         }
 
+        if (string.IsNullOrWhiteSpace(overlay.GridUri))
+        {
+            throw new GatewayValidationException(
+                "Input grid URI is required and must be a non-empty string.",
+                "gateway.missing_grid_uri");
+        }
+
         return new GatewayInputMessage(
             overlay.Id,
             overlay.SensorName,

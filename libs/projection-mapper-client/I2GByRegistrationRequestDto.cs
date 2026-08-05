@@ -17,7 +17,7 @@ public sealed class I2GByRegistrationRequestDto
     public required string GridType { get; init; }
 
     [JsonPropertyName("gridURI")]
-    public string? GridUri { get; init; }
+    public required string GridUri { get; init; }
 
     [JsonPropertyName("useCache")]
     public bool UseCache { get; init; }

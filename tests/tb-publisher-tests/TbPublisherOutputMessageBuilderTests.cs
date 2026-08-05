@@ -91,6 +91,7 @@ public sealed class TbPublisherOutputMessageBuilderTests
         SensorName = "sensor-1",
         AreaOfInterest = "region-alpha",
         GridType = "EO",
+        GridUri = "grid://default",
         TilingConfigs =
         [
             new TilingConfig { TileSizeWidth = 110, TileSizeHeight = 110, TileOverlapWidth = 10, TileOverlapHeight = 10 },

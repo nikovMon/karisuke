@@ -16,5 +16,5 @@ public sealed record GatewayInputMessage(
     DateTimeOffset PhotoTime,
     Geometry Geometry,
     string GridType,
-    string? GridUri
+    string GridUri
 );

@@ -16,6 +16,6 @@ public interface IProjectionMapperClient
         string overlayId,
         IReadOnlyList<IReadOnlyList<double>> coordinates,
         string gridType,
-        string? gridUri,
+        string gridUri,
         CancellationToken cancellationToken = default);
 }

@@ -34,6 +34,7 @@ public sealed class TbPublisherMessageHandlerTests
       "sensorName": "sensor-1",
       "areaOfInterest": "region-alpha",
       "gridType": "EO",
+      "gridURI": "grid://default",
       "tilingConfigs": [
         { "tileSizeWidth": 512, "tileSizeHeight": 384, "tileOverlapWidth": 32, "tileOverlapHeight": 24 },
         { "tileSizeWidth": 256, "tileSizeHeight": 128, "tileOverlapWidth": 16, "tileOverlapHeight": 8 }
@@ -200,6 +201,7 @@ public sealed class TbPublisherMessageHandlerTests
           "sensorName": "sensor-1",
           "areaOfInterest": "region-alpha",
           "gridType": "EO",
+          "gridURI": "grid://default",
           "tilingConfigs": [
             { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 512, "tileOverlapHeight": 0 }
           ]

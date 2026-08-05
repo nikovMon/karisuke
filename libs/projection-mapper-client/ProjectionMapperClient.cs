@@ -60,12 +60,13 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
         string overlayId,
         IReadOnlyList<IReadOnlyList<double>> coordinates,
         string gridType,
-        string? gridUri,
+        string gridUri,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(overlayId);
         ArgumentNullException.ThrowIfNull(coordinates);
         ArgumentException.ThrowIfNullOrWhiteSpace(gridType);
+        ArgumentException.ThrowIfNullOrWhiteSpace(gridUri);
 
         return ExecuteByRegistrationAsync(
             overlayId,
@@ -228,7 +229,7 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
         string overlayId,
         IReadOnlyList<IReadOnlyList<double>> coordinates,
         string gridType,
-        string? gridUri,
+        string gridUri,
         CancellationToken cancellationToken)
     {
         var request = new I2GByRegistrationRequestDto

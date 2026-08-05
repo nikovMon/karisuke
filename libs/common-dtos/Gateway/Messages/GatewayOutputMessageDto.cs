@@ -57,7 +57,7 @@ public sealed class GatewayOutputMessageDto : IValidatableObject
     public required string GridType { get; init; }
 
     [JsonPropertyName("gridURI")]
-    public string? GridUri { get; init; }
+    public required string GridUri { get; init; }
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
@@ -155,6 +155,11 @@ public sealed class GatewayOutputMessageDto : IValidatableObject
         if (string.IsNullOrWhiteSpace(GridType))
         {
             yield return new ValidationResult("gridType cannot be empty.", [nameof(GridType)]);
+        }
+
+        if (string.IsNullOrWhiteSpace(GridUri))
+        {
+            yield return new ValidationResult("gridURI cannot be empty.", [nameof(GridUri)]);
         }
     }
 }

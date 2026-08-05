@@ -74,10 +74,7 @@ public sealed class GatewayOutputMessageBuilder
         writer.WriteString("sensorName", input.SensorName);
         writer.WriteString("areaOfInterest", input.AreaOfInterest);
         writer.WriteString("gridType", input.GridType);
-        if (input.GridUri is not null)
-        {
-            writer.WriteString("gridURI", input.GridUri);
-        }
+        writer.WriteString("gridURI", input.GridUri);
         writer.WriteEndObject();
         writer.Flush();
         return buffer.WrittenSpan.ToArray();

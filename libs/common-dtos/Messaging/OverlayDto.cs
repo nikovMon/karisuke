@@ -46,5 +46,5 @@ public class OverlayDto
     public string GridType { get; set; } = string.Empty;
 
     [JsonPropertyName("grid_uri")]
-    public string? GridUri { get; set; }
+    public string GridUri { get; set; } = string.Empty;
 }
