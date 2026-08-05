@@ -351,8 +351,15 @@ public class TbMessageHandlerTests
 
         // Assert — deserialize as EmbedderInputDto envelope
         Assert.NotNull(captured);
+        using var document = JsonDocument.Parse(captured!.Body);
+        var root = document.RootElement;
+        Assert.False(root.TryGetProperty("focusedPxWkt", out _));
+        Assert.False(root.TryGetProperty("missionMetadata", out _));
+        Assert.False(root.TryGetProperty("modelMetadata", out _));
+        Assert.False(root.TryGetProperty("requestId", out _));
+
         var dto = JsonSerializer.Deserialize<EmbedderInputDto>(
-            captured!.BodyAsUtf8(),
+            captured.BodyAsUtf8(),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
         Assert.NotNull(dto);
@@ -374,11 +381,8 @@ public class TbMessageHandlerTests
         Assert.NotNull(embedder.TileCoordinates);
         Assert.NotEmpty(embedder.TileCoordinates.Coordinates);
 
-        // Verify top-level metadata fields
-        Assert.Equal("req-001", dto!.RequestId);
+        // Verify retained top-level fields
         Assert.Equal("task-001", dto.TaskId);
-        Assert.Equal("tenant-1", dto.MissionMetadata.TenantId);
-        Assert.Equal("mission-1", dto.MissionMetadata.MissionId);
     }
 
     [Fact]
