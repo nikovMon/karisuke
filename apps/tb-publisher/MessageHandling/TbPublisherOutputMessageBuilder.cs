@@ -55,7 +55,9 @@ public sealed class TbPublisherOutputMessageBuilder : ITbPublisherOutputMessageB
                     RoiFootprint = message.RoiFootprint,
                     ImageTime = message.PhotoTime,
                     SensorName = message.SensorName,
-                    SensorType = message.SensorType
+                    SensorType = message.SensorType,
+                    GridType = message.GridType,
+                    GridUri = message.GridUri
                 }
             },
             RequestId = Guid.NewGuid().ToString("N"),

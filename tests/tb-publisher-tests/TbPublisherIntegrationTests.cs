@@ -177,6 +177,8 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
             ["RabbitMq:ReconnectDelaySeconds"] = "1",
             ["ProjectionMapper:Host"] = projectionMapperBaseUrl,
             ["ProjectionMapper:Endpoints:G2IMultiPoints"] = "/flare/g2i-by-id",
+            ["ProjectionMapper:Endpoints:I2GById"] = "/flare/i2g-by-id",
+            ["ProjectionMapper:Endpoints:I2GByRegistration"] = "/flare/i2g-by-registration",
             ["ProjectionMapper:SendingSystem"] = "flare",
             ["ProjectionMapper:TimeoutSeconds"] = "10"
         }).Build();

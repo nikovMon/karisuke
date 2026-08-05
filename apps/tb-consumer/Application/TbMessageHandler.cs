@@ -270,10 +270,21 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                         "imaging_pipeline.pipeline.tile.count",
                         input.Tiles.Count);
                 }
-                batchMapped = await _projectionMapper.ProcessBatchAsync(
-                    overlay.ImageId,
-                    tileCorners,
-                    cancellationToken);
+                var useRegistrationEndpoint =
+                    string.Equals(overlay.GridType, "MSP", StringComparison.Ordinal) &&
+                    overlay.ImageId.StartsWith("SHR", StringComparison.OrdinalIgnoreCase);
+
+                batchMapped = useRegistrationEndpoint
+                    ? await _projectionMapper.ProcessBatchByRegistrationAsync(
+                        overlay.ImageId,
+                        tileCorners,
+                        overlay.GridType,
+                        overlay.GridUri,
+                        cancellationToken)
+                    : await _projectionMapper.ProcessBatchAsync(
+                        overlay.ImageId,
+                        tileCorners,
+                        cancellationToken);
 
                 if (batchMapped.Count != input.Tiles.Count * 4)
                 {

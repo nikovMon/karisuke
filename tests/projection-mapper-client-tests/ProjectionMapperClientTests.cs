@@ -169,7 +169,8 @@ public sealed class ProjectionMapperClientTests
             Endpoints = new Dictionary<string, string>
             {
                 [ProjectionMapperEndpointKeys.G2IMultiPoints] = "/flare/g2i-by-id",
-                [ProjectionMapperEndpointKeys.I2GById] = "/flare/i2g-by-id"
+                [ProjectionMapperEndpointKeys.I2GById] = "/flare/i2g-by-id",
+                [ProjectionMapperEndpointKeys.I2GByRegistration] = "/flare/i2g-by-registration"
             },
             SendingSystem = "flare"
         };

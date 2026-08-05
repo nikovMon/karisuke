@@ -42,6 +42,12 @@ public sealed class ProjectionMapperOptions
             error = $"ProjectionMapper Endpoints must include a non-empty '{ProjectionMapperEndpointKeys.I2GById}' entry.";
             return false;
         }
+        if (!Endpoints.TryGetValue(ProjectionMapperEndpointKeys.I2GByRegistration, out var i2gRegEndpoint) ||
+            string.IsNullOrWhiteSpace(i2gRegEndpoint))
+        {
+            error = $"ProjectionMapper Endpoints must include a non-empty '{ProjectionMapperEndpointKeys.I2GByRegistration}' entry.";
+            return false;
+        }
 
         error = string.Empty;
         return true;
