@@ -209,7 +209,8 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                     error = TelemetryErrorCategory.Dependency;
                     projectionActivity.SetTelemetryError(error, ex, recordException: false);
                     _logger.ProjectionFailed(ex);
-                    return RabbitMqMessageProcessingResult.Failure($"projection mapping failed: {ex.Message}");
+                    return RabbitMqMessageProcessingResult.RetryableFailure(
+                        $"projection mapping failed: {ex.Message}");
                 }
                 catch (TbPublisherValidationException ex)
                 {

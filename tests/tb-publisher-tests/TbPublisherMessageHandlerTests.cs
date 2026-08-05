@@ -145,7 +145,7 @@ public sealed class TbPublisherMessageHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsyncReturnsFailureWhenProjectionMapperFails()
+    public async Task HandleAsyncReturnsRetryableFailureWhenProjectionMapperFails()
     {
         var handler = CreateHandler(
             FakeProjectionMapperClient.ThrowingFailure(new ProjectionMapperClientException("mapper down")),
@@ -155,6 +155,7 @@ public sealed class TbPublisherMessageHandlerTests
 
         Assert.False(result.IsSuccess);
         Assert.Contains("mapper down", result.Error);
+        Assert.Equal(RabbitMqMessageFailureAction.Retry, result.FailureAction);
     }
 
     [Fact]
