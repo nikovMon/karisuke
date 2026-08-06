@@ -122,14 +122,30 @@ public class TbMessageHandlerTests
             p => p.PublishToOutputAsync(
                 It.Is<RabbitMqMessageEnvelope>(e =>
                     e.Headers != null &&
-                    e.Headers.ContainsKey("algorithm_names") &&
-                    (string)e.Headers["algorithm_names"]! == "FindAir,Rpn" &&
+                    e.Headers.ContainsKey("algorithmName") &&
+                    (string)e.Headers["algorithmName"]! == "FindAir,Rpn" &&
                     e.Headers.ContainsKey("findair-started-at-unix-ms") &&
                     e.CorrelationId == null),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
+    [Fact]
+    public async Task HandleAsync_MissingAreaMetadata_ContinuesProcessing()
+    {
+        var input = CreateValidInput();
+        input.Metadata.MissionMetadata.Overlay.AreaOfInterest = null;
+        SetupProjectionMapperPassthrough();
+
+        var result = await _handler.HandleAsync(ToEnvelope(input));
+
+        Assert.True(result.IsSuccess);
+        _publisherMock.Verify(
+            publisher => publisher.PublishToOutputAsync(
+                It.IsAny<RabbitMqMessageEnvelope>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
     [Fact]
     public async Task HandleAsync_BatchOfThreeTiles_PublishesThreeMessages()
     {

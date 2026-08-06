@@ -128,7 +128,7 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
             if (string.Equals(header.Key, FindAirMessageHeaders.TraceParent, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(header.Key, FindAirMessageHeaders.TraceState, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(header.Key, FindAirMessageHeaders.StartedAtUnixMilliseconds, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(header.Key, FindAirMessageHeaders.AlgorithmNames, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(header.Key, FindAirMessageHeaders.AlgorithmName, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(header.Key, FindAirMessageHeaders.ContractVersion, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(header.Key, retryCountHeader, StringComparison.OrdinalIgnoreCase))
             {

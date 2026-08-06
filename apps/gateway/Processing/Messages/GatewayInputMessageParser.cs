@@ -125,13 +125,17 @@ public sealed class GatewayInputMessageParser
                 "gateway.missing_grid_uri");
         }
 
+        var areaOfInterest = string.IsNullOrWhiteSpace(overlay.AreaOfInterest)
+            ? null
+            : overlay.AreaOfInterest.Trim();
+
         return new GatewayInputMessage(
             overlay.Id,
             overlay.SensorName,
             overlay.SensorType,
             registrationQuality,
             overlay.BestResolution,
-            overlay.AreaOfInterest,
+            areaOfInterest,
             overlay.ImageUrl,
             overlay.ImageWidth,
             overlay.ImageHeight,

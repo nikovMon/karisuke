@@ -40,9 +40,35 @@ The application header allowlist is:
 | tracestate | Current W3C trace state when present |
 | findair-started-at-unix-ms | Created at first FindAir entry and preserved for end-to-end timing |
 | findair-published-at-unix-ms | Replaced immediately before each publish |
-| x-retry-count | Zero for normal output; incremented for delayed retries |
-| algorithm_names | Comma-separated validated values such as FindAir,Rpn |
+| retry-count | Zero for normal output; incremented for delayed retries |
+| algorithmName | Comma-separated validated values such as FindAir,Rpn |
 | findair-contract-version | Minimal wire-metadata contract version, currently 1 |
+
+### Embedder headers-exchange routing
+
+`algorithmName` is a routing header, not unconstrained metadata. Its value is
+canonicalized to exactly one of:
+
+- `FindAir`
+- `Rpn`
+- `FindAir,Rpn`
+
+RabbitMQ headers exchanges compare complete header values; they do not interpret
+the comma-separated value as a list. To route the combined value to both
+algorithm queues, configure these bindings on `embedder_Exchange.input`:
+
+| Queue | x-match | algorithmName |
+|---|---|---|
+| FindAir queue | all | FindAir |
+| FindAir queue | all | FindAir,Rpn |
+| Rpn queue | all | Rpn |
+| Rpn queue | all | FindAir,Rpn |
+
+If one Embedder queue handles both algorithms, bind all three values to that same
+queue instead. The routing key does not select queues for a headers exchange.
+The Consumer publishes with `mandatory: true` and publisher-confirmation
+tracking, so a message that matches no binding fails publication and the input
+is not acknowledged as successfully processed.
 
 Baggage and arbitrary incoming business headers are not forwarded. The shared
 publisher filters headers case-insensitively before every publish, so callers
@@ -50,7 +76,7 @@ cannot bypass this contract accidentally. Message bodies, URLs, credentials,
 WKT, coordinate arrays, and customer metadata are never copied into headers.
 
 Gateway attaches algorithm names for the matched rule. TB Publisher and TB
-Consumer refresh algorithm_names from their validated payloads. Tile Builder
+Consumer refresh algorithmName from their validated payloads. Tile Builder
 must preserve the received allowlisted headers unchanged. Retry routing keeps
 the start time, increments the retry count, and refreshes trace and publish
 time. RabbitMQ may add broker-owned x-death headers during dead-lettering.
@@ -88,6 +114,10 @@ error.message, and error.stack_trace.
 The serializer deliberately does not repeat host, process, thread, language,
 or runtime fields on every log document. Those values remain OpenTelemetry
 resource metadata for traces and metrics.
+
+When `areaOfInterest` is missing or blank, Gateway emits one Warning for the
+image and continues. Logs and traces omit `findair.area.name`; workload metrics
+use the bounded value `unknown`.
 
 Known structured context is flattened to:
 

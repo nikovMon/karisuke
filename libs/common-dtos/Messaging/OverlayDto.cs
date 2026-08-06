@@ -19,7 +19,7 @@ public class OverlayDto
     public double BestResolution { get; set; }
 
     [JsonPropertyName("area_of_interest")]
-    public string AreaOfInterest { get; set; } = string.Empty;
+    public string? AreaOfInterest { get; set; }
 
     [JsonPropertyName("algorithm_name")] 
     public IReadOnlyList<AlgorithmName> AlgorithmNames { get; set; } = [];
