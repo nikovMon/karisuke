@@ -99,6 +99,7 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
                 operation == DependencyOperation.GroundToImage ? "ground_to_image" : "image_to_ground");
             activity.SetTag("projection_mapper.use_cache", _options.UseCache);
             activity.SetTag("projection_mapper.batch.size", batchSize);
+            activity.SetTag(TelemetryAttributeNames.ProjectionMode, GetProjectionMode(endpointKey));
         }
 
         DependencyTelemetry.RecordBatchSize(
@@ -120,6 +121,9 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
                 throw new ProjectionMapperClientException(
                     $"ProjectionMapper endpoint '{endpointKey}' is not configured.");
             }
+
+            var safeEndpoint = ResolveEndpoint(endpoint);
+            AddHttpRequestTags(activity, safeEndpoint);
 
             var requestUri = includeQueryParams
                 ? $"{endpoint}?overlayId={Uri.EscapeDataString(overlayId)}&useCache={(_options.UseCache ? "true" : "false")}"
@@ -225,6 +229,35 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
         }
     }
 
+    private Uri? ResolveEndpoint(string endpoint)
+    {
+        if (Uri.TryCreate(endpoint, UriKind.Absolute, out var absolute))
+        {
+            return absolute;
+        }
+
+        return _httpClient.BaseAddress is not null
+            && Uri.TryCreate(_httpClient.BaseAddress, endpoint, out var resolved)
+                ? resolved
+                : null;
+    }
+
+    private static void AddHttpRequestTags(Activity? activity, Uri? endpoint)
+    {
+        if (activity?.IsAllDataRequested != true || endpoint is null)
+        {
+            return;
+        }
+
+        var safeUrl = endpoint.GetLeftPart(UriPartial.Path);
+        activity.SetTag("http.request.method", HttpMethod.Post.Method);
+        activity.SetTag("url.full", safeUrl);
+        activity.SetTag("url.path", endpoint.AbsolutePath);
+        activity.SetTag("http.route", endpoint.AbsolutePath);
+        activity.SetTag("server.address", endpoint.Host);
+        activity.SetTag("server.port", endpoint.Port);
+    }
+
     private async Task<IReadOnlyList<IReadOnlyList<double>>> ExecuteByRegistrationAsync(
         string overlayId,
         IReadOnlyList<IReadOnlyList<double>> coordinates,
@@ -252,6 +285,13 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
             cancellationToken,
             includeQueryParams: false);
     }
+
+    private static string GetProjectionMode(string endpointKey) => endpointKey switch
+    {
+        ProjectionMapperEndpointKeys.G2IMultiPoints => "ground_to_image",
+        ProjectionMapperEndpointKeys.I2GByRegistration => "image_to_ground_registration",
+        _ => "image_to_ground_by_id"
+    };
 
     private static TelemetryErrorCategory ClassifyStatusCode(HttpStatusCode statusCode)
     {

@@ -36,7 +36,7 @@ public sealed class GatewayWorkerTests
         {
             Headers = new Dictionary<string, object?>
             {
-                ["x-pipeline-start-unix-ms"] =
+                ["findair-started-at-unix-ms"] =
                     DateTimeOffset.UtcNow.AddSeconds(-1).ToUnixTimeMilliseconds(),
                 ["business-header"] = "preserved"
             }
@@ -97,10 +97,12 @@ public sealed class GatewayWorkerTests
             first.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
         Assert.All(outputs, output =>
         {
-            Assert.Equal("message-1", output.CorrelationId);
+            Assert.Null(output.CorrelationId);
             Assert.NotNull(output.Headers);
-            Assert.Equal("preserved", output.Headers["business-header"]);
-            Assert.True(output.Headers.ContainsKey("x-pipeline-start-unix-ms"));
+            Assert.False(output.Headers.ContainsKey("business-header"));
+            Assert.True(output.Headers.ContainsKey("findair-started-at-unix-ms"));
+            Assert.Equal("FindAir,Rpn", output.Headers["algorithm_names"]);
+            Assert.Equal(1, output.Headers["findair-contract-version"]);
         });
         Assert.Equal("image-1:gateway-output:rule-1:der", outputs[0].MessageId);
         Assert.Equal("image-1:gateway-output:rule-1:findair", outputs[1].MessageId);
@@ -170,9 +172,9 @@ public sealed class GatewayWorkerTests
             activities.Activities,
             activity => Assert.Equal(ActivityStatusCode.Ok, activity.Status));
         Assert.Equal("image-1", handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineImageId));
-        Assert.Equal(1, handlerActivity.GetTagItem("imaging_pipeline.gateway.rules.evaluated"));
-        Assert.Equal(1, handlerActivity.GetTagItem("imaging_pipeline.gateway.rules.matched"));
-        Assert.Equal(1, handlerActivity.GetTagItem("imaging_pipeline.pipeline.output.count"));
+        Assert.Equal(1, handlerActivity.GetTagItem("findair.gateway.rules.evaluated"));
+        Assert.Equal(1, handlerActivity.GetTagItem("findair.gateway.rules.matched"));
+        Assert.Equal(1, handlerActivity.GetTagItem("findair.output.count"));
         Assert.Null(handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineRuleId));
         Assert.Null(handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineTenantId));
     }
@@ -586,7 +588,7 @@ public sealed class GatewayWorkerTests
     }
 
     [Fact]
-    public async Task ActiveRuleCacheMarksInitialRefreshCancellationOnSpan()
+    public async Task ActiveRuleCacheInitialCancellationDoesNotCreateRefreshSpan()
     {
         using var activities = new TelemetryActivityCollector(TelemetrySourceNames.Gateway);
         using var cache = new ActiveRuleCache(
@@ -602,12 +604,7 @@ public sealed class GatewayWorkerTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => cache.StartAsync(CancellationToken.None));
 
-        var activity = Assert.Single(activities.Activities);
-        Assert.Equal("gateway.rule_cache.refresh", activity.DisplayName);
-        Assert.Equal(ActivityStatusCode.Error, activity.Status);
-        Assert.Equal(
-            "cancelled",
-            activity.GetTagItem(TelemetryAttributeNames.ErrorCategory));
+        Assert.Empty(activities.Activities);
     }
 
     [Fact]

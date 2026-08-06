@@ -270,10 +270,10 @@ Per-service endpoints:
 
 | Service | `service.name` | Metrics endpoint |
 | --- | --- | --- |
-| Gateway | `imaging-pipeline-gateway` | `http://<pod-ip>:9464/metrics` |
-| TB Publisher | `imaging-pipeline-tb-publisher` | `http://<pod-ip>:9464/metrics` |
-| TB Consumer | `imaging-pipeline-tb-consumer` | `http://<pod-ip>:9464/metrics` |
-| Rules API | `imaging-pipeline-rules-api` | `http://<pod-ip>:8080/metrics` |
+| Gateway | `findair-gateway` | `http://<pod-ip>:9464/metrics` |
+| TB Publisher | `findair-tb-publisher` | `http://<pod-ip>:9464/metrics` |
+| TB Consumer | `findair-tb-consumer` | `http://<pod-ip>:9464/metrics` |
+| Rules API | `findair-rules-api` | `http://<pod-ip>:8080/metrics` |
 
 The scrape job adds only bounded resource labels:
 
@@ -312,7 +312,7 @@ point.
 | Variable | Required value or example | Purpose |
 | --- | --- | --- |
 | `Observability__Enabled` | `true` | Master observability switch |
-| `Observability__ServiceNamespace` | `imaging-pipeline` | Shared service namespace |
+| `Observability__ServiceNamespace` | `findair` | Shared service namespace |
 | `Observability__DeploymentEnvironment` | `production` | Environment shown in Elastic |
 | `OTEL_SERVICE_NAME` | service-specific name | Explicit service identity |
 | `SERVICE_VERSION` | image version or Git SHA | Service version in traces and logs |
@@ -359,7 +359,7 @@ Configure production first. A minimal production JSON configuration is:
     "DeploymentEnvironment": "production",
     "Logs": {
       "Enabled": true,
-      "ConsoleEnabled": false,
+      "ConsoleEnabled": true,
       "Logstash": {
         "Enabled": true,
         "Endpoint": "http://production-logstash:8081/"
@@ -384,7 +384,7 @@ requirement to move these values out of JSON:
 | Variable | Recommended value | Purpose |
 | --- | --- | --- |
 | `Observability__Logs__Enabled` | `true` | Enables structured application logging |
-| `Observability__Logs__ConsoleEnabled` | `false` | Avoids duplicating full logs on stdout |
+| Observability__Logs__ConsoleEnabled | true | Enables Debug console diagnostics; EcsHttp remains Information through provider-specific logging filters |
 | `Observability__Logs__Logstash__Enabled` | `true` | Enables direct HTTP export |
 | `Observability__Logs__Logstash__Endpoint` | `http://production-logstash:8081/` | Production Logstash input; override per environment |
 | `Observability__Logs__Logstash__QueueCapacity` | `10000` | Total bounded in-memory capacity |
@@ -447,7 +447,7 @@ For Rules API:
 3. reuse its existing HTTP container port;
 4. allow Prometheus ingress to port 8080.
 
-Pod labels `app.kubernetes.io/part-of=imaging-pipeline`,
+Pod labels `app.kubernetes.io/part-of=findair`,
 `app.kubernetes.io/name`, `app.kubernetes.io/version`, and `environment`
 are required by the supplied Prometheus relabeling rules. The `part-of` keep
 rule prevents this job from also scraping unrelated annotated pods in the same
@@ -492,7 +492,7 @@ Send a test batch from a pod in an allowed namespace:
 ```sh
 curl -i \
   -H 'Content-Type: application/json' \
-  --data '[{"@timestamp":"2026-07-30T10:00:00Z","ecs":{"version":"8.0.0"},"message":"observability ingestion test","log":{"level":"information","logger":"deployment-test"},"service":{"name":"imaging-pipeline-gateway","namespace":"imaging-pipeline","version":"test","environment":"production"},"event":{"dataset":"findair"}}]' \
+  --data '[{"@timestamp":"2026-07-30T10:00:00Z","ecs":{"version":"8.0.0"},"message":"observability ingestion test","log":{"level":"information","logger":"deployment-test"},"service":{"name":"findair-gateway","namespace":"findair","version":"test","environment":"production"},"event":{"dataset":"findair"}}]' \
   http://production-logstash:8081/
 ```
 
@@ -519,7 +519,7 @@ In Prometheus, open **Status > Targets** and verify one healthy target per
 application pod. Query:
 
 ```promql
-up{job="imaging-pipeline"}
+up{job="findair"}
 ```
 
 ### Collector
@@ -531,8 +531,7 @@ intentionally references an externally owned Fleet APM exporter.
 
 Confirm both OTLP ports listen and send a real pipeline message. In Kibana APM,
 verify that Gateway, TB Publisher, and TB Consumer spans share one trace ID.
-The external Tile Builder must preserve `traceparent`, `tracestate`, and
-`baggage` unchanged.
+The external Tile Builder must preserve traceparent, tracestate, and the minimal FindAir timing, algorithm, contract-version, and retry headers unchanged; baggage is not propagated.
 
 ### Application startup validation
 

@@ -20,7 +20,7 @@ spec:
       labels:
         app.kubernetes.io/name: REPLACE_SERVICE_NAME
         app.kubernetes.io/version: REPLACE_SERVICE_VERSION
-        app.kubernetes.io/part-of: imaging-pipeline
+        app.kubernetes.io/part-of: findair
         environment: production
       annotations:
         prometheus.io/scrape: "true"
@@ -37,7 +37,7 @@ spec:
             - name: Observability__Enabled
               value: "true"
             - name: Observability__ServiceNamespace
-              value: imaging-pipeline
+              value: findair
             - name: Observability__DeploymentEnvironment
               value: production
 
@@ -68,7 +68,7 @@ spec:
             - name: Observability__Logs__Enabled
               value: "true"
             - name: Observability__Logs__ConsoleEnabled
-              value: "false"
+              value: "true"
             - name: Observability__Logs__Logstash__Enabled
               value: "true"
             - name: Observability__Logs__Logstash__Endpoint

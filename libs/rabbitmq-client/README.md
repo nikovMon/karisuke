@@ -280,18 +280,13 @@ thrown by handlers are treated as retryable failures.
   names are stable and do not contain routing keys. The library adds only internal
   handler/batch spans through `ImagingPipeline.RabbitMq`, avoiding duplicate
   producer or consumer spans.
-- The native RabbitMQ context injector/extractor uses the common W3C propagator.
-  `traceparent`, `tracestate`, and bounded allowlisted OpenTelemetry `baggage`
-  therefore cross every publish/consume boundary, including retry and output
-  publishing. Handler logs run
-  inside the processing span and include trace correlation plus message metadata via
-  structured scopes.
-- `x-pipeline-start-unix-ms` is created only when missing and is preserved across
-  services for end-to-end latency. `x-pipeline-published-unix-ms` is replaced
+- The native RabbitMQ injector/extractor uses W3C traceparent and tracestate. The shared publisher removes baggage and arbitrary business headers, forwarding only trace context, timing, algorithm_names, contract version, and retry count. Handler logs remain trace-correlated and receive business identifiers from validated payload scopes.
+- `findair-started-at-unix-ms` is created only when missing and is preserved across
+  services for end-to-end latency. `findair-published-at-unix-ms` is replaced
   immediately before every publish made by this library. It normally measures one
   RabbitMQ broker hop. If an external processor forwards that timestamp unchanged,
   configure `RabbitMq:ForwardedInputStage` on its downstream consumer. The first
-  delivery is then recorded as `imaging_pipeline.pipeline.external_stage.duration`
+  delivery is then recorded as `findair.external_stage.duration`
   for that bounded stage and is omitted from the RabbitMQ-only delivery histogram.
   Retry publishes refresh the timestamp and continue to report normal broker delay.
   Neither header is used as a metric dimension. A timestamp up to five seconds ahead

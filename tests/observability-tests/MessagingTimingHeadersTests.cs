@@ -12,13 +12,13 @@ public sealed class MessagingTimingHeadersTests
         var headers = new Dictionary<string, object?>
         {
             [MessagingTimingHeaders.PublishedUnixMilliseconds] = 7_500L,
-            ["X-PIPELINE-PUBLISHED-UNIX-MS"] = 5_000L,
+            ["FINDAIR-PUBLISHED-AT-UNIX-MS"] = 5_000L,
             [PipelineTimingHeaders.StartUnixMilliseconds] = 1_000L
         };
 
         MessagingTimingHeaders.StampPublished(headers, clock);
 
-        Assert.DoesNotContain("X-PIPELINE-PUBLISHED-UNIX-MS", headers.Keys);
+        Assert.DoesNotContain("FINDAIR-PUBLISHED-AT-UNIX-MS", headers.Keys);
         Assert.Equal(10_000L, headers[MessagingTimingHeaders.PublishedUnixMilliseconds]);
         Assert.Equal(1_000L, headers[PipelineTimingHeaders.StartUnixMilliseconds]);
     }

@@ -33,7 +33,7 @@ public static class RulesTelemetry
     {
         var tags = new TagList
         {
-            { "imaging_pipeline.rules.operation", operation.Value() }
+            { "findair.rules.operation", operation.Value() }
         };
         BatchSize.Record(Math.Max(0, count), tags);
     }
@@ -51,7 +51,7 @@ public static class RulesTelemetry
     {
         var tags = new TagList
         {
-            { "imaging_pipeline.rules.operation", operation.Value() },
+            { "findair.rules.operation", operation.Value() },
             { TelemetryAttributeNames.PipelineOutcome, outcome.Value() }
         };
         if (error != TelemetryErrorCategory.None)

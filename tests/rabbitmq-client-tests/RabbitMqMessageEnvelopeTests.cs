@@ -53,7 +53,7 @@ public sealed class RabbitMqMessageEnvelopeTests
         var delivery = RabbitMqDeliveryFactory.Create(args);
 
         Assert.NotNull(delivery.Message.Headers);
-        Assert.IsType<long>(delivery.Message.Headers["x-pipeline-start-unix-ms"]);
+        Assert.IsType<long>(delivery.Message.Headers["findair-started-at-unix-ms"]);
         Assert.Null(delivery.PublishedToDeliverySeconds);
     }
 
@@ -64,13 +64,13 @@ public sealed class RabbitMqMessageEnvelopeTests
         {
             Headers = new Dictionary<string, object?>
             {
-                ["x-pipeline-start-unix-ms"] = "external-clock"
+                ["findair-started-at-unix-ms"] = "external-clock"
             }
         };
 
         var delivery = RabbitMqDeliveryFactory.Create(DeliveryArgs(properties));
 
-        Assert.IsType<long>(delivery.Message.Headers!["x-pipeline-start-unix-ms"]);
+        Assert.IsType<long>(delivery.Message.Headers!["findair-started-at-unix-ms"]);
         Assert.Null(delivery.PublishedToDeliverySeconds);
     }
 
@@ -82,8 +82,8 @@ public sealed class RabbitMqMessageEnvelopeTests
         {
             Headers = new Dictionary<string, object?>
             {
-                ["x-pipeline-published-unix-ms"] = publishedAt,
-                ["x-pipeline-start-unix-ms"] = publishedAt - 10_000
+                ["findair-published-at-unix-ms"] = publishedAt,
+                ["findair-started-at-unix-ms"] = publishedAt - 10_000
             }
         };
 
@@ -93,7 +93,7 @@ public sealed class RabbitMqMessageEnvelopeTests
         Assert.InRange(delivery.PublishedToDeliverySeconds.Value, 0.9, 5);
         Assert.Equal(
             publishedAt - 10_000,
-            delivery.Message.Headers!["x-pipeline-start-unix-ms"]);
+            delivery.Message.Headers!["findair-started-at-unix-ms"]);
     }
 
     [Theory]

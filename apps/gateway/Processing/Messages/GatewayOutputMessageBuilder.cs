@@ -33,7 +33,8 @@ public sealed class GatewayOutputMessageBuilder
                 outputs.Add(new GatewayOutputMessage(
                     BuildOutput(input, match, tenant, roiFootprint),
                     match.Rule.Id,
-                    tenant.TenantId));
+                    tenant.TenantId,
+                    string.Join(",", match.Rule.AlgorithmNames)));
             }
         }
 

@@ -64,8 +64,8 @@ public sealed class RulesObservabilityTests
             candidate => candidate.OperationName == "rules.get_by_id" &&
                 Equals(candidate.GetTagItem(TelemetryAttributeNames.PipelineRuleId), ruleId));
         Assert.Equal(ActivityKind.Internal, activity.Kind);
-        Assert.Equal("get_by_id", activity.GetTagItem("imaging_pipeline.rules.operation"));
-        Assert.Equal(1L, activity.GetTagItem("imaging_pipeline.rules.response.document.count"));
+        Assert.Equal("get_by_id", activity.GetTagItem("findair.rules.operation"));
+        Assert.Equal(1L, activity.GetTagItem("findair.rules.response.document.count"));
         Assert.DoesNotContain(TelemetryAttributeNames.PipelineRuleId, metricTagKeys);
     }
 }

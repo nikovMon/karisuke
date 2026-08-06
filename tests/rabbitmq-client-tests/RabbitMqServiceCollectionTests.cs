@@ -12,88 +12,49 @@ namespace ImagingPipeline.RabbitMqClient.Tests;
 public sealed class RabbitMqServiceCollectionTests
 {
     [Fact]
-    public void RegistrationConfiguresStableNativeRabbitMqTracing()
+    public void RegistrationConfiguresStableNativeRabbitMqTracingWithoutBaggage()
     {
-        var previousBaggage = Baggage.Current;
-        try
+        _ = new ServiceCollection()
+            .AddRabbitMqPublisher(Configuration());
+
+        Assert.False(RabbitMQActivitySource.UseRoutingKeyAsOperationName);
+        Assert.True(RabbitMQActivitySource.TracingOptions.UsePublisherAsParent);
+        Assert.NotNull(RabbitMQActivitySource.ContextInjector);
+        Assert.NotNull(RabbitMQActivitySource.ContextExtractor);
+
+        using var activity = new Activity("producer").Start();
+        var headers = new Dictionary<string, object?>
         {
-            Baggage.SetBaggage("tenant", "north");
-            _ = new ServiceCollection()
-                .AddRabbitMqPublisher(Configuration());
+            ["baggage"] = Encoding.UTF8.GetBytes("secret=stale")
+        };
+        RabbitMQActivitySource.ContextInjector(activity, headers);
+        var properties = new BasicProperties { Headers = headers };
 
-            Assert.False(RabbitMQActivitySource.UseRoutingKeyAsOperationName);
-            Assert.True(RabbitMQActivitySource.TracingOptions.UsePublisherAsParent);
-            Assert.NotNull(RabbitMQActivitySource.ContextInjector);
-            Assert.NotNull(RabbitMQActivitySource.ContextExtractor);
+        var extracted = RabbitMQActivitySource.ContextExtractor(properties);
 
-            using var activity = new Activity("producer").Start();
-            var headers = new Dictionary<string, object?>();
-            RabbitMQActivitySource.ContextInjector(activity, headers);
-            var properties = new BasicProperties { Headers = headers };
-
-            var extracted = RabbitMQActivitySource.ContextExtractor(properties);
-
-            Assert.Equal(activity.TraceId, extracted.TraceId);
-            Assert.Equal(activity.SpanId, extracted.SpanId);
-            Assert.Contains(
-                "tenant=north",
-                Encoding.UTF8.GetString(Assert.IsType<byte[]>(headers["baggage"])),
-                StringComparison.Ordinal);
-        }
-        finally
-        {
-            Baggage.Current = previousBaggage;
-        }
+        Assert.Equal(activity.TraceId, extracted.TraceId);
+        Assert.Equal(activity.SpanId, extracted.SpanId);
+        Assert.False(headers.ContainsKey("baggage"));
     }
 
     [Fact]
-    public void NativeRabbitMqInjectorSerializesScopedCanonicalPipelineBaggage()
+    public void NativeRabbitMqInjectorPreservesBusinessHeadersButRemovesBaggage()
     {
-        var previous = Baggage.Current;
-        try
+        _ = new ServiceCollection().AddRabbitMqPublisher(Configuration());
+
+        using var activity = new Activity("producer").Start();
+        var headers = new Dictionary<string, object?>
         {
-            Baggage.Current = Baggage.Create(new Dictionary<string, string>
-            {
-                ["secret"] = "do-not-forward"
-            });
-            _ = new ServiceCollection().AddRabbitMqPublisher(Configuration());
+            ["baggage"] = Encoding.UTF8.GetBytes("secret=stale"),
+            ["business-header"] = "preserved"
+        };
 
-            using (PipelineCorrelationBaggage.Push(new PipelineCorrelationContext(
-                       TaskId: "task-1",
-                       RequestId: "request-1",
-                       ImageId: "image-1",
-                       RuleId: "rule-1",
-                       TenantId: "tenant-1",
-                       AlgorithmName: "FindAir")))
-            using (var activity = new Activity("producer").Start())
-            {
-                var headers = new Dictionary<string, object?>
-                {
-                    ["baggage"] = Encoding.UTF8.GetBytes("secret=stale"),
-                    ["business-header"] = "preserved"
-                };
+        RabbitMQActivitySource.ContextInjector(activity, headers);
 
-                RabbitMQActivitySource.ContextInjector(activity, headers);
-
-                var extracted = new W3CMessageTraceContextPropagator().Extract(headers);
-                Assert.Equal("task-1", extracted.Baggage.GetBaggage(TelemetryAttributeNames.PipelineTaskId));
-                Assert.Equal("request-1", extracted.Baggage.GetBaggage(TelemetryAttributeNames.PipelineRequestId));
-                Assert.Equal("image-1", extracted.Baggage.GetBaggage(TelemetryAttributeNames.PipelineImageId));
-                Assert.Equal("rule-1", extracted.Baggage.GetBaggage(TelemetryAttributeNames.PipelineRuleId));
-                Assert.Equal("tenant-1", extracted.Baggage.GetBaggage(TelemetryAttributeNames.PipelineTenantId));
-                Assert.Equal("FindAir", extracted.Baggage.GetBaggage(TelemetryAttributeNames.PipelineAlgorithmName));
-                Assert.Null(extracted.Baggage.GetBaggage("secret"));
-                Assert.Equal("preserved", headers["business-header"]);
-            }
-
-            Assert.Equal("do-not-forward", Baggage.Current.GetBaggage("secret"));
-        }
-        finally
-        {
-            Baggage.Current = previous;
-        }
+        Assert.False(headers.ContainsKey("baggage"));
+        Assert.Equal("preserved", headers["business-header"]);
+        Assert.True(headers.ContainsKey("traceparent"));
     }
-
     [Fact]
     public async Task AddRabbitMqPublisherRegistersPublisherOnlyServices()
     {

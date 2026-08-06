@@ -19,7 +19,7 @@ internal static partial class GatewayLog
         Exception exception,
         double restartDelaySeconds);
 
-    [LoggerMessage(2010, LogLevel.Debug, "Gateway processed an input message: {RulesEvaluated} rules evaluated, {RulesMatched} rules matched, and {OutputCount} tenant tasks built.")]
+    [LoggerMessage(2010, LogLevel.Information, "Gateway processed an input message: {RulesEvaluated} rules evaluated, {RulesMatched} rules matched, and {OutputCount} tenant tasks built.")]
     public static partial void MessageProcessed(
         this ILogger logger,
         int rulesEvaluated,

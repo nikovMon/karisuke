@@ -52,7 +52,11 @@ public static class TelemetrySpanExtensions
         string? imageId = null,
         string? ruleId = null,
         string? tenantId = null,
-        string? algorithmName = null)
+        string? algorithmName = null,
+        string? areaName = null,
+        string? sensorName = null,
+        string? tileId = null,
+        int? tileIndex = null)
     {
         if (activity is null || !activity.IsAllDataRequested)
         {
@@ -65,6 +69,14 @@ public static class TelemetrySpanExtensions
         SetIfPresent(activity, TelemetryAttributeNames.PipelineRuleId, ruleId);
         SetIfPresent(activity, TelemetryAttributeNames.PipelineTenantId, tenantId);
         SetIfPresent(activity, TelemetryAttributeNames.PipelineAlgorithmName, algorithmName);
+        SetIfPresent(activity, TelemetryAttributeNames.AreaName, areaName);
+        SetIfPresent(activity, TelemetryAttributeNames.SensorName, sensorName);
+        SetIfPresent(activity, TelemetryAttributeNames.TileId, tileId);
+        if (tileIndex.HasValue)
+        {
+            activity.SetTag(TelemetryAttributeNames.TileIndex, tileIndex.Value);
+        }
+
         return activity;
     }
 

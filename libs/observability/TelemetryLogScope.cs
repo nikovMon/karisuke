@@ -13,7 +13,11 @@ public readonly record struct TelemetryLogContext(
     string? ImageId = null,
     string? RuleId = null,
     string? TenantId = null,
-    string? AlgorithmName = null) : IReadOnlyList<KeyValuePair<string, object?>>
+    string? AlgorithmName = null,
+    string? AreaName = null,
+    string? SensorName = null,
+    string? TileId = null,
+    int? TileIndex = null) : IReadOnlyList<KeyValuePair<string, object?>>
 {
     public int Count =>
         Present(MessageId) +
@@ -25,7 +29,11 @@ public readonly record struct TelemetryLogContext(
         Present(ImageId) +
         Present(RuleId) +
         Present(TenantId) +
-        Present(AlgorithmName);
+        Present(AlgorithmName) +
+        Present(AreaName) +
+        Present(SensorName) +
+        Present(TileId) +
+        (TileIndex.HasValue ? 1 : 0);
 
     public KeyValuePair<string, object?> this[int index]
     {
@@ -45,7 +53,11 @@ public readonly record struct TelemetryLogContext(
                 || TryTake(ref index, TelemetryAttributeNames.PipelineImageId, ImageId, out item)
                 || TryTake(ref index, TelemetryAttributeNames.PipelineRuleId, RuleId, out item)
                 || TryTake(ref index, TelemetryAttributeNames.PipelineTenantId, TenantId, out item)
-                || TryTake(ref index, TelemetryAttributeNames.PipelineAlgorithmName, AlgorithmName, out item))
+                || TryTake(ref index, TelemetryAttributeNames.PipelineAlgorithmName, AlgorithmName, out item)
+                || TryTake(ref index, TelemetryAttributeNames.AreaName, AreaName, out item)
+                || TryTake(ref index, TelemetryAttributeNames.SensorName, SensorName, out item)
+                || TryTake(ref index, TelemetryAttributeNames.TileId, TileId, out item)
+                || TryTake(ref index, TelemetryAttributeNames.TileIndex, TileIndex, out item))
             {
                 return item;
             }

@@ -87,8 +87,8 @@ public static class PipelineTelemetry
     {
         var tags = new TagList
         {
-            { "imaging_pipeline.telemetry.header", header.Value() },
-            { "imaging_pipeline.telemetry.rejection.reason", reason.Value() }
+            { "findair.telemetry.header", header.Value() },
+            { "findair.telemetry.rejection.reason", reason.Value() }
         };
         InvalidTimingHeaders.Add(1, tags);
     }

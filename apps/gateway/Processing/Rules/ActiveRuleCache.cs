@@ -11,7 +11,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
-using System.Diagnostics;
 
 namespace ImagingPipeline.Gateway.Processing.Rules;
 
@@ -51,7 +50,6 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         var started = TelemetryTiming.StartTimestamp();
-        using var activity = StartRefreshActivity("initial");
         try
         {
             var initialRules = BuildSnapshot(
@@ -66,26 +64,15 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
                 TelemetryOutcome.Success,
                 initialRules.Length,
                 skippedRules: skippedCount);
-            if (activity?.IsAllDataRequested == true)
-            {
-                activity.SetTag("imaging_pipeline.gateway.rule_cache.entries", initialRules.Length);
-                activity.SetTag("imaging_pipeline.gateway.rule_cache.skipped", skippedCount);
-            }
-
-            activity.SetTelemetrySuccess();
             _logger.RuleCacheInitialized(initialRules.Length, skippedCount);
         }
-        catch (OperationCanceledException ex)
+        catch (OperationCanceledException)
         {
             GatewayTelemetry.RecordCacheRefresh(
                 TelemetryTiming.ElapsedSeconds(started),
                 TelemetryOutcome.Cancelled,
                 Current.Count,
                 TelemetryErrorCategory.Cancelled);
-            activity.SetTelemetryError(
-                TelemetryErrorCategory.Cancelled,
-                ex,
-                recordException: false);
             throw;
         }
         catch (Exception ex)
@@ -95,10 +82,6 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
                 TelemetryOutcome.Failure,
                 Current.Count,
                 TelemetryErrorCategory.Dependency);
-            activity.SetTelemetryError(
-                TelemetryErrorCategory.Dependency,
-                ex,
-                recordException: false);
             _logger.RuleCacheRefreshFailed(ex, Current.Count);
             throw;
         }
@@ -137,7 +120,6 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
     private async Task RefreshAsync(CancellationToken cancellationToken)
     {
         var started = TelemetryTiming.StartTimestamp();
-        using var activity = StartRefreshActivity("scheduled");
         try
         {
             var rules = BuildSnapshot(
@@ -152,26 +134,15 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
                 TelemetryOutcome.Success,
                 rules.Length,
                 skippedRules: skippedCount);
-            if (activity?.IsAllDataRequested == true)
-            {
-                activity.SetTag("imaging_pipeline.gateway.rule_cache.entries", rules.Length);
-                activity.SetTag("imaging_pipeline.gateway.rule_cache.skipped", skippedCount);
-            }
-
-            activity.SetTelemetrySuccess();
             _logger.RuleCacheRefreshed(rules.Length, skippedCount);
         }
-        catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             GatewayTelemetry.RecordCacheRefresh(
                 TelemetryTiming.ElapsedSeconds(started),
                 TelemetryOutcome.Cancelled,
                 Current.Count,
                 TelemetryErrorCategory.Cancelled);
-            activity.SetTelemetryError(
-                TelemetryErrorCategory.Cancelled,
-                ex,
-                recordException: false);
             throw;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -183,10 +154,6 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
                 TelemetryOutcome.Failure,
                 Current.Count,
                 TelemetryErrorCategory.Dependency);
-            activity.SetTelemetryError(
-                TelemetryErrorCategory.Dependency,
-                ex,
-                recordException: false);
             _logger.RuleCacheRefreshFailed(ex, Current.Count);
         }
     }
@@ -389,20 +356,6 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
             : !string.IsNullOrWhiteSpace(rule.RuleName)
                 ? rule.RuleName
                 : "<unknown>";
-
-    private static Activity? StartRefreshActivity(string refreshType)
-    {
-        var activity = TelemetrySources.Gateway.StartActivity(
-            "gateway.rule_cache.refresh",
-            ActivityKind.Internal);
-        if (activity?.IsAllDataRequested == true)
-        {
-            activity.SetTag(TelemetryAttributeNames.PipelineStage, "gateway");
-            activity.SetTag("imaging_pipeline.gateway.rule_cache.refresh.type", refreshType);
-        }
-
-        return activity;
-    }
 
     private static ActiveRule BuildRuleSnapshot(
         RuleDto rule,
