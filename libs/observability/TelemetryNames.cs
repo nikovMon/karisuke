@@ -114,4 +114,5 @@ public static class TelemetryAttributeNames
     public const string RetryAttempt = "findair.retry.attempt";
     public const string DependencyName = "findair.dependency.name";
     public const string DependencyOperation = "findair.dependency.operation";
+    public const string ProjectionMode = "findair.projection.mode";
 }

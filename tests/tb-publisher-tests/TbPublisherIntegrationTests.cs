@@ -99,7 +99,7 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
     }
 
     [RabbitMqBrokerFact]
-    public async Task ProjectionMapperFailureLeavesMessageDeadLettered()
+    public async Task ProjectionMapperFailureIsRetriedThenDeadLettered()
     {
         await using var projectionMapper = new FakeProjectionMapperServer(_ => "not valid json");
 
@@ -138,6 +138,7 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
         await StopConsumerAsync(consumerTask, cts);
 
         Assert.Equal(body, deadLetter);
+        Assert.Equal(2, projectionMapper.RequestCount);
         Assert.Null(await BasicGetAsync(topology.OutputQueue, CancellationToken.None));
     }
 
@@ -146,11 +147,13 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
         var topology = new TestTopology(
             _broker.CreateName("input"),
             _broker.CreateName("output"),
-            _broker.CreateName("dlq"));
+            _broker.CreateName("dlq"),
+            _broker.CreateName("retry"));
 
         _broker.TrackQueue(topology.InputQueue);
         _broker.TrackQueue(topology.OutputQueue);
         _broker.TrackQueue(topology.DeadLetterQueue);
+        _broker.TrackQueue(topology.RetryQueue);
         return topology;
     }
 
@@ -166,11 +169,16 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
             ["RabbitMq:InputQueue"] = topology.InputQueue,
             ["RabbitMq:OutputQueue"] = topology.OutputQueue,
             ["RabbitMq:DeadLetterQueue"] = topology.DeadLetterQueue,
+            ["RabbitMq:RetryQueue"] = topology.RetryQueue,
+            ["RabbitMq:RetryDelayMilliseconds"] = "100",
+            ["RabbitMq:MaxRetryAttempts"] = "1",
             ["RabbitMq:PrefetchCount"] = "1",
             ["RabbitMq:PublisherChannelPoolSize"] = "2",
             ["RabbitMq:ReconnectDelaySeconds"] = "1",
             ["ProjectionMapper:Host"] = projectionMapperBaseUrl,
             ["ProjectionMapper:Endpoints:G2IMultiPoints"] = "/flare/g2i-by-id",
+            ["ProjectionMapper:Endpoints:I2GById"] = "/flare/i2g-by-id",
+            ["ProjectionMapper:Endpoints:I2GByRegistration"] = "/flare/i2g-by-registration",
             ["ProjectionMapper:SendingSystem"] = "flare",
             ["ProjectionMapper:TimeoutSeconds"] = "10"
         }).Build();
@@ -241,5 +249,9 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
         }
     }
 
-    private sealed record TestTopology(string InputQueue, string OutputQueue, string DeadLetterQueue);
+    private sealed record TestTopology(
+        string InputQueue,
+        string OutputQueue,
+        string DeadLetterQueue,
+        string RetryQueue);
 }

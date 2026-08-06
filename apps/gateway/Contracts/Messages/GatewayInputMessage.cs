@@ -14,5 +14,7 @@ public sealed record GatewayInputMessage(
     int ImageWidth,
     int ImageHeight,
     DateTimeOffset PhotoTime,
-    Geometry Geometry
+    Geometry Geometry,
+    string GridType,
+    string GridUri
 );

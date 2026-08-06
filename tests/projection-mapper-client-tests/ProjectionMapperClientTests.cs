@@ -115,8 +115,40 @@ public sealed class ProjectionMapperClientTests
         Assert.Equal("/flare/g2i-by-id", span.GetTagItem("url.path"));
         Assert.Equal("/flare/g2i-by-id", span.GetTagItem("http.route"));
         Assert.Equal("projection-mapper.test", span.GetTagItem("server.address"));
+        Assert.Equal("ground_to_image", span.GetTagItem(TelemetryAttributeNames.ProjectionMode));
     }
 
+    [Fact]
+    public async Task RegistrationOperationExposesBoundedProjectionModeAndSanitizedRoute()
+    {
+        Activity? completed = null;
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == "FindAir.ProjectionMapper",
+            Sample = static (ref ActivityCreationOptions<ActivityContext> _) =>
+                ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = activity => completed = activity
+        };
+        ActivitySource.AddActivityListener(listener);
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(new ProjectionMapperResponseDto { Coordinates = [[31, 32]] })
+        });
+        var client = CreateClient(handler);
+
+        await client.ProcessBatchByRegistrationAsync(
+            "SHR-image-1",
+            [[1, 2]],
+            "MSP",
+            "http://grid.test/grid.json");
+
+        var span = Assert.IsType<Activity>(completed);
+        Assert.Equal(
+            "image_to_ground_registration",
+            span.GetTagItem(TelemetryAttributeNames.ProjectionMode));
+        Assert.Equal("/flare/i2g-by-registration", span.GetTagItem("http.route"));
+        Assert.Equal(string.Empty, handler.LastRequest!.RequestUri!.Query);
+    }
     [Fact]
     public async Task DependencyMetricsUseBoundedDimensionsAndExcludeOverlayId()
     {
@@ -175,7 +207,8 @@ public sealed class ProjectionMapperClientTests
             Endpoints = new Dictionary<string, string>
             {
                 [ProjectionMapperEndpointKeys.G2IMultiPoints] = "/flare/g2i-by-id",
-                [ProjectionMapperEndpointKeys.I2GById] = "/flare/i2g-by-id"
+                [ProjectionMapperEndpointKeys.I2GById] = "/flare/i2g-by-id",
+                [ProjectionMapperEndpointKeys.I2GByRegistration] = "/flare/i2g-by-registration"
             },
             SendingSystem = "flare"
         };

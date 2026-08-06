@@ -33,6 +33,8 @@ public sealed class TbPublisherMessageHandlerTests
       "bestResolution": 100,
       "sensorName": "sensor-1",
       "areaOfInterest": "region-alpha",
+      "gridType": "EO",
+      "gridURI": "grid://default",
       "tilingConfigs": [
         { "tileSizeWidth": 512, "tileSizeHeight": 384, "tileOverlapWidth": 32, "tileOverlapHeight": 24 },
         { "tileSizeWidth": 256, "tileSizeHeight": 128, "tileOverlapWidth": 16, "tileOverlapHeight": 8 }
@@ -144,7 +146,7 @@ public sealed class TbPublisherMessageHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsyncReturnsFailureWhenProjectionMapperFails()
+    public async Task HandleAsyncReturnsRetryableFailureWhenProjectionMapperFails()
     {
         var handler = CreateHandler(
             FakeProjectionMapperClient.ThrowingFailure(new ProjectionMapperClientException("mapper down")),
@@ -154,6 +156,7 @@ public sealed class TbPublisherMessageHandlerTests
 
         Assert.False(result.IsSuccess);
         Assert.Contains("mapper down", result.Error);
+        Assert.Equal(RabbitMqMessageFailureAction.Retry, result.FailureAction);
     }
 
     [Fact]
@@ -195,6 +198,8 @@ public sealed class TbPublisherMessageHandlerTests
           "bestResolution": 100,
           "sensorName": "sensor-1",
           "areaOfInterest": "region-alpha",
+          "gridType": "EO",
+          "gridURI": "grid://default",
           "tilingConfigs": [
             { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 512, "tileOverlapHeight": 0 }
           ]

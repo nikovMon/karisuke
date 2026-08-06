@@ -9,6 +9,7 @@ public sealed class FakeProjectionMapperServer : IAsyncDisposable
     private readonly HttpListener _listener;
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _loop;
+    private int _requestCount;
 
     public FakeProjectionMapperServer(Func<string, string> respond)
     {
@@ -21,6 +22,7 @@ public sealed class FakeProjectionMapperServer : IAsyncDisposable
     }
 
     public string BaseUrl { get; }
+    public int RequestCount => Volatile.Read(ref _requestCount);
 
     private async Task LoopAsync(Func<string, string> respond)
     {
@@ -36,6 +38,7 @@ public sealed class FakeProjectionMapperServer : IAsyncDisposable
                 break;
             }
 
+            Interlocked.Increment(ref _requestCount);
             using var reader = new StreamReader(context.Request.InputStream);
             var body = await reader.ReadToEndAsync();
             var responseBody = respond(body);

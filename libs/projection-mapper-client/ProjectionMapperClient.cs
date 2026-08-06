@@ -56,6 +56,26 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
             cancellationToken);
     }
 
+    public Task<IReadOnlyList<IReadOnlyList<double>>> ProcessBatchByRegistrationAsync(
+        string overlayId,
+        IReadOnlyList<IReadOnlyList<double>> coordinates,
+        string gridType,
+        string gridUri,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(overlayId);
+        ArgumentNullException.ThrowIfNull(coordinates);
+        ArgumentException.ThrowIfNullOrWhiteSpace(gridType);
+        ArgumentException.ThrowIfNullOrWhiteSpace(gridUri);
+
+        return ExecuteByRegistrationAsync(
+            overlayId,
+            coordinates,
+            gridType,
+            gridUri,
+            cancellationToken);
+    }
+
     private async Task<IReadOnlyList<IReadOnlyList<double>>> ExecuteAsync<TRequest>(
         string overlayId,
         string endpointKey,
@@ -63,7 +83,8 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
         PipelineItem batchItem,
         int batchSize,
         TRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool includeQueryParams = true)
     {
         var spanName = operation == DependencyOperation.GroundToImage
             ? "projection_mapper ground_to_image"
@@ -78,6 +99,7 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
                 operation == DependencyOperation.GroundToImage ? "ground_to_image" : "image_to_ground");
             activity.SetTag("projection_mapper.use_cache", _options.UseCache);
             activity.SetTag("projection_mapper.batch.size", batchSize);
+            activity.SetTag(TelemetryAttributeNames.ProjectionMode, GetProjectionMode(endpointKey));
         }
 
         DependencyTelemetry.RecordBatchSize(
@@ -103,8 +125,9 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
             var safeEndpoint = ResolveEndpoint(endpoint);
             AddHttpRequestTags(activity, safeEndpoint);
 
-            var requestUri =
-                $"{endpoint}?overlayId={Uri.EscapeDataString(overlayId)}&useCache={(_options.UseCache ? "true" : "false")}";
+            var requestUri = includeQueryParams
+                ? $"{endpoint}?overlayId={Uri.EscapeDataString(overlayId)}&useCache={(_options.UseCache ? "true" : "false")}"
+                : endpoint;
             using var requestMessage = new HttpRequestMessage(HttpMethod.Post, requestUri)
             {
                 Content = JsonContent.Create(request),
@@ -234,6 +257,42 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
         activity.SetTag("server.address", endpoint.Host);
         activity.SetTag("server.port", endpoint.Port);
     }
+
+    private async Task<IReadOnlyList<IReadOnlyList<double>>> ExecuteByRegistrationAsync(
+        string overlayId,
+        IReadOnlyList<IReadOnlyList<double>> coordinates,
+        string gridType,
+        string gridUri,
+        CancellationToken cancellationToken)
+    {
+        var request = new I2GByRegistrationRequestDto
+        {
+            OverlayId = overlayId,
+            ReturnAltitude = false,
+            PixelPoints = coordinates,
+            GridType = gridType,
+            GridUri = gridUri,
+            UseCache = _options.UseCache
+        };
+
+        return await ExecuteAsync(
+            overlayId,
+            ProjectionMapperEndpointKeys.I2GByRegistration,
+            DependencyOperation.ImageToGround,
+            PipelineItem.Coordinate,
+            coordinates.Count,
+            request,
+            cancellationToken,
+            includeQueryParams: false);
+    }
+
+    private static string GetProjectionMode(string endpointKey) => endpointKey switch
+    {
+        ProjectionMapperEndpointKeys.G2IMultiPoints => "ground_to_image",
+        ProjectionMapperEndpointKeys.I2GByRegistration => "image_to_ground_registration",
+        _ => "image_to_ground_by_id"
+    };
+
     private static TelemetryErrorCategory ClassifyStatusCode(HttpStatusCode statusCode)
     {
         if (statusCode == HttpStatusCode.RequestTimeout)

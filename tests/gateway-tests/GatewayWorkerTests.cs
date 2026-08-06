@@ -90,7 +90,9 @@ public sealed class GatewayWorkerTests
                 "imageHeight",
                 "bestResolution",
                 "sensorName",
-                "areaOfInterest"
+                "areaOfInterest",
+                "gridType",
+                "gridURI"
             ],
             first.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
         Assert.All(outputs, output =>
@@ -775,7 +777,9 @@ public sealed class GatewayWorkerTests
                 "roiFootprint": {
                   "type": "Polygon",
                   "coordinates": [[[34.7800, 32.0800], [34.7900, 32.0800], [34.7900, 32.0900], [34.7800, 32.0900], [34.7800, 32.0800]]]
-                }
+                },
+                "gridType": "EO",
+                "gridURI": "grid://default"
               }
             }
             """,
@@ -824,7 +828,9 @@ public sealed class GatewayWorkerTests
                 "roiFootprint": {
                   "type": "Polygon",
                   "coordinates": [[[34.7800, 32.0800], [34.7900, 32.0800], [34.7900, 32.0900], [34.7800, 32.0900], [34.7800, 32.0800]]]
-                }
+                },
+                "gridType": "EO",
+                "gridURI": "grid://default"
               }
             }
             """,

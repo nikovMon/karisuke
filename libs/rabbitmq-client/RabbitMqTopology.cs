@@ -85,6 +85,7 @@ internal static class RabbitMqTopology
 
         if (string.Equals(options.RetryExchangeType, ExchangeType.Headers, StringComparison.OrdinalIgnoreCase))
         {
+            arguments.TryAdd("x-match", "any");
             arguments[options.RetryCountHeader] = retryQueue.RetryCount;
         }
 

@@ -43,4 +43,10 @@ public sealed class GatewayInputOverlayDto
 
     [JsonPropertyName("roiFootprint")]
     public required JsonElement RoiFootprint { get; init; }
+
+    [JsonPropertyName("gridType")]
+    public required string GridType { get; init; }
+
+    [JsonPropertyName("gridURI")]
+    public required string GridUri { get; init; }
 }
