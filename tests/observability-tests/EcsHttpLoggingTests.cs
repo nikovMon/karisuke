@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry;
@@ -25,7 +26,11 @@ public sealed class EcsHttpLoggingTests
             MessageId: "message-1",
             CorrelationId: "correlation-1",
             TaskId: "task-1",
-            TenantId: "tenant-1"));
+            TenantId: "tenant-1",
+            AreaName: "Israel",
+            SensorName: "sensor-x",
+            TileId: "tile-1",
+            TileIndex: 7));
         using var metadataScope = logger.BeginScope(new Dictionary<string, object?>
         {
             ["Uri"] = new Uri("https://projection.example/i2g?token=secret"),
@@ -51,9 +56,9 @@ public sealed class EcsHttpLoggingTests
         Assert.Equal("logs", document.GetProperty("data_stream").GetProperty("type").GetString());
         Assert.Equal("findair", document.GetProperty("data_stream").GetProperty("dataset").GetString());
         Assert.Equal("production", document.GetProperty("data_stream").GetProperty("namespace").GetString());
-        Assert.Equal("imaging-pipeline-gateway", document.GetProperty("service").GetProperty("name").GetString());
+        Assert.Equal("findair-gateway", document.GetProperty("service").GetProperty("name").GetString());
         Assert.Equal("production", document.GetProperty("service").GetProperty("environment").GetString());
-        Assert.Equal("imaging-pipeline", document.GetProperty("service").GetProperty("namespace").GetString());
+        Assert.Equal("findair", document.GetProperty("service").GetProperty("namespace").GetString());
         Assert.Equal("pod-uid", document.GetProperty("service").GetProperty("instance").GetProperty("id").GetString());
         Assert.Equal("gateway-1", document.GetProperty("service").GetProperty("node").GetProperty("name").GetString());
         Assert.Equal("cluster-1", document.GetProperty("orchestrator").GetProperty("cluster").GetProperty("name").GetString());
@@ -69,7 +74,21 @@ public sealed class EcsHttpLoggingTests
             document.GetProperty("messaging").GetProperty("message").GetProperty("id").GetString());
         Assert.Equal(
             "task-1",
-            document.GetProperty("imaging_pipeline").GetProperty("task").GetProperty("id").GetString());
+            document.GetProperty("findair").GetProperty("task").GetProperty("id").GetString());
+        Assert.Equal(
+            "Israel",
+            document.GetProperty("findair").GetProperty("area").GetProperty("name").GetString());
+        Assert.Equal(
+            "sensor-x",
+            document.GetProperty("findair").GetProperty("sensor").GetProperty("name").GetString());
+        Assert.Equal(
+            "tile-1",
+            document.GetProperty("findair").GetProperty("tile").GetProperty("id").GetString());
+        Assert.Equal(
+            7,
+            document.GetProperty("findair").GetProperty("tile").GetProperty("index").GetInt32());
+        Assert.False(document.TryGetProperty("host", out _));
+        Assert.False(document.TryGetProperty("process", out _));
         Assert.Equal(
             "https://projection.example/i2g",
             document.GetProperty("url").GetProperty("full").GetString()?.TrimEnd('/'));
@@ -177,6 +196,37 @@ public sealed class EcsHttpLoggingTests
     }
 
     [Fact]
+    public async Task ProviderSpecificFilter_KeepsDebugOutOfLogstash()
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Observability:Traces:Enabled"] = "false",
+            ["Observability:Metrics:Enabled"] = "false",
+            ["Observability:Logs:Enabled"] = "true",
+            ["Observability:Logs:ConsoleEnabled"] = "false",
+            ["Observability:Logs:Logstash:Enabled"] = "true",
+            ["Observability:Logs:Logstash:Endpoint"] = "http://logstash:8081",
+            ["Logging:LogLevel:Default"] = "Debug",
+            ["Logging:EcsHttp:LogLevel:Default"] = "Information"
+        });
+        builder.AddImagingPipelineObservability(ObservabilityServiceNames.Gateway);
+
+        using var host = builder.Build();
+        var logger = host.Services.GetRequiredService<ILogger<EcsHttpLoggingTests>>();
+        var buffer = host.Services.GetRequiredService<EcsLogBuffer>();
+
+        logger.LogDebug("console-only debug");
+        logger.LogInformation("logstash information");
+
+        var logEvent = await buffer.ReadAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
+        Assert.NotNull(logEvent);
+        Assert.Equal(LogLevel.Information, logEvent.Level);
+        Assert.Equal("logstash information", logEvent.Message);
+        Assert.False(buffer.TryRead(out _));
+    }
+
+    [Fact]
     public void Configuration_MissingLogstashEndpointFailsWithIndicativeMessage()
     {
         var configuration = new ConfigurationBuilder()
@@ -255,8 +305,8 @@ public sealed class EcsHttpLoggingTests
         MaxStringLength: 8_192);
 
     private static ObservabilityResourceIdentity CreateResource() => new(
-        ServiceName: "imaging-pipeline-gateway",
-        ServiceNamespace: "imaging-pipeline",
+        ServiceName: "findair-gateway",
+        ServiceNamespace: "findair",
         ServiceVersion: "1.2.3",
         DeploymentEnvironment: "production",
         ServiceInstanceId: "pod-uid",

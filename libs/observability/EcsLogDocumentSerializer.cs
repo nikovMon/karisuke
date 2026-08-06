@@ -21,6 +21,12 @@ internal static class EcsLogDocumentSerializer
             ["RuleId"] = TelemetryAttributeNames.PipelineRuleId,
             ["TenantId"] = TelemetryAttributeNames.PipelineTenantId,
             ["AlgorithmName"] = TelemetryAttributeNames.PipelineAlgorithmName,
+            ["AlgorithmNames"] = TelemetryAttributeNames.PipelineAlgorithmName,
+            ["AreaName"] = TelemetryAttributeNames.AreaName,
+            ["SensorName"] = TelemetryAttributeNames.SensorName,
+            ["TileId"] = TelemetryAttributeNames.TileId,
+            ["TileIndex"] = TelemetryAttributeNames.TileIndex,
+            ["TileCount"] = TelemetryAttributeNames.TileCount,
             ["RequestMethod"] = "http.request.method",
             ["HttpMethod"] = "http.request.method",
             ["RequestPath"] = "url.path",
@@ -39,7 +45,12 @@ internal static class EcsLogDocumentSerializer
             [TelemetryAttributeNames.PipelineImageId] = TelemetryAttributeNames.PipelineImageId,
             [TelemetryAttributeNames.PipelineRuleId] = TelemetryAttributeNames.PipelineRuleId,
             [TelemetryAttributeNames.PipelineTenantId] = TelemetryAttributeNames.PipelineTenantId,
-            [TelemetryAttributeNames.PipelineAlgorithmName] = TelemetryAttributeNames.PipelineAlgorithmName
+            [TelemetryAttributeNames.PipelineAlgorithmName] = TelemetryAttributeNames.PipelineAlgorithmName,
+            [TelemetryAttributeNames.AreaName] = TelemetryAttributeNames.AreaName,
+            [TelemetryAttributeNames.SensorName] = TelemetryAttributeNames.SensorName,
+            [TelemetryAttributeNames.TileId] = TelemetryAttributeNames.TileId,
+            [TelemetryAttributeNames.TileIndex] = TelemetryAttributeNames.TileIndex,
+            [TelemetryAttributeNames.TileCount] = TelemetryAttributeNames.TileCount
         };
 
     public static byte[] SerializeBatch(
@@ -85,13 +96,6 @@ internal static class EcsLogDocumentSerializer
         SetPath(document, "service.instance.id", resource.ServiceInstanceId);
         SetIfPresent(document, "service.node.name", resource.PodName);
 
-        SetPath(document, "host.name", resource.HostName);
-        SetPath(document, "process.pid", resource.ProcessId);
-        SetPath(document, "process.thread.id", logEvent.ThreadId);
-        SetPath(document, "service.language.name", "dotnet");
-        SetPath(document, "service.language.version", resource.RuntimeVersion);
-        SetPath(document, "service.runtime.name", resource.RuntimeName);
-        SetPath(document, "service.runtime.version", resource.RuntimeVersion);
 
         SetIfPresent(document, "kubernetes.namespace", resource.PodNamespace);
         SetIfPresent(document, "kubernetes.pod.name", resource.PodName);

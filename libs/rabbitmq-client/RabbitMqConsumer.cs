@@ -3,7 +3,6 @@ using System.Threading.Channels;
 using ImagingPipeline.Observability;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using OpenTelemetry;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
@@ -107,29 +106,20 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
             {
                 var receivedAt = TelemetryTiming.StartTimestamp();
                 var delivery = RabbitMqDeliveryFactory.Create(args);
-                var (parentContext, baggage) = ExtractTransportContext(delivery.Message.Headers);
-                var previousBaggage = Baggage.Current;
-                Baggage.Current = baggage;
+                var parentContext = ExtractTransportContext(delivery.Message.Headers);
                 try
                 {
-                    try
-                    {
-                        await ProcessDeliveryAsync(
-                            channel,
-                            handler,
-                            delivery,
-                            parentContext,
-                            receivedAt,
-                            cancellationToken);
-                    }
-                    catch (RabbitMqMessageCompletionException ex)
-                    {
-                        lifetime.CompletionFailed(ex);
-                    }
+                    await ProcessDeliveryAsync(
+                        channel,
+                        handler,
+                        delivery,
+                        parentContext,
+                        receivedAt,
+                        cancellationToken);
                 }
-                finally
+                catch (RabbitMqMessageCompletionException ex)
                 {
-                    Baggage.Current = previousBaggage;
+                    lifetime.CompletionFailed(ex);
                 }
             };
 
@@ -323,13 +313,13 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
             {
                 var receivedAt = TelemetryTiming.StartTimestamp();
                 var delivery = RabbitMqDeliveryFactory.Create(args);
-                var (parentContext, baggage) = ExtractTransportContext(delivery.Message.Headers);
+                var parentContext = ExtractTransportContext(delivery.Message.Headers);
                 var retryAttempt = ReadRetryAttempt(delivery.Message.Headers);
                 RabbitMqInputTelemetry.RecordConsumed(_options, delivery, retryAttempt);
 
                 await RabbitMqBatchBufferWriter.WriteAsync(
                     buffer.Writer,
-                    new BufferedDelivery(delivery, parentContext, baggage, receivedAt),
+                    new BufferedDelivery(delivery, parentContext, receivedAt),
                     _options.InputQueue,
                     receivedAt,
                     cancellationToken);
@@ -497,15 +487,9 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
         {
             activity.SetTag("messaging.system", "rabbitmq");
             activity.SetTag("messaging.destination.name", _options.InputQueue);
-            activity.SetTag("imaging_pipeline.messaging.operation", "handler");
+            activity.SetTag("findair.messaging.operation", "handler");
             activity.SetTag("messaging.batch.message_count", batch.Count);
         }
-
-        var previousBaggage = Baggage.Current;
-        // A batch has multiple linked parents. Only baggage shared by every message is
-        // safe to make ambient for downstream publishes; using batch[0] would leak its
-        // tenant/correlation context onto unrelated messages.
-        Baggage.Current = CommonBaggage(batch);
         using var logScope = _logger.BeginTelemetryScope(new TelemetryLogContext(
             Destination: _options.InputQueue));
 
@@ -583,8 +567,6 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
                     fallbackError);
                 MessagingTelemetry.AddInFlight(_options.InputQueue, -1);
             }
-
-            Baggage.Current = previousBaggage;
         }
     }
 
@@ -593,18 +575,15 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
             ? TelemetrySources.RabbitMq.StartActivity(name, ActivityKind.Internal)
             : TelemetrySources.RabbitMq.StartActivity(name, ActivityKind.Internal, parentContext);
 
-    private (ActivityContext ActivityContext, Baggage Baggage) ExtractTransportContext(
+    private ActivityContext ExtractTransportContext(
         IReadOnlyDictionary<string, object?>? headers)
     {
         if (Activity.Current is { } nativeActivity)
         {
-            // RabbitMQ.Client already extracted W3C trace context to create its subscriber
-            // activity. Parse only baggage here instead of parsing trace headers twice.
-            return (nativeActivity.Context, _propagator.ExtractBaggage(headers));
+            return nativeActivity.Context;
         }
 
-        var extracted = _propagator.Extract(headers);
-        return (extracted.ActivityContext, extracted.Baggage);
+        return _propagator.Extract(headers).ActivityContext;
     }
 
     private void AddDeliveryTags(Activity? activity, RabbitMqDelivery delivery, int retryAttempt)
@@ -616,7 +595,7 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
 
         activity.SetTag("messaging.system", "rabbitmq");
         activity.SetTag("messaging.destination.name", _options.InputQueue);
-        activity.SetTag("imaging_pipeline.messaging.operation", "handler");
+        activity.SetTag("findair.messaging.operation", "handler");
         activity.SetTag("messaging.message.id", delivery.Message.MessageId);
         activity.SetTag("messaging.message.conversation_id", delivery.Message.CorrelationId);
         activity.SetTag("messaging.message.body.size", delivery.Message.Body.LongLength);
@@ -635,60 +614,9 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
             : 0;
     }
 
-    private static Baggage CommonBaggage(IReadOnlyList<BufferedDelivery> batch)
-    {
-        var common = batch[0].Baggage.GetBaggage().ToArray();
-        var commonCount = common.Length;
-
-        for (var index = 1; index < batch.Count && commonCount > 0; index++)
-        {
-            var retainedCount = 0;
-            for (var commonIndex = 0; commonIndex < commonCount; commonIndex++)
-            {
-                var candidate = common[commonIndex];
-                if (ContainsBaggage(batch[index].Baggage, candidate))
-                {
-                    common[retainedCount++] = candidate;
-                }
-            }
-
-            commonCount = retainedCount;
-        }
-
-        if (commonCount == 0)
-        {
-            return default;
-        }
-
-        var commonDictionary = new Dictionary<string, string>(commonCount, StringComparer.Ordinal);
-        for (var index = 0; index < commonCount; index++)
-        {
-            commonDictionary[common[index].Key] = common[index].Value;
-        }
-
-        return Baggage.Create(commonDictionary);
-    }
-
-    private static bool ContainsBaggage(
-        Baggage baggage,
-        KeyValuePair<string, string> candidate)
-    {
-        foreach (var item in baggage.GetBaggage())
-        {
-            if (string.Equals(item.Key, candidate.Key, StringComparison.Ordinal)
-                && string.Equals(item.Value, candidate.Value, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     private sealed record BufferedDelivery(
         RabbitMqDelivery Delivery,
         ActivityContext ParentContext,
-        Baggage Baggage,
         long ReceivedAt);
 }
 

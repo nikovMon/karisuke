@@ -100,6 +100,9 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
                     $"ProjectionMapper endpoint '{endpointKey}' is not configured.");
             }
 
+            var safeEndpoint = ResolveEndpoint(endpoint);
+            AddHttpRequestTags(activity, safeEndpoint);
+
             var requestUri =
                 $"{endpoint}?overlayId={Uri.EscapeDataString(overlayId)}&useCache={(_options.UseCache ? "true" : "false")}";
             using var requestMessage = new HttpRequestMessage(HttpMethod.Post, requestUri)
@@ -203,6 +206,34 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
         }
     }
 
+    private Uri? ResolveEndpoint(string endpoint)
+    {
+        if (Uri.TryCreate(endpoint, UriKind.Absolute, out var absolute))
+        {
+            return absolute;
+        }
+
+        return _httpClient.BaseAddress is not null
+            && Uri.TryCreate(_httpClient.BaseAddress, endpoint, out var resolved)
+                ? resolved
+                : null;
+    }
+
+    private static void AddHttpRequestTags(Activity? activity, Uri? endpoint)
+    {
+        if (activity?.IsAllDataRequested != true || endpoint is null)
+        {
+            return;
+        }
+
+        var safeUrl = endpoint.GetLeftPart(UriPartial.Path);
+        activity.SetTag("http.request.method", HttpMethod.Post.Method);
+        activity.SetTag("url.full", safeUrl);
+        activity.SetTag("url.path", endpoint.AbsolutePath);
+        activity.SetTag("http.route", endpoint.AbsolutePath);
+        activity.SetTag("server.address", endpoint.Host);
+        activity.SetTag("server.port", endpoint.Port);
+    }
     private static TelemetryErrorCategory ClassifyStatusCode(HttpStatusCode statusCode)
     {
         if (statusCode == HttpStatusCode.RequestTimeout)

@@ -35,7 +35,7 @@ internal static class ObservabilityInternalTelemetry
 
     public static void RecordDroppedLogs(string reason, long count = 1)
     {
-        var tags = new TagList { { "imaging_pipeline.logs.drop.reason", reason } };
+        var tags = new TagList { { "findair.logs.drop.reason", reason } };
         DroppedLogs.Add(Math.Max(0, count), tags);
     }
 

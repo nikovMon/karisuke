@@ -27,11 +27,11 @@ public sealed class PipelineTimingHeadersTests
         var clock = new FakeTimeProvider(DateTimeOffset.FromUnixTimeMilliseconds(10_000));
         var valid = new Dictionary<string, object?>
         {
-            ["X-PIPELINE-START-UNIX-MS"] = Encoding.UTF8.GetBytes("2500")
+            ["FINDAIR-STARTED-AT-UNIX-MS"] = Encoding.UTF8.GetBytes("2500")
         };
         var malformed = new Dictionary<string, object?>
         {
-            ["X-PIPELINE-START-UNIX-MS"] = "yesterday"
+            ["FINDAIR-STARTED-AT-UNIX-MS"] = "yesterday"
         };
 
         PipelineTimingHeaders.EnsureStarted(valid, clock);
@@ -50,7 +50,7 @@ public sealed class PipelineTimingHeadersTests
         var headers = new Dictionary<string, object?>
         {
             [PipelineTimingHeaders.StartUnixMilliseconds] = 2_500L,
-            ["X-PIPELINE-START-UNIX-MS"] = 3_500L
+            ["FINDAIR-STARTED-AT-UNIX-MS"] = 3_500L
         };
 
         PipelineTimingHeaders.EnsureStarted(headers, clock);

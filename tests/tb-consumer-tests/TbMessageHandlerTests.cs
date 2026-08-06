@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Text;
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Messaging;
 using ImagingPipeline.Common.Dtos.Rules.Models;
@@ -9,6 +10,7 @@ using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbConsumer.Application;
 using Microsoft.Extensions.Time.Testing;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using OpenTelemetry;
@@ -20,6 +22,7 @@ public class TbMessageHandlerTests
     private readonly Mock<IProjectionMapperClient> _projectionMapperMock;
     private readonly Mock<IRabbitMqPublisher> _publisherMock;
     private readonly FakeTimeProvider _timeProvider;
+    private readonly RecordingLogger<TbMessageHandler> _logger;
     private readonly TbMessageHandler _handler;
 
     public TbMessageHandlerTests()
@@ -27,18 +30,22 @@ public class TbMessageHandlerTests
         _projectionMapperMock = new Mock<IProjectionMapperClient>();
         _publisherMock = new Mock<IRabbitMqPublisher>();
         _timeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 7, 15, 12, 0, 0, TimeSpan.Zero));
+        _logger = new RecordingLogger<TbMessageHandler>();
 
         _handler = new TbMessageHandler(
             _projectionMapperMock.Object,
             new EmbedderInputMessageBuilder(),
             _publisherMock.Object,
             _timeProvider,
-            NullLogger<TbMessageHandler>.Instance);
+            _logger,
+            new W3CMessageTraceContextPropagator());
     }
 
     private static TbConsumerInputDto CreateValidInput(int tileCount = 1) => new()
     {
         RequestId = "req-001",
+        TotalAmount = tileCount,
+        BatchTilesAmount = tileCount,
         Metadata = new TileBuilderMetadataDto
         {
             RequestId = "req-001",
@@ -57,6 +64,7 @@ public class TbMessageHandlerTests
                     ImageWidth = 1024,
                     ImageHeight = 1024,
                     SensorName = "sensor-x",
+                    AreaOfInterest = "Israel",
                     SensorType = "EO",
                     ImageTime = DateTimeOffset.Parse("2026-07-07T12:00:00Z"),
                     RoiFootprint = System.Text.Json.JsonDocument.Parse("{}").RootElement
@@ -99,7 +107,7 @@ public class TbMessageHandlerTests
             CorrelationId = "correlation-1",
             Headers = new Dictionary<string, object?>
             {
-                ["x-pipeline-start-unix-ms"] = _timeProvider.GetUtcNow().AddSeconds(-1).ToUnixTimeMilliseconds(),
+                ["findair-started-at-unix-ms"] = _timeProvider.GetUtcNow().AddSeconds(-1).ToUnixTimeMilliseconds(),
                 ["business-header"] = "preserved"
             }
         };
@@ -114,11 +122,10 @@ public class TbMessageHandlerTests
             p => p.PublishToOutputAsync(
                 It.Is<RabbitMqMessageEnvelope>(e =>
                     e.Headers != null &&
-                    e.Headers.ContainsKey("algorithm_name") &&
-                    (string)e.Headers["algorithm_name"]! == "FindAir,Rpn" &&
-                    e.Headers.ContainsKey("x-pipeline-start-unix-ms") &&
-                    (string)e.Headers["business-header"]! == "preserved" &&
-                    e.CorrelationId == "correlation-1"),
+                    e.Headers.ContainsKey("algorithm_names") &&
+                    (string)e.Headers["algorithm_names"]! == "FindAir,Rpn" &&
+                    e.Headers.ContainsKey("findair-started-at-unix-ms") &&
+                    e.CorrelationId == null),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -263,52 +270,90 @@ public class TbMessageHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_PublishesAuthoritativeCorrelationBaggageAndRestoresAmbientState()
+    public async Task HandleAsync_Success_LogsOneConfirmedEventPerTileAndOneBatchSummary()
+    {
+        var input = CreateValidInput(2);
+        input.Tiles[0].Uri = "https://user:password@tiles.test/tile-0.tif?signature=secret#fragment";
+        SetupProjectionMapperPassthrough();
+
+        var result = await _handler.HandleAsync(ToEnvelope(input));
+
+        Assert.True(result.IsSuccess);
+        var tileLogs = _logger.Entries.Where(entry => entry.EventId.Id == 4017).ToArray();
+        Assert.Equal(2, tileLogs.Length);
+        Assert.Single(_logger.Entries, entry => entry.EventId.Id == 4015);
+        Assert.All(tileLogs, entry =>
+        {
+            Assert.Equal(LogLevel.Information, entry.Level);
+            Assert.DoesNotContain("secret", entry.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("password", entry.Message, StringComparison.Ordinal);
+            Assert.Equal("task-001", entry.Attributes[TelemetryAttributeNames.PipelineTaskId]);
+            Assert.Equal("img-001", entry.Attributes[TelemetryAttributeNames.PipelineImageId]);
+            Assert.Equal("rule-1", entry.Attributes[TelemetryAttributeNames.PipelineRuleId]);
+            Assert.Equal("tenant-1", entry.Attributes[TelemetryAttributeNames.PipelineTenantId]);
+            Assert.Equal("Israel", entry.Attributes[TelemetryAttributeNames.AreaName]);
+            Assert.Equal("sensor-x", entry.Attributes[TelemetryAttributeNames.SensorName]);
+            Assert.True(entry.Attributes.ContainsKey(TelemetryAttributeNames.TileId));
+            Assert.True(entry.Attributes.ContainsKey(TelemetryAttributeNames.TileIndex));
+        });
+    }
+
+    [Fact]
+    public async Task HandleAsync_BatchTileAmountMismatch_ReturnsFailure()
+    {
+        var input = CreateValidInput(2);
+        input.BatchTilesAmount = 1;
+
+        var result = await _handler.HandleAsync(ToEnvelope(input));
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("batchTilesAmount", result.Error);
+    }
+
+    [Fact]
+    public async Task HandleAsync_DuplicateTileIndex_ReturnsFailure()
+    {
+        var input = CreateValidInput(2);
+        input.Tiles[1].TileIndex = input.Tiles[0].TileIndex;
+
+        var result = await _handler.HandleAsync(ToEnvelope(input));
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("tile indexes", result.Error);
+    }
+
+    [Fact]
+    public async Task HandleAsync_DoesNotCreateAuthoritativeCorrelationBaggage()
     {
         var previous = Baggage.Current;
         try
         {
             Baggage.Current = Baggage.Create(new Dictionary<string, string>
             {
-                [TelemetryAttributeNames.PipelineTaskId] = "spoofed-task",
-                [TelemetryAttributeNames.PipelineRequestId] = "spoofed-request",
                 ["secret"] = "do-not-forward"
             });
             var input = CreateValidInput();
             SetupProjectionMapperPassthrough();
-            IReadOnlyDictionary<string, string>? publishedBaggage = null;
-            _publisherMock
-                .Setup(p => p.PublishToOutputAsync(
-                    It.IsAny<RabbitMqMessageEnvelope>(),
-                    It.IsAny<CancellationToken>()))
-                .Callback(() => publishedBaggage = Baggage.Current.GetBaggage().ToDictionary(
-                    static item => item.Key,
-                    static item => item.Value,
-                    StringComparer.Ordinal))
-                .Returns(Task.CompletedTask);
 
             var result = await _handler.HandleAsync(ToEnvelope(input));
 
             Assert.True(result.IsSuccess);
-            Assert.NotNull(publishedBaggage);
-            Assert.Equal("task-001", publishedBaggage[TelemetryAttributeNames.PipelineTaskId]);
-            Assert.Equal("req-001", publishedBaggage[TelemetryAttributeNames.PipelineRequestId]);
-            Assert.Equal("img-001", publishedBaggage[TelemetryAttributeNames.PipelineImageId]);
-            Assert.Equal("rule-1", publishedBaggage[TelemetryAttributeNames.PipelineRuleId]);
-            Assert.Equal("tenant-1", publishedBaggage[TelemetryAttributeNames.PipelineTenantId]);
-            Assert.Equal("FindAir,Rpn", publishedBaggage[TelemetryAttributeNames.PipelineAlgorithmName]);
-            Assert.DoesNotContain("secret", publishedBaggage.Keys);
-            Assert.Equal("spoofed-task", Baggage.Current.GetBaggage(TelemetryAttributeNames.PipelineTaskId));
             Assert.Equal("do-not-forward", Baggage.Current.GetBaggage("secret"));
+            _publisherMock.Verify(
+                publisher => publisher.PublishToOutputAsync(
+                    It.Is<RabbitMqMessageEnvelope>(message =>
+                        message.Headers != null
+                        && !message.Headers.ContainsKey("baggage")),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
         }
         finally
         {
             Baggage.Current = previous;
         }
     }
-
     [Fact]
-    public async Task HandleAsync_CreatesAggregateValidationProjectionAndBuildSpans()
+    public async Task HandleAsync_CreatesProjectionAndEmbedderBatchSpans()
     {
         var input = CreateValidInput(2);
         SetupProjectionMapperPassthrough();
@@ -320,10 +365,22 @@ public class TbMessageHandlerTests
 
         Assert.True(result.IsSuccess);
         Assert.Equal(
-            ["tb_consumer.validate", "tb_consumer.projection", "tb_consumer.build"],
+            ["tb_consumer.projection", "embedder.publish_batch"],
             activities.Activities.Select(activity => activity.DisplayName).ToArray());
-        Assert.All(activities.Activities, activity => Assert.Equal(ActivityKind.Internal, activity.Kind));
+        Assert.Equal(ActivityKind.Internal, activities.Activities[0].Kind);
+        Assert.Equal(ActivityKind.Producer, activities.Activities[1].Kind);
         Assert.All(activities.Activities, activity => Assert.Equal(ActivityStatusCode.Ok, activity.Status));
+        var aggregateSpanId = activities.Activities[1].SpanId.ToHexString();
+        var publishedEnvelopes = _publisherMock.Invocations
+            .Select(invocation => Assert.IsType<RabbitMqMessageEnvelope>(invocation.Arguments[0]))
+            .ToArray();
+        Assert.Equal(2, publishedEnvelopes.Length);
+        Assert.All(publishedEnvelopes, envelope =>
+        {
+            Assert.NotNull(envelope.Headers);
+            var traceParent = Assert.IsType<byte[]>(envelope.Headers["traceparent"]);
+            Assert.Contains(aggregateSpanId, Encoding.UTF8.GetString(traceParent), StringComparison.Ordinal);
+        });
         Assert.Equal("task-001", handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineTaskId));
         Assert.Equal("req-001", handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineRequestId));
         Assert.Equal("img-001", handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineImageId));
@@ -485,7 +542,7 @@ public class TbMessageHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_PublishCancellation_MarksBuildSpanCancelled()
+    public async Task HandleAsync_PublishCancellation_MarksEmbedderBatchSpanCancelled()
     {
         var input = CreateValidInput();
         SetupProjectionMapperPassthrough();
@@ -498,7 +555,7 @@ public class TbMessageHandlerTests
 
         var activity = Assert.Single(
             activities.Activities,
-            activity => activity.DisplayName == "tb_consumer.build");
+            activity => activity.DisplayName == "embedder.publish_batch");
         Assert.Equal(ActivityStatusCode.Error, activity.Status);
         Assert.Equal("cancelled", activity.GetTagItem(TelemetryAttributeNames.ErrorCategory));
     }
@@ -589,6 +646,70 @@ public class TbMessageHandlerTests
         Assert.Equal(3, Assert.Single(fanOut.Measurements));
     }
 
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        private readonly Stack<object> _scopes = new();
+
+        public List<LogEntry> Entries { get; } = [];
+
+        public IDisposable BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            _scopes.Push(state);
+            return new Scope(_scopes);
+        }
+
+        public bool IsEnabled(LogLevel logLevel) => logLevel != LogLevel.None;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            var attributes = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var scope in _scopes.Reverse())
+            {
+                AddAttributes(scope, attributes);
+            }
+
+            AddAttributes(state, attributes);
+            Entries.Add(new LogEntry(logLevel, eventId, formatter(state, exception), attributes));
+        }
+
+        private static void AddAttributes(
+            object? state,
+            IDictionary<string, object?> attributes)
+        {
+            if (state is not IEnumerable<KeyValuePair<string, object?>> pairs)
+            {
+                return;
+            }
+
+            foreach (var pair in pairs)
+            {
+                attributes[pair.Key] = pair.Value;
+            }
+        }
+
+        private sealed class Scope(Stack<object> scopes) : IDisposable
+        {
+            public void Dispose()
+            {
+                if (scopes.Count > 0)
+                {
+                    scopes.Pop();
+                }
+            }
+        }
+    }
+
+    private sealed record LogEntry(
+        LogLevel Level,
+        EventId EventId,
+        string Message,
+        IReadOnlyDictionary<string, object?> Attributes);
     private sealed class FanOutMeasurementCollector : IDisposable
     {
         private readonly ConcurrentQueue<long> _measurements = new();

@@ -309,9 +309,93 @@ public sealed class TelemetryContractTests
 
         var tags = Assert.IsType<KeyValuePair<string, object?>[]>(capturedTags);
         Assert.Contains(tags, tag =>
-            tag.Key == "imaging_pipeline.rules.operation" && Equals(tag.Value, "bulk_update"));
+            tag.Key == "findair.rules.operation" && Equals(tag.Value, "bulk_update"));
         Assert.DoesNotContain(tags, tag =>
             tag.Key is TelemetryAttributeNames.PipelineOutcome or "error.type");
+    }
+
+    [Fact]
+    public void WorkloadMetricsUseBoundedBusinessDimensionsAndExcludeExecutionIds()
+    {
+        var measurements = new ConcurrentBag<Measurement>();
+        using var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, meterListener) =>
+            {
+                if (instrument.Name is
+                    TelemetryMetricNames.Images or
+                    TelemetryMetricNames.Tasks or
+                    TelemetryMetricNames.TileRequests or
+                    TelemetryMetricNames.TileBatches or
+                    TelemetryMetricNames.Tiles or
+                    TelemetryMetricNames.TilePublishAttempts)
+                {
+                    meterListener.EnableMeasurementEvents(instrument);
+                }
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, _, tags, _) =>
+            measurements.Add(new Measurement(instrument.Name, tags.ToArray())));
+        listener.Start();
+
+        WorkloadTelemetry.RecordImage(TelemetryOutcome.Success, "Israel", "sensor-x");
+        WorkloadTelemetry.RecordTask(
+            PipelineDirection.Egress,
+            TelemetryOutcome.Success,
+            "rule-1",
+            "tenant-1",
+            "Israel",
+            "sensor-x",
+            "FindAir,Rpn");
+        WorkloadTelemetry.RecordTileRequest(
+            TelemetryOutcome.Success,
+            "rule-1",
+            "tenant-1",
+            "Israel",
+            "sensor-x",
+            "FindAir,Rpn");
+        WorkloadTelemetry.RecordTileBatch(
+            TelemetryOutcome.Success,
+            "rule-1",
+            "tenant-1",
+            "Israel",
+            "sensor-x",
+            "FindAir,Rpn");
+        WorkloadTelemetry.RecordTiles(
+            TelemetryOutcome.Success,
+            "rule-1",
+            "tenant-1",
+            "Israel",
+            "sensor-x",
+            "FindAir,Rpn",
+            512,
+            512,
+            2);
+        WorkloadTelemetry.RecordTilePublishAttempt(
+            TelemetryOutcome.Success,
+            "rule-1",
+            "tenant-1",
+            "Israel",
+            "sensor-x",
+            "FindAir,Rpn");
+
+        Assert.Equal(6, measurements.Count);
+        var tags = measurements.SelectMany(measurement => measurement.Tags).ToArray();
+        Assert.Contains(tags, tag =>
+            tag.Key == TelemetryAttributeNames.AreaName && Equals(tag.Value, "Israel"));
+        Assert.Contains(tags, tag =>
+            tag.Key == TelemetryAttributeNames.SensorName && Equals(tag.Value, "sensor-x"));
+        Assert.Contains(tags, tag =>
+            tag.Key == TelemetryAttributeNames.PipelineRuleId && Equals(tag.Value, "rule-1"));
+        Assert.Contains(tags, tag =>
+            tag.Key == TelemetryAttributeNames.PipelineTenantId && Equals(tag.Value, "tenant-1"));
+        Assert.DoesNotContain(tags, tag =>
+            tag.Key is
+                TelemetryAttributeNames.PipelineTaskId or
+                TelemetryAttributeNames.PipelineRequestId or
+                TelemetryAttributeNames.PipelineImageId or
+                TelemetryAttributeNames.TileId or
+                TelemetryAttributeNames.TileIndex);
     }
 
     [Fact]

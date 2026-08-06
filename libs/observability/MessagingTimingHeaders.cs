@@ -6,7 +6,7 @@ namespace ImagingPipeline.Observability;
 /// </summary>
 public static class MessagingTimingHeaders
 {
-    public const string PublishedUnixMilliseconds = "x-pipeline-published-unix-ms";
+    public const string PublishedUnixMilliseconds = "findair-published-at-unix-ms";
     public static readonly TimeSpan DefaultMaximumAge = TimeSpan.FromHours(24);
     public static readonly TimeSpan DefaultMaximumFutureClockSkew = TimeSpan.FromSeconds(5);
 

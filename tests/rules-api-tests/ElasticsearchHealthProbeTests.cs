@@ -72,14 +72,14 @@ public sealed class ElasticsearchHealthProbeTests
         Assert.Equal(3, durations.Length);
         Assert.All(operations.Concat(durations), measurement =>
         {
-            Assert.Equal("health", measurement.Tags["imaging_pipeline.rules.operation"]);
+            Assert.Equal("health", measurement.Tags["findair.rules.operation"]);
             Assert.Contains(
                 measurement.Tags[TelemetryAttributeNames.PipelineOutcome],
                 new object?[] { "success", "failure" });
             Assert.Subset(
                 new HashSet<string>(StringComparer.Ordinal)
                 {
-                    "imaging_pipeline.rules.operation",
+                    "findair.rules.operation",
                     TelemetryAttributeNames.PipelineOutcome,
                     "error.type"
                 },
@@ -109,7 +109,7 @@ public sealed class ElasticsearchHealthProbeTests
         var duration = Assert.Single(
             measurements,
             measurement => measurement.InstrumentName == TelemetryMetricNames.RulesOperationDuration);
-        Assert.Equal("health", duration.Tags["imaging_pipeline.rules.operation"]);
+        Assert.Equal("health", duration.Tags["findair.rules.operation"]);
         Assert.Equal("cancelled", duration.Tags[TelemetryAttributeNames.PipelineOutcome]);
         Assert.Equal("cancelled", duration.Tags["error.type"]);
     }
@@ -181,7 +181,7 @@ public sealed class ElasticsearchHealthProbeTests
         where T : struct
     {
         var tagValues = ToDictionary(tags);
-        if (Equals(tagValues.GetValueOrDefault("imaging_pipeline.rules.operation"), "health"))
+        if (Equals(tagValues.GetValueOrDefault("findair.rules.operation"), "health"))
         {
             measurements.Add(new Measurement(instrumentName, Convert.ToDouble(value), tagValues));
         }

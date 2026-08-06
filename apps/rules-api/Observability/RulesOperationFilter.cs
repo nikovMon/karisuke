@@ -24,11 +24,11 @@ internal sealed class RulesOperationFilter : IAsyncActionFilter
 
         if (activity?.IsAllDataRequested == true)
         {
-            activity.SetTag("imaging_pipeline.rules.operation", OperationName(operation));
+            activity.SetTag("findair.rules.operation", OperationName(operation));
             if (requestedCount.HasValue)
             {
                 activity.SetTag(
-                    "imaging_pipeline.rules.request.document.count",
+                    "findair.rules.request.document.count",
                     requestedCount.Value);
             }
         }
@@ -71,7 +71,7 @@ internal sealed class RulesOperationFilter : IAsyncActionFilter
             if (activity?.IsAllDataRequested == true)
             {
                 activity.SetTag("http.response.status_code", statusCode);
-                activity.SetTag("imaging_pipeline.rules.response.document.count", documentCount);
+                activity.SetTag("findair.rules.response.document.count", documentCount);
                 activity.SetTag(TelemetryAttributeNames.PipelineOutcome, OutcomeName(outcome));
             }
             if (outcome == TelemetryOutcome.Success)

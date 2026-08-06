@@ -74,13 +74,13 @@ public sealed class RuleMatcher
             if (Activity.Current?.IsAllDataRequested == true)
             {
                 Activity.Current.SetTag(
-                    "imaging_pipeline.gateway.rules.filtered_photo_age",
+                    "findair.gateway.rules.filtered_photo_age",
                     photoAgeFilteredRuleCount);
                 Activity.Current.SetTag(
-                    "imaging_pipeline.gateway.photo.age_days",
+                    "findair.gateway.photo.age_days",
                     imageAgeDays);
                 Activity.Current.SetTag(
-                    "imaging_pipeline.gateway.photo.max_age_days",
+                    "findair.gateway.photo.max_age_days",
                     _maxPhotoAgeDays);
             }
 

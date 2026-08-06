@@ -9,8 +9,6 @@ public interface IMessageTraceContextPropagator
 {
     PropagationContext Extract(IReadOnlyDictionary<string, object?>? headers);
 
-    Baggage ExtractBaggage(IReadOnlyDictionary<string, object?>? headers);
-
     void InjectCurrent(IDictionary<string, object?> headers);
 
     void Inject(IDictionary<string, object?> headers, ActivityContext activityContext);
@@ -20,24 +18,7 @@ public sealed class W3CMessageTraceContextPropagator : IMessageTraceContextPropa
 {
     private static readonly string[] PropagationHeaderNames = ["traceparent", "tracestate", "baggage"];
 
-    private static readonly HashSet<string> AllowedBaggageKeys = new(StringComparer.Ordinal)
-    {
-        "tenant",
-        TelemetryAttributeNames.PipelineTaskId,
-        TelemetryAttributeNames.PipelineRequestId,
-        TelemetryAttributeNames.PipelineImageId,
-        TelemetryAttributeNames.PipelineRuleId,
-        TelemetryAttributeNames.PipelineTenantId,
-        TelemetryAttributeNames.PipelineAlgorithmName
-    };
-
-    private const int MaxBaggageEntries = 8;
-    private const int MaxBaggageKeyBytes = 128;
-    private const int MaxBaggageValueBytes = 256;
-    private const int MaxBaggageBytes = 2_048;
-
     private static readonly TextMapPropagator TraceContext = new TraceContextPropagator();
-    private static readonly TextMapPropagator BaggageContext = new BaggagePropagator();
 
     public PropagationContext Extract(IReadOnlyDictionary<string, object?>? headers)
     {
@@ -57,28 +38,8 @@ public sealed class W3CMessageTraceContextPropagator : IMessageTraceContextPropa
             return default;
         }
 
-        return new PropagationContext(trace.ActivityContext, ExtractBaggage(headers));
+        return new PropagationContext(trace.ActivityContext, default);
     }
-
-    public Baggage ExtractBaggage(IReadOnlyDictionary<string, object?>? headers)
-    {
-        if (headers is null || headers.Count == 0 || !IsBaggageHeaderWithinLimit(headers))
-        {
-            return default;
-        }
-
-        try
-        {
-            var extracted = BaggageContext.Extract(default, headers, ExtractValues);
-            return FilterBaggage(extracted.Baggage);
-        }
-        catch (Exception)
-        {
-            // Invalid external baggage is dropped without affecting trace propagation.
-            return default;
-        }
-    }
-
     public void InjectCurrent(IDictionary<string, object?> headers)
     {
         ArgumentNullException.ThrowIfNull(headers);
@@ -120,57 +81,11 @@ public sealed class W3CMessageTraceContextPropagator : IMessageTraceContextPropa
             headers,
             static (carrier, key, value) => carrier[key] = Encoding.UTF8.GetBytes(value));
 
-        var baggage = FilterBaggage(Baggage.Current);
-        BaggageContext.Inject(
-            new PropagationContext(activityContext, baggage),
-            headers,
-            static (carrier, key, value) => carrier[key] = Encoding.UTF8.GetBytes(value));
+
     }
 
     private static bool IsPropagationHeader(string key) =>
         PropagationHeaderNames.Contains(key, StringComparer.OrdinalIgnoreCase);
-
-    private static bool IsBaggageHeaderWithinLimit(IReadOnlyDictionary<string, object?> headers)
-    {
-        var raw = FindValue(headers, "baggage");
-        return raw switch
-        {
-            null => true,
-            string value => Encoding.UTF8.GetByteCount(value) <= MaxBaggageBytes,
-            byte[] value => value.Length <= MaxBaggageBytes,
-            ReadOnlyMemory<byte> value => value.Length <= MaxBaggageBytes,
-            Memory<byte> value => value.Length <= MaxBaggageBytes,
-            _ => false
-        };
-    }
-
-    private static Baggage FilterBaggage(Baggage baggage)
-    {
-        Dictionary<string, string>? filtered = null;
-        var totalBytes = 0;
-        foreach (var item in baggage.GetBaggage())
-        {
-            if (filtered?.Count >= MaxBaggageEntries || !AllowedBaggageKeys.Contains(item.Key))
-            {
-                continue;
-            }
-
-            var keyBytes = Encoding.UTF8.GetByteCount(item.Key);
-            var valueBytes = Encoding.UTF8.GetByteCount(item.Value);
-            if (keyBytes > MaxBaggageKeyBytes
-                || valueBytes > MaxBaggageValueBytes
-                || totalBytes + keyBytes + valueBytes > MaxBaggageBytes)
-            {
-                continue;
-            }
-
-            filtered ??= new Dictionary<string, string>(StringComparer.Ordinal);
-            filtered[item.Key] = item.Value;
-            totalBytes += keyBytes + valueBytes;
-        }
-
-        return filtered is null ? default : Baggage.Create(filtered);
-    }
 
     private static IEnumerable<string> ExtractValues(
         IReadOnlyDictionary<string, object?> headers,

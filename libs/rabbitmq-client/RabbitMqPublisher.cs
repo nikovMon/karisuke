@@ -60,12 +60,14 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
 
         try
         {
-            var headers = RabbitMqHeaders.Clone(message.Headers);
+            var headers = FilterOutboundHeaders(message.Headers, _options.RetryCountHeader);
             if (resetRetryCount)
             {
                 ResetRetryCount(headers, _options.RetryCountHeader);
             }
             PipelineTimingHeaders.EnsureStarted(headers);
+            headers[FindAirMessageHeaders.ContractVersion] =
+                FindAirMessageHeaders.CurrentContractVersion;
 
             var properties = new BasicProperties
             {
@@ -78,7 +80,7 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
 
             await using var lease = await _channels.LeaseAsync(cancellationToken);
             // This clock measures only the current broker hop. Native RabbitMQ tracing injects
-            // trace context and baggage from the producer span during BasicPublishAsync.
+            // trace context from the producer span during BasicPublishAsync.
             MessagingTimingHeaders.StampPublished(headers);
             await lease.Channel.BasicPublishAsync(
                 exchange: exchange,
@@ -111,6 +113,31 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
         }
     }
 
+    internal static Dictionary<string, object?> FilterOutboundHeaders(
+        IEnumerable<KeyValuePair<string, object?>>? source,
+        string retryCountHeader)
+    {
+        var filtered = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (source is null)
+        {
+            return filtered;
+        }
+
+        foreach (var header in source)
+        {
+            if (string.Equals(header.Key, FindAirMessageHeaders.TraceParent, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(header.Key, FindAirMessageHeaders.TraceState, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(header.Key, FindAirMessageHeaders.StartedAtUnixMilliseconds, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(header.Key, FindAirMessageHeaders.AlgorithmNames, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(header.Key, FindAirMessageHeaders.ContractVersion, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(header.Key, retryCountHeader, StringComparison.OrdinalIgnoreCase))
+            {
+                filtered[header.Key] = header.Value;
+            }
+        }
+
+        return filtered;
+    }
     internal static void ResetRetryCount(
         IDictionary<string, object?> headers,
         string retryCountHeader)
