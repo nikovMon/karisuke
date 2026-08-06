@@ -45,7 +45,7 @@ public sealed class RabbitMqClientOptions
     public int OutputPublishConcurrency { get; set; } = 4;
     public int RetryDelayMilliseconds { get; set; } = 10000;
     public int MaxRetryAttempts { get; set; } = 3;
-    public string RetryCountHeader { get; set; } = "x-retry-count";
+    public string RetryCountHeader { get; set; } = "retry-count";
     /// <summary>
     /// Identifies an external processor that forwards the upstream publication timestamp
     /// unchanged. On the first delivery, its elapsed time is recorded as external-stage
