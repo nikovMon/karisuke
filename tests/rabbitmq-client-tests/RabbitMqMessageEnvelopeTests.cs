@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using ImagingPipeline.Observability;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
@@ -374,6 +375,22 @@ public sealed class RabbitMqMessageEnvelopeTests
         Assert.Null(result.Message);
     }
 
+    [Fact]
+    public void OutboundHeaderFilterPreservesRoutingContractAndDropsArbitraryHeaders()
+    {
+        var headers = new Dictionary<string, object?>
+        {
+            [FindAirMessageHeaders.AlgorithmName] = "FindAir,Rpn",
+            [FindAirMessageHeaders.TraceParent] = "trace-context",
+            ["business-header"] = "drop-me"
+        };
+
+        var filtered = RabbitMqPublisher.FilterOutboundHeaders(headers, "retry-count");
+
+        Assert.Equal("FindAir,Rpn", filtered[FindAirMessageHeaders.AlgorithmName]);
+        Assert.Equal("trace-context", filtered[FindAirMessageHeaders.TraceParent]);
+        Assert.DoesNotContain("business-header", filtered.Keys);
+    }
     [Fact]
     public void OutputPublishRetryResetCanonicalizesCaseAndStartsTheNextServiceAtZero()
     {

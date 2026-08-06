@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Gateway.Messages;
 using ImagingPipeline.Common.Dtos.Rules.Models;
@@ -101,7 +102,7 @@ public sealed class GatewayWorkerTests
             Assert.NotNull(output.Headers);
             Assert.False(output.Headers.ContainsKey("business-header"));
             Assert.True(output.Headers.ContainsKey("findair-started-at-unix-ms"));
-            Assert.Equal("FindAir,Rpn", output.Headers["algorithm_names"]);
+            Assert.Equal("FindAir,Rpn", output.Headers["algorithmName"]);
             Assert.Equal(1, output.Headers["findair-contract-version"]);
         });
         Assert.Equal("image-1:gateway-output:rule-1:der", outputs[0].MessageId);
@@ -758,6 +759,27 @@ public sealed class GatewayWorkerTests
     }
 
     [Fact]
+    public async Task HandleAsyncMissingAreaContinuesAndLogsOneWarning()
+    {
+        var logger = new global::ImagingPipeline.Gateway.Tests.RecordingLogger<GatewayWorker>();
+        await using var harness = await GatewayWorkerHarness.CreateAsync(
+            [MatchingRule()],
+            gatewayWorkerLogger: logger);
+        var json = Encoding.UTF8.GetString(InputMessage().Body)
+            .Replace("\"areaOfInterest\": \"region-alpha\",", string.Empty, StringComparison.Ordinal);
+
+        var result = await harness.GatewayWorker.HandleAsync(
+            RabbitMqMessageEnvelope.FromUtf8(json, "message-without-area"));
+
+        Assert.True(result.IsSuccess);
+        var output = Assert.Single(OutputMessages(result));
+        using var document = JsonDocument.Parse(output.Body);
+        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("areaOfInterest").ValueKind);
+        var warning = Assert.Single(logger.Entries, entry => entry.EventId.Id == 2014);
+        Assert.Equal(LogLevel.Warning, warning.Level);
+        Assert.Equal("image-1", warning.Properties["ImageId"]);
+    }
+    [Fact]
     public async Task HandleAsyncReturnsFailureWhenRegistrationQualityIsMissing()
     {
         await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
@@ -919,7 +941,8 @@ public sealed class GatewayWorkerTests
             TimeSpan? consumerRestartDelay = null,
             GatewaySettings? gatewaySettings = null,
             TimeProvider? timeProvider = null,
-            ILogger<RuleMatcher>? ruleMatcherLogger = null)
+            ILogger<RuleMatcher>? ruleMatcherLogger = null,
+            ILogger<GatewayWorker>? gatewayWorkerLogger = null)
         {
             var health = new GatewayHealthState();
             gatewaySettings ??= new GatewaySettings
@@ -947,7 +970,7 @@ public sealed class GatewayWorkerTests
                     ruleMatcherLogger ?? NullLogger<RuleMatcher>.Instance),
                 outputBuilder,
                 health,
-                NullLogger<GatewayWorker>.Instance,
+                gatewayWorkerLogger ?? NullLogger<GatewayWorker>.Instance,
                 consumerRestartDelay ?? TimeSpan.FromSeconds(5));
 
             return new GatewayWorkerHarness(worker, ruleCache);

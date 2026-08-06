@@ -452,10 +452,9 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
         if (string.IsNullOrWhiteSpace(mission.TenantId)
             || string.IsNullOrWhiteSpace(overlay.ImageId)
             || string.IsNullOrWhiteSpace(overlay.RuleId)
-            || string.IsNullOrWhiteSpace(overlay.AreaOfInterest)
             || string.IsNullOrWhiteSpace(overlay.SensorName))
         {
-            return "Validation failed: tenantId, imageId, ruleId, area, and sensorName are required.";
+            return "Validation failed: tenantId, imageId, ruleId, and sensorName are required.";
         }
 
         if (input.Tiles is not { Count: > 0 })
@@ -495,7 +494,7 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
         return matchedAlgorithms is not { Count: > 0 }
                || matchedAlgorithms.Any(algorithm => !Enum.IsDefined(algorithm))
                || matchedAlgorithms.Distinct().Count() != matchedAlgorithms.Count
-            ? $"Validation failed: algorithm_names must contain one or more unique algorithms. Valid algorithms are: {string.Join(", ", Enum.GetNames<AlgorithmName>())}"
+            ? $"Validation failed: algorithm_name must contain one or more unique algorithms. Valid algorithms are: {string.Join(", ", Enum.GetNames<AlgorithmName>())}"
             : null;
     }
 
@@ -528,6 +527,7 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
             Password = string.Empty
         }.Uri.AbsoluteUri;
     }
+
     private static Activity? StartStageActivity(string operation)
     {
         var spanName = operation switch

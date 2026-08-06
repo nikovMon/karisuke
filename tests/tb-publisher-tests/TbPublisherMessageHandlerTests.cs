@@ -99,7 +99,7 @@ public sealed class TbPublisherMessageHandlerTests
             Assert.NotNull(envelope.Headers);
             Assert.False(envelope.Headers.ContainsKey("business-header"));
             Assert.True(envelope.Headers.ContainsKey("findair-started-at-unix-ms"));
-            Assert.Equal("FindAir,Rpn", envelope.Headers["algorithm_names"]);
+            Assert.Equal("FindAir,Rpn", envelope.Headers["algorithmName"]);
         });
     }
 
@@ -260,7 +260,7 @@ public sealed class TbPublisherMessageHandlerTests
                 {
                     Assert.NotNull(output.Headers);
                     Assert.False(output.Headers.ContainsKey("baggage"));
-                    Assert.Equal("FindAir,Rpn", output.Headers["algorithm_names"]);
+                    Assert.Equal("FindAir,Rpn", output.Headers["algorithmName"]);
                 });
         }
         finally

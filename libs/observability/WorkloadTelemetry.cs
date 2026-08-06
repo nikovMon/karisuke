@@ -20,11 +20,11 @@ public static class WorkloadTelemetry
 
     public static void RecordImage(
         TelemetryOutcome outcome,
-        string areaName,
+        string? areaName,
         string sensorName)
     {
         var tags = OutcomeTags(outcome);
-        AddIfPresent(ref tags, TelemetryAttributeNames.AreaName, areaName);
+        AddDimension(ref tags, TelemetryAttributeNames.AreaName, areaName);
         AddIfPresent(ref tags, TelemetryAttributeNames.SensorName, sensorName);
         Images.Add(1, tags);
     }
@@ -34,7 +34,7 @@ public static class WorkloadTelemetry
         TelemetryOutcome outcome,
         string ruleId,
         string tenantId,
-        string areaName,
+        string? areaName,
         string sensorName,
         string algorithmNames,
         long count = 1)
@@ -48,7 +48,7 @@ public static class WorkloadTelemetry
         TelemetryOutcome outcome,
         string ruleId,
         string tenantId,
-        string areaName,
+        string? areaName,
         string sensorName,
         string algorithmNames,
         long count = 1) =>
@@ -60,7 +60,7 @@ public static class WorkloadTelemetry
         TelemetryOutcome outcome,
         string ruleId,
         string tenantId,
-        string areaName,
+        string? areaName,
         string sensorName,
         string algorithmNames) =>
         TileBatches.Add(
@@ -71,7 +71,7 @@ public static class WorkloadTelemetry
         TelemetryOutcome outcome,
         string ruleId,
         string tenantId,
-        string areaName,
+        string? areaName,
         string sensorName,
         string algorithmNames,
         int tileWidth,
@@ -87,7 +87,7 @@ public static class WorkloadTelemetry
         TelemetryOutcome outcome,
         string ruleId,
         string tenantId,
-        string areaName,
+        string? areaName,
         string sensorName,
         string algorithmNames)
     {
@@ -99,14 +99,14 @@ public static class WorkloadTelemetry
         TelemetryOutcome outcome,
         string ruleId,
         string tenantId,
-        string areaName,
+        string? areaName,
         string sensorName,
         string algorithmNames)
     {
         var tags = OutcomeTags(outcome);
         AddIfPresent(ref tags, TelemetryAttributeNames.PipelineRuleId, ruleId);
         AddIfPresent(ref tags, TelemetryAttributeNames.PipelineTenantId, tenantId);
-        AddIfPresent(ref tags, TelemetryAttributeNames.AreaName, areaName);
+        AddDimension(ref tags, TelemetryAttributeNames.AreaName, areaName);
         AddIfPresent(ref tags, TelemetryAttributeNames.SensorName, sensorName);
         AddIfPresent(ref tags, TelemetryAttributeNames.PipelineAlgorithmName, algorithmNames);
         return tags;
@@ -116,6 +116,9 @@ public static class WorkloadTelemetry
     {
         { TelemetryAttributeNames.PipelineOutcome, outcome.Value() }
     };
+
+    private static void AddDimension(ref TagList tags, string key, string? value) =>
+        tags.Add(key, string.IsNullOrWhiteSpace(value) ? "unknown" : value);
 
     private static void AddIfPresent(ref TagList tags, string key, string? value)
     {

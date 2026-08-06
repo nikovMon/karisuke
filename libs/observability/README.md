@@ -273,7 +273,7 @@ centrally. Callers do not add duplicate manual transport spans.
 IMessageTraceContextPropagator injects and extracts only W3C traceparent and
 tracestate. Baggage is removed. The shared RabbitMqPublisher applies a strict
 case-insensitive header allowlist containing trace context, FindAir start and
-per-hop timestamps, algorithm_names, findair-contract-version, and the
+per-hop timestamps, algorithmName, findair-contract-version, and the
 configured retry-count header. Arbitrary business headers are dropped.
 
 Tile Builder must forward these headers unchanged. IDs needed for business

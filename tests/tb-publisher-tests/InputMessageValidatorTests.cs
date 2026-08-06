@@ -45,6 +45,19 @@ public sealed class InputMessageValidatorTests
     }
 
     [Fact]
+    public void ValidateAllowsMissingAreaMetadata()
+    {
+        var body = ValidBody.Replace(
+            "\"areaOfInterest\": \"region-alpha\",",
+            string.Empty,
+            StringComparison.Ordinal);
+
+        var result = _validator.Validate(Encoding.UTF8.GetBytes(body));
+
+        Assert.True(result.IsValid);
+        Assert.Null(result.Message!.AreaOfInterest);
+    }
+    [Fact]
     public void ValidateReturnsFailureForMalformedJson()
     {
         var body = Encoding.UTF8.GetBytes("{ not json");

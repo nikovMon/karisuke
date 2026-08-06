@@ -338,7 +338,7 @@ public sealed class TelemetryContractTests
             measurements.Add(new Measurement(instrument.Name, tags.ToArray())));
         listener.Start();
 
-        WorkloadTelemetry.RecordImage(TelemetryOutcome.Success, "Israel", "sensor-x");
+        WorkloadTelemetry.RecordImage(TelemetryOutcome.Success, null, "sensor-x");
         WorkloadTelemetry.RecordTask(
             PipelineDirection.Egress,
             TelemetryOutcome.Success,
@@ -382,7 +382,9 @@ public sealed class TelemetryContractTests
         Assert.Equal(6, measurements.Count);
         var tags = measurements.SelectMany(measurement => measurement.Tags).ToArray();
         Assert.Contains(tags, tag =>
-            tag.Key == TelemetryAttributeNames.AreaName && Equals(tag.Value, "Israel"));
+            tag.Key == TelemetryAttributeNames.AreaName && Equals(tag.Value, "Israel"));        Assert.Contains(tags, tag =>
+            tag.Key == TelemetryAttributeNames.AreaName && Equals(tag.Value, "unknown"));
+
         Assert.Contains(tags, tag =>
             tag.Key == TelemetryAttributeNames.SensorName && Equals(tag.Value, "sensor-x"));
         Assert.Contains(tags, tag =>

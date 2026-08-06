@@ -188,6 +188,10 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
                 ImageId: input.ImageId,
                 AreaName: input.AreaOfInterest,
                 SensorName: input.SensorName));
+            if (input.AreaOfInterest is null)
+            {
+                _logger.MissingAreaOfInterest(input.ImageId);
+            }
 
             IReadOnlyList<RuleMatchResult> matches;
             using (var matchActivity = StartStageActivity("match"))
