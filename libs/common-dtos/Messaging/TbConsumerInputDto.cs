@@ -28,8 +28,8 @@ public sealed class TbConsumerInputDto
     [JsonPropertyName("requestId")]
     public string RequestId { get; set; } = string.Empty;
 
-    [JsonPropertyName("totalAmount")]
-    public int TotalAmount { get; set; }
+    [JsonPropertyName("tilesAmount")]
+    public int TilesAmount { get; set; }
 
     [JsonPropertyName("batchTilesAmount")]
     public int BatchTilesAmount { get; set; }

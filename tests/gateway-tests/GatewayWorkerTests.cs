@@ -204,9 +204,12 @@ public sealed class GatewayWorkerTests
         Assert.Equal(2013, log.EventId.Id);
         Assert.Equal(LogLevel.Information, log.Level);
         Assert.Equal(1, log.Properties["FilteredRuleCount"]);
+        Assert.Equal("image-1", log.Properties["ImageId"]);
+        Assert.Equal(InputPhotoTime, log.Properties["PhotoTime"]);
+        Assert.Equal(InputPhotoTime.AddDays(31), log.Properties["EvaluatedAt"]);
         Assert.Equal(31d, log.Properties["ImageAgeDays"]);
         Assert.Equal(30, log.Properties["MaxPhotoAgeDays"]);
-        Assert.Equal(InputPhotoTime, log.Properties["PhotoTime"]);
+        Assert.Equal(InputPhotoTime.AddDays(1), log.Properties["PhotoTimeCutoff"]);
     }
 
     [Theory]

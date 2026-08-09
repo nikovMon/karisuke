@@ -2,9 +2,9 @@ namespace ImagingPipeline.Rules.Api.Configuration;
 
 public sealed class RulesElasticsearchOptions
 {
-    public const string SectionName = "Rules";
+    public const string SectionName = "Elasticsearch";
 
-    public string IndexName { get; set; } = "rules";
+    public string Index { get; set; } = "rules";
 
     public int DefaultSearchSize { get; set; } = 100;
 
@@ -12,9 +12,9 @@ public sealed class RulesElasticsearchOptions
 
     internal bool IsValid(out string error)
     {
-        if (string.IsNullOrWhiteSpace(IndexName))
+        if (string.IsNullOrWhiteSpace(Index))
         {
-            error = "Rules Elasticsearch IndexName must not be empty.";
+            error = "Rules Elasticsearch Index must not be empty.";
             return false;
         }
 

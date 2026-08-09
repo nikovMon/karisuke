@@ -404,7 +404,7 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
 
         _logger.MessageProcessed(
             input.Tiles.Count,
-            input.TotalAmount,
+            input.TilesAmount,
             mappedCoordinateCount,
             publishedCount);
         WorkloadTelemetry.RecordTileBatch(
@@ -462,9 +462,9 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
             return "Validation failed: tileUniqueMetadata must contain at least one tile.";
         }
 
-        if (input.TotalAmount <= 0 || input.TotalAmount < input.Tiles.Count)
+        if (input.TilesAmount <= 0 || input.TilesAmount < input.Tiles.Count)
         {
-            return "Validation failed: totalAmount must be positive and not smaller than the batch tile count.";
+            return "Validation failed: tilesAmount must be positive and not smaller than the batch tile count.";
         }
 
         if (input.BatchTilesAmount != input.Tiles.Count)
@@ -476,10 +476,10 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
         foreach (var tile in input.Tiles)
         {
             if (tile.TileIndex < 0
-                || tile.TileIndex >= input.TotalAmount
+                || tile.TileIndex >= input.TilesAmount
                 || !indexes.Add(tile.TileIndex))
             {
-                return "Validation failed: tile indexes must be unique within the batch and in totalAmount range.";
+                return "Validation failed: tile indexes must be unique within the batch and in tilesAmount range.";
             }
 
             if (tile.Roi is not { Length: 4 }

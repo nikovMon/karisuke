@@ -28,7 +28,7 @@ public sealed class RuleService : IRuleService
         ILogger<RuleService> logger)
     {
         _client = client;
-        _indexName = options.Value.IndexName;
+        _indexName = options.Value.Index;
         _logger = logger;
     }
 

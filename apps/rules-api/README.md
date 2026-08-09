@@ -15,10 +15,7 @@ Default local settings:
     "Index": "rules",
     "TimeoutSeconds": 30,
     "Username": "",
-    "Password": ""
-  },
-  "Rules": {
-    "IndexName": "rules",
+    "Password": "",
     "DefaultSearchSize": 100,
     "MaxSearchSize": 1000
   }
@@ -182,7 +179,7 @@ Query parameters:
 - `getNameOnly`: optional boolean. Defaults to `false`.
 - `isActive`: optional boolean. When set, filters active or inactive rules.
 - `from`: optional zero-based result offset. Defaults to `0`.
-- `size`: optional page size. Defaults to `Rules:DefaultSearchSize` and cannot exceed `Rules:MaxSearchSize`.
+- `size`: optional page size. Defaults to `Elasticsearch:DefaultSearchSize` and cannot exceed `Elasticsearch:MaxSearchSize`.
 
 Examples:
 

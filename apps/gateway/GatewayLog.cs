@@ -38,13 +38,16 @@ internal static partial class GatewayLog
         Exception exception,
         string errorCategory);
 
-    [LoggerMessage(2013, LogLevel.Information, "Gateway excluded {FilteredRuleCount} rules from matching because image photo age {ImageAgeDays} days exceeded the configured maximum of {MaxPhotoAgeDays} days. PhotoTime: {PhotoTime}")]
+    [LoggerMessage(2013, LogLevel.Information, "Gateway excluded {FilteredRuleCount} photo-age-sensitive rules for image {ImageId}: photo time {PhotoTime}, evaluated at {EvaluatedAt}, age {ImageAgeDays} days, configured maximum {MaxPhotoAgeDays} days, cutoff {PhotoTimeCutoff}.")]
     public static partial void OldPhotoRulesFiltered(
         this ILogger logger,
         int filteredRuleCount,
+        string imageId,
+        DateTimeOffset photoTime,
+        DateTimeOffset evaluatedAt,
         double imageAgeDays,
         int maxPhotoAgeDays,
-        DateTimeOffset photoTime);
+        DateTimeOffset photoTimeCutoff);
 
     [LoggerMessage(2014, LogLevel.Warning, "Gateway input image {ImageId} has no areaOfInterest; processing continues without area metadata.")]
     public static partial void MissingAreaOfInterest(this ILogger logger, string imageId);

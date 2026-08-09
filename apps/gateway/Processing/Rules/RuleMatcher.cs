@@ -35,7 +35,8 @@ public sealed class RuleMatcher
     {
         var matches = new List<RuleMatchResult>();
         var registrationQualityMask = RegistrationQualityMask.From(input.RegistrationQuality);
-        var photoAge = _timeProvider.GetUtcNow() - input.PhotoTime;
+        var evaluatedAt = _timeProvider.GetUtcNow();
+        var photoAge = evaluatedAt - input.PhotoTime;
         var exceedsMaximumPhotoAge = photoAge > _maxPhotoAge;
         var photoAgeFilteredRuleCount = 0;
 
@@ -86,9 +87,12 @@ public sealed class RuleMatcher
 
             _logger.OldPhotoRulesFiltered(
                 photoAgeFilteredRuleCount,
+                input.ImageId,
+                input.PhotoTime,
+                evaluatedAt,
                 Math.Round(imageAgeDays, 3),
                 _maxPhotoAgeDays,
-                input.PhotoTime);
+                evaluatedAt - _maxPhotoAge);
         }
 
         return matches;

@@ -35,7 +35,7 @@ public sealed class RuleServiceTests
         var logger = new RecordingLogger<RuleService>();
         var service = new RuleService(
             repository,
-            Options.Create(new RulesElasticsearchOptions { IndexName = "rules" }),
+            Options.Create(new RulesElasticsearchOptions { Index = "rules" }),
             logger);
 
         var result = await service.CreateAsync(ValidCreateRequest("same-name"));
@@ -286,7 +286,7 @@ public sealed class RuleServiceTests
         var logger = new RecordingLogger<RuleService>();
         var service = new RuleService(
             repository,
-            Options.Create(new RulesElasticsearchOptions { IndexName = "rules" }),
+            Options.Create(new RulesElasticsearchOptions { Index = "rules" }),
             logger);
         var missingIds = Enumerable.Range(1, 12).Select(index => $"missing-{index}").ToArray();
         var ids = new[] { "rule-1" }.Concat(missingIds).ToArray();
@@ -382,7 +382,7 @@ public sealed class RuleServiceTests
         var logger = new RecordingLogger<RuleService>();
         var service = new RuleService(
             new InMemoryRuleRepository(),
-            Options.Create(new RulesElasticsearchOptions { IndexName = "rules" }),
+            Options.Create(new RulesElasticsearchOptions { Index = "rules" }),
             logger);
         var missingIds = Enumerable.Range(1, 12).Select(index => $"missing-{index}").ToArray();
 
@@ -495,7 +495,7 @@ public sealed class RuleServiceTests
         var logger = new RecordingLogger<RuleService>();
         var service = new RuleService(
             new InMemoryRuleRepository(),
-            Options.Create(new RulesElasticsearchOptions { IndexName = "rules" }),
+            Options.Create(new RulesElasticsearchOptions { Index = "rules" }),
             logger);
         var request = new UpdateRuleRequest();
 
@@ -519,7 +519,7 @@ public sealed class RuleServiceTests
         var logger = new RecordingLogger<RuleService>();
         var service = new RuleService(
             new InMemoryRuleRepository(),
-            Options.Create(new RulesElasticsearchOptions { IndexName = "rules" }),
+            Options.Create(new RulesElasticsearchOptions { Index = "rules" }),
             logger);
 
         var result = await service.CreateAsync(ValidCreateRequest("observed-rule"));
@@ -538,7 +538,7 @@ public sealed class RuleServiceTests
     private static RuleService CreateService(InMemoryRuleRepository repository) =>
         new(
             repository,
-            Options.Create(new RulesElasticsearchOptions { IndexName = "rules" }),
+            Options.Create(new RulesElasticsearchOptions { Index = "rules" }),
             NullLogger<RuleService>.Instance);
 
     private static CreateRuleRequest ValidCreateRequest(string ruleName) =>
