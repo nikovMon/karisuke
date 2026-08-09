@@ -44,7 +44,7 @@ public class TbMessageHandlerTests
     private static TbConsumerInputDto CreateValidInput(int tileCount = 1) => new()
     {
         RequestId = "req-001",
-        TotalAmount = tileCount,
+        TilesAmount = tileCount,
         BatchTilesAmount = tileCount,
         Metadata = new TileBuilderMetadataDto
         {
@@ -167,6 +167,20 @@ public class TbMessageHandlerTests
             Times.Exactly(3));
     }
 
+    [Fact]
+    public async Task HandleAsync_TileBuilderContract_UsesTilesAmountName()
+    {
+        var input = CreateValidInput(1);
+        SetupProjectionMapperPassthrough();
+        var json = JsonSerializer.Serialize(input);
+
+        Assert.Contains("\"tilesAmount\":1", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"totalAmount\"", json, StringComparison.Ordinal);
+
+        var result = await _handler.HandleAsync(RabbitMqMessageEnvelope.FromUtf8(json));
+
+        Assert.True(result.IsSuccess);
+    }
     [Fact]
     public async Task HandleAsync_RoiBoundingBox_SendsFourCornersToProjectionMapper()
     {
