@@ -50,6 +50,7 @@ public sealed class ObservabilityLogstashOptions
     public string? Endpoint { get; set; }
     public int QueueCapacity { get; set; } = 10_000;
     public int PriorityQueueCapacity { get; set; } = 1_000;
+    public int WarningQueueCapacity { get; set; } = 1_000;
     public int BatchSize { get; set; } = 100;
     public int FlushIntervalMilliseconds { get; set; } = 1_000;
     public int RequestTimeoutSeconds { get; set; } = 5;

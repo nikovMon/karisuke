@@ -90,24 +90,32 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                 return RabbitMqMessageProcessingResult.Failure(deserializationError);
             }
 
-            var validationError = Validate(input);
-            if (validationError is not null)
+            var telemetryContext = CreateTelemetryContext(input);
+            using var pipelineScope = _logger.BeginTelemetryScope(telemetryContext);
+            Activity.Current.AddPipelineContext(
+                taskId: telemetryContext.TaskId,
+                requestId: telemetryContext.RequestId,
+                imageId: telemetryContext.ImageId,
+                ruleId: telemetryContext.RuleId,
+                tenantId: telemetryContext.TenantId,
+                algorithmName: telemetryContext.AlgorithmName,
+                areaName: telemetryContext.AreaName,
+                sensorName: telemetryContext.SensorName);
+
+            var validationFailure = Validate(input);
+            if (validationFailure is not null)
             {
                 outcome = TelemetryOutcome.Rejected;
                 error = TelemetryErrorCategory.Validation;
-                _logger.MessageRejected(validationError);
-                return RabbitMqMessageProcessingResult.Failure(validationError);
+                _logger.MessageRejected(
+                    validationFailure.Code,
+                    validationFailure.Message,
+                    validationFailure.TilesAmount,
+                    validationFailure.BatchTilesAmount,
+                    validationFailure.ActualBatchTileCount,
+                    validationFailure.OffendingTileIndex);
+                return RabbitMqMessageProcessingResult.Failure(validationFailure.Message);
             }
-            var overlay = input.Metadata.MissionMetadata.Overlay;
-            Activity.Current.AddPipelineContext(
-                taskId: input.Metadata.TaskId,
-                requestId: input.RequestId,
-                imageId: overlay.ImageId,
-                ruleId: overlay.RuleId,
-                tenantId: input.Metadata.MissionMetadata.TenantId,
-                algorithmName: string.Join(",", overlay.AlgorithmNames),
-                areaName: overlay.AreaOfInterest,
-                sensorName: overlay.SensorName);
 
             var result = await HandleValidatedMessageAsync(input, message, cancellationToken, processingState);
             outcome = processingState.Outcome;
@@ -172,15 +180,6 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
             .ToList();
         var algorithmNameText = string.Join(",", algorithmNames);
         var overlay = input.Metadata.MissionMetadata.Overlay;
-        using var pipelineScope = _logger.BeginTelemetryScope(new TelemetryLogContext(
-            TaskId: input.Metadata.TaskId,
-            RequestId: input.RequestId,
-            ImageId: overlay.ImageId,
-            RuleId: overlay.RuleId,
-            TenantId: input.Metadata.MissionMetadata.TenantId,
-            AlgorithmName: algorithmNameText,
-            AreaName: overlay.AreaOfInterest,
-            SensorName: overlay.SensorName));
 
         PipelineTelemetry.RecordBatchSize(PipelineStage.TbConsumer, PipelineItem.Tile, input.Tiles.Count);
 
@@ -435,69 +434,163 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
         return RabbitMqMessageProcessingResult.Success();
     }
 
-    private static string? Validate(TbConsumerInputDto input)
+    private static ValidationFailure? Validate(TbConsumerInputDto input)
     {
         if (string.IsNullOrWhiteSpace(input.RequestId))
         {
-            return "Validation failed: requestId is missing or empty.";
+            return ValidationFailure.Create(
+                "missing_request_id",
+                "Validation failed: requestId is missing or empty.",
+                input);
+        }
+
+        if (input.Metadata is null)
+        {
+            return ValidationFailure.Create(
+                "missing_metadata",
+                "Validation failed: metadata is missing.",
+                input);
         }
 
         if (string.IsNullOrWhiteSpace(input.Metadata.TaskId))
         {
-            return "Validation failed: taskId is missing or empty.";
+            return ValidationFailure.Create(
+                "missing_task_id",
+                "Validation failed: taskId is missing or empty.",
+                input);
+        }
+
+        if (input.Metadata.MissionMetadata is null)
+        {
+            return ValidationFailure.Create(
+                "missing_mission_metadata",
+                "Validation failed: missionMetadata is missing.",
+                input);
         }
 
         var mission = input.Metadata.MissionMetadata;
+        if (mission.Overlay is null)
+        {
+            return ValidationFailure.Create(
+                "missing_overlay",
+                "Validation failed: overlay is missing.",
+                input);
+        }
+
         var overlay = mission.Overlay;
         if (string.IsNullOrWhiteSpace(mission.TenantId)
             || string.IsNullOrWhiteSpace(overlay.ImageId)
             || string.IsNullOrWhiteSpace(overlay.RuleId)
             || string.IsNullOrWhiteSpace(overlay.SensorName))
         {
-            return "Validation failed: tenantId, imageId, ruleId, and sensorName are required.";
+            return ValidationFailure.Create(
+                "missing_business_metadata",
+                "Validation failed: tenantId, imageId, ruleId, and sensorName are required.",
+                input);
         }
 
         if (input.Tiles is not { Count: > 0 })
         {
-            return "Validation failed: tileUniqueMetadata must contain at least one tile.";
+            return ValidationFailure.Create(
+                "missing_tiles",
+                "Validation failed: tileUniqueMetadata must contain at least one tile.",
+                input);
         }
 
         if (input.TilesAmount <= 0 || input.TilesAmount < input.Tiles.Count)
         {
-            return "Validation failed: tilesAmount must be positive and not smaller than the batch tile count.";
+            return ValidationFailure.Create(
+                "invalid_tiles_amount",
+                "Validation failed: tilesAmount must be positive and not smaller than the batch tile count.",
+                input);
         }
 
         if (input.BatchTilesAmount != input.Tiles.Count)
         {
-            return "Validation failed: batchTilesAmount must equal tileUniqueMetadata count.";
+            return ValidationFailure.Create(
+                "batch_tiles_amount_mismatch",
+                "Validation failed: batchTilesAmount must equal tileUniqueMetadata count.",
+                input);
         }
 
         var indexes = new HashSet<int>();
         foreach (var tile in input.Tiles)
         {
-            if (tile.TileIndex < 0
-                || tile.TileIndex >= input.TilesAmount
-                || !indexes.Add(tile.TileIndex))
+            if (tile is null)
             {
-                return "Validation failed: tile indexes must be unique within the batch and in tilesAmount range.";
+                return ValidationFailure.Create(
+                    "null_tile",
+                    "Validation failed: tileUniqueMetadata contains a null tile.",
+                    input);
+            }
+
+            if (tile.TileIndex < 0 || tile.TileIndex >= input.TilesAmount)
+            {
+                return ValidationFailure.Create(
+                    "tile_index_out_of_range",
+                    $"Validation failed: tile index {tile.TileIndex} must be between 0 and {input.TilesAmount - 1}.",
+                    input,
+                    tile.TileIndex);
+            }
+
+            if (!indexes.Add(tile.TileIndex))
+            {
+                return ValidationFailure.Create(
+                    "duplicate_tile_index",
+                    $"Validation failed: tile index {tile.TileIndex} is duplicated within the batch.",
+                    input,
+                    tile.TileIndex);
             }
 
             if (tile.Roi is not { Length: 4 }
                 || tile.Roi.Any(value => !double.IsFinite(value))
                 || string.IsNullOrWhiteSpace(tile.Uri))
             {
-                return "Validation failed: every tile requires a finite four-value ROI and non-empty URI.";
+                return ValidationFailure.Create(
+                    "invalid_tile_metadata",
+                    "Validation failed: every tile requires a finite four-value ROI and non-empty URI.",
+                    input,
+                    tile.TileIndex);
             }
         }
 
         var matchedAlgorithms = overlay.AlgorithmNames;
-        return matchedAlgorithms is not { Count: > 0 }
-               || matchedAlgorithms.Any(algorithm => !Enum.IsDefined(algorithm))
-               || matchedAlgorithms.Distinct().Count() != matchedAlgorithms.Count
-            ? $"Validation failed: algorithm_name must contain one or more unique algorithms. Valid algorithms are: {string.Join(", ", Enum.GetNames<AlgorithmName>())}"
-            : null;
+        if (matchedAlgorithms is not { Count: > 0 }
+            || matchedAlgorithms.Any(algorithm => !Enum.IsDefined(algorithm))
+            || matchedAlgorithms.Distinct().Count() != matchedAlgorithms.Count)
+        {
+            return ValidationFailure.Create(
+                "invalid_algorithms",
+                $"Validation failed: algorithm_name must contain one or more unique algorithms. Valid algorithms are: {string.Join(", ", Enum.GetNames<AlgorithmName>())}",
+                input);
+        }
+
+        return null;
     }
 
+    private static TelemetryLogContext CreateTelemetryContext(TbConsumerInputDto input)
+    {
+        var metadata = input.Metadata;
+        var mission = metadata?.MissionMetadata;
+        var overlay = mission?.Overlay;
+        return new TelemetryLogContext(
+            TaskId: NullIfWhiteSpace(metadata?.TaskId),
+            RequestId: NullIfWhiteSpace(input.RequestId),
+            ImageId: NullIfWhiteSpace(overlay?.ImageId),
+            RuleId: NullIfWhiteSpace(overlay?.RuleId),
+            TenantId: NullIfWhiteSpace(mission?.TenantId),
+            AlgorithmName: ValidAlgorithmNamesOrNull(overlay?.AlgorithmNames),
+            AreaName: NullIfWhiteSpace(overlay?.AreaOfInterest),
+            SensorName: NullIfWhiteSpace(overlay?.SensorName));
+    }
+
+    private static string? ValidAlgorithmNamesOrNull(IReadOnlyCollection<AlgorithmName>? algorithms) =>
+        algorithms is { Count: > 0 } && algorithms.All(Enum.IsDefined)
+            ? string.Join(",", algorithms)
+            : null;
+
+    private static string? NullIfWhiteSpace(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value;
     private static Activity? StartEmbedderBatchActivity(int tileCount)
     {
         var activity = TelemetrySources.TbConsumer.StartActivity(
@@ -544,6 +637,27 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
         return activity;
     }
 
+    private sealed record ValidationFailure(
+        string Code,
+        string Message,
+        int? TilesAmount,
+        int? BatchTilesAmount,
+        int? ActualBatchTileCount,
+        int? OffendingTileIndex)
+    {
+        public static ValidationFailure Create(
+            string code,
+            string message,
+            TbConsumerInputDto input,
+            int? offendingTileIndex = null) =>
+            new(
+                code,
+                message,
+                input.TilesAmount,
+                input.BatchTilesAmount,
+                input.Tiles?.Count,
+                offendingTileIndex);
+    }
     private sealed class HandlerTelemetryState
     {
         public TelemetryOutcome Outcome { get; private set; } = TelemetryOutcome.Failure;

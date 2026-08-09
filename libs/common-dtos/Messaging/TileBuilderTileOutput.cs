@@ -10,6 +10,6 @@ public class TileBuilderTileOutput
     [JsonPropertyName("uri")]
     public string Uri { get; set; } = string.Empty;
 
-    [JsonPropertyName("tile_index")]
+    [JsonPropertyName("tileIndex")]
     public int TileIndex { get; set; }
 }

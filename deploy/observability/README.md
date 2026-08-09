@@ -389,6 +389,7 @@ requirement to move these values out of JSON:
 | `Observability__Logs__Logstash__Endpoint` | `http://production-logstash:8081/` | Production Logstash input; override per environment |
 | `Observability__Logs__Logstash__QueueCapacity` | `10000` | Total bounded in-memory capacity |
 | `Observability__Logs__Logstash__PriorityQueueCapacity` | `1000` | Capacity reserved for error/critical records |
+| `Observability__Logs__Logstash__WarningQueueCapacity` | `1000` | Capacity reserved for warning records |
 | `Observability__Logs__Logstash__BatchSize` | `100` | Maximum records per HTTP batch |
 | `Observability__Logs__Logstash__FlushIntervalMilliseconds` | `1000` | Maximum partial-batch wait |
 | `Observability__Logs__Logstash__RequestTimeoutSeconds` | `5` | Per-request timeout |

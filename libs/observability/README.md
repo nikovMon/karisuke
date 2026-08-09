@@ -81,6 +81,7 @@ A complete configuration has the following shape:
         "Endpoint": "http://logstash.example:8080",
         "QueueCapacity": 10000,
         "PriorityQueueCapacity": 1000,
+        "WarningQueueCapacity": 1000,
         "BatchSize": 100,
         "FlushIntervalMilliseconds": 1000,
         "RequestTimeoutSeconds": 5,

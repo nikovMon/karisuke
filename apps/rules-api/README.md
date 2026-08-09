@@ -130,7 +130,7 @@ Repository failures, usually Elasticsearch failures, return `503 Service Unavail
 
 ## Observability
 
-The API exports OpenTelemetry traces, metrics, and correlated structured logs through OTLP.
+The API exports traces to the OpenTelemetry Collector over OTLP, exposes metrics at `/metrics` for Prometheus, and sends correlated ECS JSON logs to Logstash over HTTP.
 
 - ASP.NET Core produces the HTTP server spans and request-duration metrics; a separate request-logging middleware is intentionally not used.
 - Rules actions add child spans and bounded metrics for operation outcome, duration, validation failures, requested bulk size, and returned or changed document counts.

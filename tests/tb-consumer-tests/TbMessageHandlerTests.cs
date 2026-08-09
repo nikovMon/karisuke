@@ -341,15 +341,98 @@ public class TbMessageHandlerTests
     }
 
     [Fact]
-    public async Task HandleAsync_DuplicateTileIndex_ReturnsFailure()
+    public async Task HandleAsync_DuplicateTileIndex_LogsStructuredFailureWithBusinessContext()
     {
         var input = CreateValidInput(2);
         input.Tiles[1].TileIndex = input.Tiles[0].TileIndex;
+        using var activity = new Activity("rabbitmq handler").Start();
 
         var result = await _handler.HandleAsync(ToEnvelope(input));
 
         Assert.False(result.IsSuccess);
-        Assert.Contains("tile indexes", result.Error);
+        Assert.Contains("duplicated", result.Error);
+        var rejection = Assert.Single(_logger.Entries, entry => entry.EventId.Id == 4011);
+        Assert.Equal("duplicate_tile_index", rejection.Attributes["ValidationCode"]);
+        Assert.Equal(2, rejection.Attributes["TilesAmount"]);
+        Assert.Equal(2, rejection.Attributes["BatchTilesAmount"]);
+        Assert.Equal(2, rejection.Attributes["ActualBatchTileCount"]);
+        Assert.Equal(0, rejection.Attributes["OffendingTileIndex"]);
+        Assert.Equal("task-001", rejection.Attributes[TelemetryAttributeNames.PipelineTaskId]);
+        Assert.Equal("req-001", rejection.Attributes[TelemetryAttributeNames.PipelineRequestId]);
+        Assert.Equal("img-001", rejection.Attributes[TelemetryAttributeNames.PipelineImageId]);
+        Assert.Equal("rule-1", rejection.Attributes[TelemetryAttributeNames.PipelineRuleId]);
+        Assert.Equal("tenant-1", rejection.Attributes[TelemetryAttributeNames.PipelineTenantId]);
+        Assert.Equal("Israel", rejection.Attributes[TelemetryAttributeNames.AreaName]);
+        Assert.Equal("sensor-x", rejection.Attributes[TelemetryAttributeNames.SensorName]);
+        Assert.Equal("FindAir,Rpn", rejection.Attributes[TelemetryAttributeNames.PipelineAlgorithmName]);
+        Assert.Equal("task-001", activity.GetTagItem(TelemetryAttributeNames.PipelineTaskId));
+        Assert.Equal("img-001", activity.GetTagItem(TelemetryAttributeNames.PipelineImageId));
+    }
+
+    [Fact]
+    public async Task HandleAsync_OutOfRangeTileIndex_LogsSpecificStructuredFailure()
+    {
+        var input = CreateValidInput(2);
+        input.Tiles[0].TileIndex = 2;
+
+        var result = await _handler.HandleAsync(ToEnvelope(input));
+
+        Assert.False(result.IsSuccess);
+        var rejection = Assert.Single(_logger.Entries, entry => entry.EventId.Id == 4011);
+        Assert.Equal("tile_index_out_of_range", rejection.Attributes["ValidationCode"]);
+        Assert.Equal(2, rejection.Attributes["OffendingTileIndex"]);
+        Assert.Contains("between 0 and 1", result.Error);
+    }
+
+    [Theory]
+    [InlineData("metadata", "missing_metadata")]
+    [InlineData("missionMetadata", "missing_mission_metadata")]
+    [InlineData("overlay", "missing_overlay")]
+    [InlineData("tile", "null_tile")]
+    public async Task HandleAsync_ExplicitNullNestedField_IsRejectedSafely(
+        string nullTarget,
+        string expectedValidationCode)
+    {
+        var json = JsonSerializer.Serialize(CreateValidInput());
+        using var document = JsonDocument.Parse(json);
+        var root = System.Text.Json.Nodes.JsonNode.Parse(document.RootElement.GetRawText())!.AsObject();
+        switch (nullTarget)
+        {
+            case "metadata":
+                root["metadata"] = null;
+                break;
+            case "missionMetadata":
+                root["metadata"]!["missionMetadata"] = null;
+                break;
+            case "overlay":
+                root["metadata"]!["missionMetadata"]!["overlay"] = null;
+                break;
+            case "tile":
+                root["tileUniqueMetadata"]!.AsArray()[0] = null;
+                break;
+        }
+
+        var result = await _handler.HandleAsync(RabbitMqMessageEnvelope.FromUtf8(root.ToJsonString()));
+
+        Assert.False(result.IsSuccess);
+        var rejection = Assert.Single(_logger.Entries, entry => entry.EventId.Id == 4011);
+        Assert.Equal(expectedValidationCode, rejection.Attributes["ValidationCode"]);
+        _projectionMapperMock.VerifyNoOtherCalls();
+        _publisherMock.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public void TileBuilderTileOutput_UsesExternalCamelCaseTileIndexContract()
+    {
+        const string json = "{\"roi\":[0,0,1,1],\"uri\":\"http://tiles/tile.tif\",\"tileIndex\":7}";
+
+        var tile = JsonSerializer.Deserialize<TileBuilderTileOutput>(json);
+        var serialized = JsonSerializer.Serialize(tile);
+
+        Assert.NotNull(tile);
+        Assert.Equal(7, tile.TileIndex);
+        Assert.Contains("\"tileIndex\":7", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("tile_index", serialized, StringComparison.Ordinal);
     }
 
     [Fact]
