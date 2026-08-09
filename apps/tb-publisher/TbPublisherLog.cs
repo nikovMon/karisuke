@@ -27,7 +27,7 @@ internal static partial class TbPublisherLog
     [LoggerMessage(3011, LogLevel.Warning, "TB Publisher rejected an input message because its ROI geometry is invalid.")]
     public static partial void InvalidRoiGeometry(this ILogger logger, Exception exception);
 
-    [LoggerMessage(3012, LogLevel.Warning, "TB Publisher could not map the input geometry through Projection Mapper; the message will be rejected by the current processing policy.")]
+    [LoggerMessage(3012, LogLevel.Warning, "TB Publisher could not map the input geometry through Projection Mapper; RabbitMQ will retry the message.")]
     public static partial void ProjectionFailed(this ILogger logger, Exception exception);
 
     [LoggerMessage(3013, LogLevel.Warning, "TB Publisher rejected the Projection Mapper response because its pixel geometry is invalid.")]
@@ -39,10 +39,11 @@ internal static partial class TbPublisherLog
         int publishedCount,
         int totalCount);
 
-    [LoggerMessage(3015, LogLevel.Debug, "TB Publisher processed an input message with {GroundPointCount} ground points and {TilingConfigCount} tiling configurations, publishing {OutputCount} outputs.")]
+    [LoggerMessage(3015, LogLevel.Information, "TB Publisher processed a task with {GroundPointCount} ground points and {TilingConfigCount} tiling configurations, publishing {OutputCount} Tile Builder requests. RequestIds: {RequestIds}")]
     public static partial void MessageProcessed(
         this ILogger logger,
         int groundPointCount,
         int tilingConfigCount,
-        int outputCount);
+        int outputCount,
+        string requestIds);
 }

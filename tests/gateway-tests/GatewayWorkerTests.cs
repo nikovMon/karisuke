@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Gateway.Messages;
 using ImagingPipeline.Common.Dtos.Rules.Models;
@@ -36,7 +37,7 @@ public sealed class GatewayWorkerTests
         {
             Headers = new Dictionary<string, object?>
             {
-                ["x-pipeline-start-unix-ms"] =
+                ["findair-started-at-unix-ms"] =
                     DateTimeOffset.UtcNow.AddSeconds(-1).ToUnixTimeMilliseconds(),
                 ["business-header"] = "preserved"
             }
@@ -97,10 +98,12 @@ public sealed class GatewayWorkerTests
             first.RootElement.EnumerateObject().Select(property => property.Name).ToArray());
         Assert.All(outputs, output =>
         {
-            Assert.Equal("message-1", output.CorrelationId);
+            Assert.Null(output.CorrelationId);
             Assert.NotNull(output.Headers);
-            Assert.Equal("preserved", output.Headers["business-header"]);
-            Assert.True(output.Headers.ContainsKey("x-pipeline-start-unix-ms"));
+            Assert.False(output.Headers.ContainsKey("business-header"));
+            Assert.True(output.Headers.ContainsKey("findair-started-at-unix-ms"));
+            Assert.Equal("FindAir,Rpn", output.Headers["algorithmName"]);
+            Assert.Equal(1, output.Headers["findair-contract-version"]);
         });
         Assert.Equal("image-1:gateway-output:rule-1:der", outputs[0].MessageId);
         Assert.Equal("image-1:gateway-output:rule-1:findair", outputs[1].MessageId);
@@ -170,9 +173,9 @@ public sealed class GatewayWorkerTests
             activities.Activities,
             activity => Assert.Equal(ActivityStatusCode.Ok, activity.Status));
         Assert.Equal("image-1", handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineImageId));
-        Assert.Equal(1, handlerActivity.GetTagItem("imaging_pipeline.gateway.rules.evaluated"));
-        Assert.Equal(1, handlerActivity.GetTagItem("imaging_pipeline.gateway.rules.matched"));
-        Assert.Equal(1, handlerActivity.GetTagItem("imaging_pipeline.pipeline.output.count"));
+        Assert.Equal(1, handlerActivity.GetTagItem("findair.gateway.rules.evaluated"));
+        Assert.Equal(1, handlerActivity.GetTagItem("findair.gateway.rules.matched"));
+        Assert.Equal(1, handlerActivity.GetTagItem("findair.output.count"));
         Assert.Null(handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineRuleId));
         Assert.Null(handlerActivity.GetTagItem(TelemetryAttributeNames.PipelineTenantId));
     }
@@ -586,7 +589,7 @@ public sealed class GatewayWorkerTests
     }
 
     [Fact]
-    public async Task ActiveRuleCacheMarksInitialRefreshCancellationOnSpan()
+    public async Task ActiveRuleCacheInitialCancellationDoesNotCreateRefreshSpan()
     {
         using var activities = new TelemetryActivityCollector(TelemetrySourceNames.Gateway);
         using var cache = new ActiveRuleCache(
@@ -602,12 +605,7 @@ public sealed class GatewayWorkerTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => cache.StartAsync(CancellationToken.None));
 
-        var activity = Assert.Single(activities.Activities);
-        Assert.Equal("gateway.rule_cache.refresh", activity.DisplayName);
-        Assert.Equal(ActivityStatusCode.Error, activity.Status);
-        Assert.Equal(
-            "cancelled",
-            activity.GetTagItem(TelemetryAttributeNames.ErrorCategory));
+        Assert.Empty(activities.Activities);
     }
 
     [Fact]
@@ -760,6 +758,27 @@ public sealed class GatewayWorkerTests
         Assert.Empty(OutputMessages(result));
     }
 
+    [Fact]
+    public async Task HandleAsyncMissingAreaContinuesAndLogsOneWarning()
+    {
+        var logger = new global::ImagingPipeline.Gateway.Tests.RecordingLogger<GatewayWorker>();
+        await using var harness = await GatewayWorkerHarness.CreateAsync(
+            [MatchingRule()],
+            gatewayWorkerLogger: logger);
+        var json = Encoding.UTF8.GetString(InputMessage().Body)
+            .Replace("\"areaOfInterest\": \"region-alpha\",", string.Empty, StringComparison.Ordinal);
+
+        var result = await harness.GatewayWorker.HandleAsync(
+            RabbitMqMessageEnvelope.FromUtf8(json, "message-without-area"));
+
+        Assert.True(result.IsSuccess);
+        var output = Assert.Single(OutputMessages(result));
+        using var document = JsonDocument.Parse(output.Body);
+        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("areaOfInterest").ValueKind);
+        var warning = Assert.Single(logger.Entries, entry => entry.EventId.Id == 2014);
+        Assert.Equal(LogLevel.Warning, warning.Level);
+        Assert.Equal("image-1", warning.Properties["ImageId"]);
+    }
     [Fact]
     public async Task HandleAsyncReturnsFailureWhenRegistrationQualityIsMissing()
     {
@@ -922,7 +941,8 @@ public sealed class GatewayWorkerTests
             TimeSpan? consumerRestartDelay = null,
             GatewaySettings? gatewaySettings = null,
             TimeProvider? timeProvider = null,
-            ILogger<RuleMatcher>? ruleMatcherLogger = null)
+            ILogger<RuleMatcher>? ruleMatcherLogger = null,
+            ILogger<GatewayWorker>? gatewayWorkerLogger = null)
         {
             var health = new GatewayHealthState();
             gatewaySettings ??= new GatewaySettings
@@ -950,7 +970,7 @@ public sealed class GatewayWorkerTests
                     ruleMatcherLogger ?? NullLogger<RuleMatcher>.Instance),
                 outputBuilder,
                 health,
-                NullLogger<GatewayWorker>.Instance,
+                gatewayWorkerLogger ?? NullLogger<GatewayWorker>.Instance,
                 consumerRestartDelay ?? TimeSpan.FromSeconds(5));
 
             return new GatewayWorkerHarness(worker, ruleCache);

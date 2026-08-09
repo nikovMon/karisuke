@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace ImagingPipeline.Observability;
 
+[ProviderAlias("EcsHttp")]
 internal sealed class EcsHttpLoggerProvider : ILoggerProvider, ISupportExternalScope
 {
     private readonly ConcurrentDictionary<string, EcsHttpLogger> _loggers = new(StringComparer.Ordinal);

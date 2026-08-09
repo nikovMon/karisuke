@@ -55,7 +55,7 @@ A complete configuration has the following shape:
 {
   "Observability": {
     "Enabled": true,
-    "ServiceNamespace": "imaging-pipeline",
+    "ServiceNamespace": "findair",
     "ServiceVersion": "1.2.3",
     "DeploymentEnvironment": "production",
     "Traces": {
@@ -75,7 +75,7 @@ A complete configuration has the following shape:
     },
     "Logs": {
       "Enabled": true,
-      "ConsoleEnabled": false,
+      "ConsoleEnabled": true,
       "Logstash": {
         "Enabled": true,
         "Endpoint": "http://logstash.example:8080",
@@ -178,24 +178,21 @@ This is deliberate: an unavailable logging system must not stop RabbitMQ consump
 
 If Logstash HTTP logging is enabled, `Observability:Logs:Logstash:Endpoint` is required and must be an absolute HTTP or HTTPS URL without embedded credentials. `Dataset` and `Namespace` must contain only lowercase letters, digits, underscores, or dots. The log dataset defaults to `findair`. Set the namespace explicitly to `production`, `integration`, or `development` in each deployment configuration; when omitted, it falls back to the normalized deployment environment. Keeping these settings separate lets the final `logs-findair-{namespace}` data-stream name change without a code change.
 
-Each document includes ECS fields such as:
+Each document includes the ECS data-stream, service identity, environment,
+event, logger, Kubernetes, trace-correlation, and error fields described in
+docs/observability-contract.md. Repeated process/thread/runtime fields are not
+written on every log document; they remain OpenTelemetry resource attributes.
 
-- `@timestamp`, `ecs.version`, `message`
-- `data_stream.type`, `data_stream.dataset`, `data_stream.namespace`
-- `service.name`, `service.version`, `service.environment`, and `service.node.name`
-- `host.*`, `process.*`, runtime, and available Kubernetes/OpenShift identity
-- `event.code`, `event.action`, `log.level`, `log.logger`
-- `trace.id` and `span.id` when a trace is active
-- `error.type`, `error.message`, and `error.stack_trace` for exceptions
-- canonical `messaging.*`, `http.*`, and `imaging_pipeline.*` context
-- other bounded structured values under `labels.*`
+TelemetryLogContext flattens message/destination/retry plus task, request,
+image, rule, tenant, algorithms, area, sensor, tile ID, and tile index into
+canonical messaging and findair fields. Known HTTP values become sanitized
+http, url, and server fields. OriginalFormat and rendered scope object strings
+are removed.
 
-The provider flattens structured scopes rather than serializing `TelemetryLogContext { ... }`, removes `{OriginalFormat}`, converts enums and identifiers to readable values, decodes textual byte headers as UTF-8, represents binary values explicitly, and bounds strings, collections, and attribute counts. URI values have query strings, fragments, and credentials removed.
-
-Do not enable console output and Logstash output together unless duplicate records are intentional. Normal per-message success belongs at `Debug`; lifecycle summaries at `Information`; retries and rejections at `Warning`; exhausted or unrecoverable failures at `Error`.
-
-Never log message bodies, WKT, coordinate arrays, raw Elasticsearch queries, credentials, arbitrary headers, or signed image URLs.
-
+The HTTP exporter is intentionally non-blocking and bounded. One Information
+event is currently emitted for every broker-confirmed tile. At high volume,
+monitor findair.logs.dropped; trace sampling does not reduce application log
+volume.
 ## Metrics: Prometheus scraping
 
 Metrics are pulled by Prometheus; the applications do not push them to the Collector, Elastic APM, Logstash, or Elasticsearch.
@@ -215,27 +212,36 @@ OpenTelemetry metric names are translated into Prometheus names. Dots become und
 
 The strongly typed recorder groups are:
 
-- `MessagingTelemetry`: RabbitMQ send, consume, processing, settlement, payload, delay, retries, in-flight work, connections, channels, restarts, and channel-pool waits.
-- `DependencyTelemetry`: Elasticsearch, Projection Mapper, RabbitMQ, and logical HTTP operations, latency, known payload sizes, and batch sizes.
-- `PipelineTelemetry`: stage ingress/egress, outcomes, stage latency, external-stage transit, end-to-end latency, fan-out, and batch sizes.
-- `GatewayTelemetry`: rule-cache entries, skipped invalid rules, cache age, refreshes, and matching volumes.
-- `RulesTelemetry`: CRUD and bulk operations, duration, document counts, batch sizes, and validation failures.
-
+- MessagingTelemetry for RabbitMQ transport, processing, settlement, retry,
+  payload, delay, connection, channel, and pool-wait data.
+- DependencyTelemetry for Elasticsearch, Projection Mapper, RabbitMQ, and HTTP
+  dependency duration, outcome, payload, and batch data.
+- PipelineTelemetry for stage traffic, duration, external transit, batch
+  completion latency, fan-out, and batch sizes.
+- WorkloadTelemetry for images, tasks, Tile Builder requests/batches, logical
+  tile counts, and Embedder publish attempts, grouped only by bounded business
+  dimensions.
+- GatewayTelemetry for cache and rule-matching data.
+- RulesTelemetry for CRUD/bulk outcomes, duration, counts, and validation.
 Log-export health is observable through:
 
 | OpenTelemetry instrument | Type | Bounded labels |
 | --- | --- | --- |
-| `imaging_pipeline.logs.queue.size` | Gauge | none |
-| `imaging_pipeline.logs.dropped` | Counter | `imaging_pipeline.logs.drop.reason` |
-| `imaging_pipeline.logs.export.requests` | Counter | `imaging_pipeline.pipeline.outcome`, optional `http.response.status_code_class` |
-| `imaging_pipeline.logs.export.duration` | Histogram | the same bounded outcome/status-class labels |
+| `findair.logs.queue.size` | Gauge | none |
+| `findair.logs.dropped` | Counter | `findair.logs.drop.reason` |
+| `findair.logs.export.requests` | Counter | `findair.outcome`, optional `http.response.status_code_class` |
+| `findair.logs.export.duration` | Histogram | the same bounded outcome/status-class labels |
 
 Drop reasons are fixed implementation values such as `queue_full`, `priority_queue_full`, `formatting`, `serialization`, `transport`, and `shutdown`; they are not exception messages.
 
-Metric labels may contain only bounded dimensions such as configured queue/exchange names, fixed dependency/index names, route templates, status codes or status-code classes, stage, operation, outcome, error category, direction, and item type.
+Metric labels may contain bounded dimensions such as stage, direction,
+operation, outcome, error category, dependency, rule ID, tenant ID, normalized
+area/country, sensor name, algorithm combination, and configured tile size.
 
-Metric labels must never contain message, correlation, task, request, image, overlay, rule, tenant, or pod IDs; raw paths or URLs; sensor names; exception text; bodies; WKT; or coordinates. Pod identity is a resource attribute. Aggregate counters and in-flight values across pods; inspect pod-local cache gauges with max or average rather than summing them.
-
+Metric labels must never contain message, correlation, task, request, image,
+overlay, tile, or trace IDs; raw URLs; exception text; stack traces; payloads;
+WKT; coordinates; or application-emitted pod identity. Pod identity belongs to
+resource and Prometheus target labels.
 Prometheus handles application and runtime metrics. Broker queue depth, unacked deliveries, RabbitMQ cluster memory, container CPU/memory/network, and pod restarts should come from their authoritative RabbitMQ and OpenShift exporters rather than being independently emitted by every application pod.
 
 ## Resource identity
@@ -261,21 +267,25 @@ The resulting resource includes service name/namespace/version/instance, deploym
 
 ## RabbitMQ trace propagation
 
-RabbitMQ.Client publisher and subscriber activity sources are registered centrally. Callers must not add duplicate manual transport spans.
+RabbitMQ.Client publisher and subscriber activity sources are registered
+centrally. Callers do not add duplicate manual transport spans.
 
-`IMessageTraceContextPropagator` injects and extracts W3C `traceparent`, `tracestate`, and allowlisted `baggage`. It accepts RabbitMQ header values represented as `string`, `byte[]`, `Memory<byte>`, or `ReadOnlyMemory<byte>`. Malformed propagation values are treated as missing context and never reject a business message.
+IMessageTraceContextPropagator injects and extracts only W3C traceparent and
+tracestate. Baggage is removed. The shared RabbitMqPublisher applies a strict
+case-insensitive header allowlist containing trace context, FindAir start and
+per-hop timestamps, algorithmName, findair-contract-version, and the
+configured retry-count header. Arbitrary business headers are dropped.
 
-Inject only after the producer activity starts and extract before application processing begins. Tile Builder must forward the incoming headers unchanged.
-
-Baggage is limited to `tenant` and the canonical task, request, image, rule, tenant, and algorithm keys, with eight entries, 128-byte keys, 256-byte values, and a 2 KiB total header. Unknown or oversized baggage is dropped without dropping valid trace context. IDs belong in traces and logs, never metric labels.
-
+Tile Builder must forward these headers unchanged. IDs needed for business
+processing remain in the JSON contract; high-cardinality IDs belong in
+logs/traces and never Prometheus labels.
 ## Instrumentation and performance rules
 
 - Sources, meters, and instruments are static for process lifetime.
 - Keep traces aggregate; do not create one span per rule, coordinate, or tile.
 - Check `Activity.IsAllDataRequested` before computing expensive optional span data.
 - Use source-generated `[LoggerMessage]` methods and structured fields.
-- Use metrics rather than full-rate success logs for throughput accounting.
+- Use metrics for aggregate accounting; the current user-selected confirmed-tile Information event is the explicit high-volume exception.
 - Never serialize a payload only to calculate a telemetry size.
 - Never place message bodies, URLs, credentials, WKT, coordinate arrays, or unconstrained customer metadata in logs, baggage, span attributes, or metric labels.
 - Keep Logstash queues bounded. Increasing pod resources does not make an unbounded telemetry queue safe.

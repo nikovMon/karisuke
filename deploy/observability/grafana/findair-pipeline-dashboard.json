@@ -44,7 +44,7 @@
       }
     ]
   },
-  "description": "FindAir pipeline traffic, latency, reliability, structured logs and Elastic APM trace correlation. Prometheus metrics intentionally contain no tenant/task/rule IDs; those filters query structured Elasticsearch logs.",
+  "description": "FindAir traffic, workload volume, latency, reliability, structured logs and Elastic APM trace correlation.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -59,7 +59,7 @@
       "gridPos": { "h": 5, "w": 24, "x": 0, "y": 0 },
       "options": {
         "mode": "markdown",
-        "content": "### FindAir pipeline observability\nUse **job / metric service** for Prometheus panels and **environment / log service / tenant / rule / algorithm / image / task** for Elasticsearch log panels. Paste a `trace.id` into **Trace ID** to populate the Kibana APM link and correlated logs.\n\n**Accuracy note:** the existing `pipeline.end_to_end.duration` stops at TB Consumer ingress. The dashboard's full-pipeline latency card adds the successful TB Consumer stage average, so it is an aggregate approximation rather than an exact per-task measurement. Use the Kibana APM link for the exact trace waterfall already stored in Elastic.\n\n**Unavailable filters:** `sensor name` is not currently emitted as a structured telemetry field. ROI/area is intentionally not a metric label and should remain out because it is high-cardinality; add a bounded `area.id` or `region.code` to logs/spans if area filtering is required."
+        "content": "### FindAir observability\\nUse **job / metric service** for Prometheus panels and the structured-log variables for Elasticsearch panels. Paste a trace ID into **Trace ID** for Kibana APM and correlated logs.\\n\\n**Latency:** findair.end_to_end.duration is exact Gateway-to-completed-TB-Consumer-batch latency after broker-confirmed tile publishes. It is not final-task completion when Tile Builder splits a task across messages/pods; that requires shared durable aggregation.\\n\\n**Cardinality:** execution IDs stay in logs/traces. Prometheus uses bounded area, sensor, rule, tenant, algorithm and tile-size labels."
       }
     },
     {
@@ -92,7 +92,7 @@
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": { "defaults": { "unit": "ops", "color": { "mode": "palette-classic" } }, "overrides": [] },
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto", "wideLayout": true },
-      "targets": [{ "editorMode": "code", "expr": "sum(rate({__name__=~\"imaging_pipeline[._]pipeline[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",imaging_pipeline_pipeline_direction=\"ingress\"}[$__rate_interval]))", "legendFormat": "input/s", "range": true, "refId": "A" }]
+      "targets": [{ "editorMode": "code", "expr": "sum(rate({__name__=~\"findair[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",findair_direction=\"ingress\"}[$__rate_interval]))", "legendFormat": "input/s", "range": true, "refId": "A" }]
     },
     {
       "id": 5,
@@ -102,29 +102,29 @@
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": { "defaults": { "unit": "ops", "color": { "mode": "palette-classic" } }, "overrides": [] },
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto", "wideLayout": true },
-      "targets": [{ "editorMode": "code", "expr": "sum(rate({__name__=~\"imaging_pipeline[._]pipeline[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",imaging_pipeline_pipeline_direction=\"egress\",imaging_pipeline_pipeline_outcome=\"success\"}[$__rate_interval]))", "legendFormat": "output/s", "range": true, "refId": "A" }]
+      "targets": [{ "editorMode": "code", "expr": "sum(rate({__name__=~\"findair[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",findair_direction=\"egress\",findair_outcome=\"success\"}[$__rate_interval]))", "legendFormat": "output/s", "range": true, "refId": "A" }]
     },
     {
       "id": 6,
       "type": "stat",
       "title": "Tiles sent to Embedder",
-      "description": "Successful TB Consumer egress messages during the selected dashboard range. This is an aggregate; task-level counts belong in logs/traces, not Prometheus labels.",
+      "description": "Publisher-confirmed tile deliveries to Embedder during the selected range. Retries are attempts; use tile.id logs to deduplicate logical tiles.",
       "gridPos": { "h": 5, "w": 4, "x": 16, "y": 5 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] } }, "overrides": [] },
       "options": { "colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto", "wideLayout": true },
-      "targets": [{ "editorMode": "code", "expr": "sum(increase({__name__=~\"imaging_pipeline[._]pipeline[._]messages_total\",job=~\"$job\",service_name=~\".*tb.consumer.*|.*tb-consumer.*\",imaging_pipeline_pipeline_stage=\"tb_consumer\",imaging_pipeline_pipeline_direction=\"egress\",imaging_pipeline_pipeline_outcome=\"success\"}[$__range]))", "legendFormat": "tiles", "range": true, "refId": "A" }]
+      "targets": [{ "editorMode": "code", "expr": "sum(increase({__name__=~\"findair[._]tile[._]publish[._]attempts_total\",job=~\"$job\",service_name=~\"$metric_service\",findair_outcome=\"success\"}[$__range]))", "legendFormat": "tiles", "range": true, "refId": "A" }]
     },
     {
       "id": 7,
       "type": "stat",
-      "title": "Avg Gateway → Embedder latency (approx.)",
-      "description": "Aggregate approximation: average gateway-origin-to-TB-Consumer-ingress duration plus average successful TB Consumer processing duration. Add a post-confirm end-to-end histogram for an exact Prometheus value.",
+      "title": "Avg Gateway to completed tile batch latency",
+      "description": "Average Gateway-ingress to successful completion of each TB Consumer batch. Exact final-task completion across multiple batches requires shared durable aggregation.",
       "gridPos": { "h": 5, "w": 4, "x": 20, "y": 5 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": { "defaults": { "unit": "s", "decimals": 3, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 2 }, { "color": "red", "value": 5 }] } }, "overrides": [] },
       "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto", "wideLayout": true },
-      "targets": [{ "editorMode": "code", "expr": "(sum(rate({__name__=~\"imaging_pipeline[._]pipeline[._]end_to_end[._]duration.*_sum\",job=~\"$job\",imaging_pipeline_pipeline_stage=\"tb_consumer\"}[$__rate_interval])) / clamp_min(sum(rate({__name__=~\"imaging_pipeline[._]pipeline[._]end_to_end[._]duration.*_count\",job=~\"$job\",imaging_pipeline_pipeline_stage=\"tb_consumer\"}[$__rate_interval])), 1e-9)) + (sum(rate({__name__=~\"imaging_pipeline[._]pipeline[._]stage[._]duration.*_sum\",job=~\"$job\",imaging_pipeline_pipeline_stage=\"tb_consumer\",imaging_pipeline_pipeline_outcome=\"success\"}[$__rate_interval])) / clamp_min(sum(rate({__name__=~\"imaging_pipeline[._]pipeline[._]stage[._]duration.*_count\",job=~\"$job\",imaging_pipeline_pipeline_stage=\"tb_consumer\",imaging_pipeline_pipeline_outcome=\"success\"}[$__rate_interval])), 1e-9))", "legendFormat": "approx. average", "range": true, "refId": "A" }]
+      "targets": [{ "editorMode": "code", "expr": "sum(rate({__name__=~\"findair[._]end_to_end[._]duration.*_sum\",job=~\"$job\",service_name=~\"$metric_service\",findair_stage=\"tb_consumer\"}[$__rate_interval])) / clamp_min(sum(rate({__name__=~\"findair[._]end_to_end[._]duration.*_count\",job=~\"$job\",service_name=~\"$metric_service\",findair_stage=\"tb_consumer\"}[$__rate_interval])), 1e-9)", "legendFormat": "batch average", "range": true, "refId": "A" }]
     },
     {
       "id": 8,
@@ -136,8 +136,8 @@
       "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineInterpolation": "linear", "lineWidth": 2, "fillOpacity": 8, "gradientMode": "none", "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" } } }, "overrides": [] },
       "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
-        { "editorMode": "code", "expr": "sum by (service_name) (rate({__name__=~\"imaging_pipeline[._]pipeline[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",imaging_pipeline_pipeline_direction=\"ingress\"}[$__rate_interval]))", "legendFormat": "{{service_name}} input", "range": true, "refId": "A" },
-        { "editorMode": "code", "expr": "sum by (service_name) (rate({__name__=~\"imaging_pipeline[._]pipeline[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",imaging_pipeline_pipeline_direction=\"egress\",imaging_pipeline_pipeline_outcome=\"success\"}[$__rate_interval]))", "legendFormat": "{{service_name}} output", "range": true, "refId": "B" }
+        { "editorMode": "code", "expr": "sum by (service_name) (rate({__name__=~\"findair[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",findair_direction=\"ingress\"}[$__rate_interval]))", "legendFormat": "{{service_name}} input", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "sum by (service_name) (rate({__name__=~\"findair[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",findair_direction=\"egress\",findair_outcome=\"success\"}[$__rate_interval]))", "legendFormat": "{{service_name}} output", "range": true, "refId": "B" }
       ]
     },
     {
@@ -149,8 +149,8 @@
       "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "continuous-GrYlRd" } }, "overrides": [] },
       "options": { "displayMode": "gradient", "maxVizHeight": 300, "minVizHeight": 16, "minVizWidth": 8, "namePlacement": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "sizing": "auto", "valueMode": "color" },
       "targets": [
-        { "editorMode": "code", "expr": "sum by (service_name) (increase({__name__=~\"imaging_pipeline[._]pipeline[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",imaging_pipeline_pipeline_direction=\"ingress\"}[$__range]))", "instant": true, "legendFormat": "{{service_name}} input", "range": false, "refId": "A" },
-        { "editorMode": "code", "expr": "sum by (service_name) (increase({__name__=~\"imaging_pipeline[._]pipeline[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",imaging_pipeline_pipeline_direction=\"egress\",imaging_pipeline_pipeline_outcome=\"success\"}[$__range]))", "instant": true, "legendFormat": "{{service_name}} output", "range": false, "refId": "B" }
+        { "editorMode": "code", "expr": "sum by (service_name) (increase({__name__=~\"findair[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",findair_direction=\"ingress\"}[$__range]))", "instant": true, "legendFormat": "{{service_name}} input", "range": false, "refId": "A" },
+        { "editorMode": "code", "expr": "sum by (service_name) (increase({__name__=~\"findair[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",findair_direction=\"egress\",findair_outcome=\"success\"}[$__range]))", "instant": true, "legendFormat": "{{service_name}} output", "range": false, "refId": "B" }
       ]
     },
     {
@@ -162,8 +162,8 @@
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 2, "fillOpacity": 5, "gradientMode": "none", "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" } } }, "overrides": [] },
       "options": { "legend": { "calcs": ["mean", "p95", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
-        { "editorMode": "code", "expr": "sum by (service_name) (rate({__name__=~\"imaging_pipeline[._]pipeline[._]stage[._]duration.*_sum\",job=~\"$job\",service_name=~\"$metric_service\"}[$__rate_interval])) / clamp_min(sum by (service_name) (rate({__name__=~\"imaging_pipeline[._]pipeline[._]stage[._]duration.*_count\",job=~\"$job\",service_name=~\"$metric_service\"}[$__rate_interval])), 1e-9)", "legendFormat": "{{service_name}} avg", "range": true, "refId": "A" },
-        { "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le, service_name) (rate({__name__=~\"imaging_pipeline[._]pipeline[._]stage[._]duration.*_bucket\",job=~\"$job\",service_name=~\"$metric_service\"}[$__rate_interval])))", "legendFormat": "{{service_name}} p95", "range": true, "refId": "B" }
+        { "editorMode": "code", "expr": "sum by (service_name) (rate({__name__=~\"findair[._]stage[._]duration.*_sum\",job=~\"$job\",service_name=~\"$metric_service\"}[$__rate_interval])) / clamp_min(sum by (service_name) (rate({__name__=~\"findair[._]stage[._]duration.*_count\",job=~\"$job\",service_name=~\"$metric_service\"}[$__rate_interval])), 1e-9)", "legendFormat": "{{service_name}} avg", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le, service_name) (rate({__name__=~\"findair[._]stage[._]duration.*_bucket\",job=~\"$job\",service_name=~\"$metric_service\"}[$__rate_interval])))", "legendFormat": "{{service_name}} p95", "range": true, "refId": "B" }
       ]
     },
     {
@@ -175,7 +175,7 @@
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "fieldConfig": { "defaults": { "custom": { "scaleDistribution": { "type": "log", "log": 2 } } }, "overrides": [] },
       "options": { "calculate": false, "cellGap": 1, "cellValues": { "unit": "short" }, "color": { "exponent": 0.5, "fill": "dark-orange", "mode": "scheme", "reverse": false, "scale": "exponential", "scheme": "Oranges", "steps": 64 }, "filterValues": { "le": 1e-9 }, "legend": { "show": true }, "rowsFrame": { "layout": "auto" }, "tooltip": { "mode": "single", "showColorScale": false }, "yAxis": { "axisPlacement": "left", "reverse": false, "unit": "s" } },
-      "targets": [{ "editorMode": "code", "expr": "sum by (le) (rate({__name__=~\"imaging_pipeline[._]pipeline[._]stage[._]duration.*_bucket\",job=~\"$job\",service_name=~\"$metric_service\"}[$__rate_interval]))", "format": "heatmap", "legendFormat": "{{le}}", "range": true, "refId": "A" }]
+      "targets": [{ "editorMode": "code", "expr": "sum by (le) (rate({__name__=~\"findair[._]stage[._]duration.*_bucket\",job=~\"$job\",service_name=~\"$metric_service\"}[$__rate_interval]))", "format": "heatmap", "legendFormat": "{{le}}", "range": true, "refId": "A" }]
     },
     {
       "id": 12,
@@ -187,10 +187,10 @@
       "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "bars", "lineWidth": 1, "fillOpacity": 35, "gradientMode": "none", "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "normal" } } }, "overrides": [] },
       "options": { "legend": { "calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
-        { "editorMode": "code", "expr": "sum by (service_name) (rate({__name__=~\"imaging_pipeline[._]pipeline[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",imaging_pipeline_pipeline_outcome=\"failure\"}[$__rate_interval]))", "legendFormat": "{{service_name}} failure", "range": true, "refId": "A" },
-        { "editorMode": "code", "expr": "sum by (service_name) (rate({__name__=~\"imaging_pipeline[._]pipeline[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",imaging_pipeline_pipeline_outcome=\"retry\"}[$__rate_interval]))", "legendFormat": "{{service_name}} retry", "range": true, "refId": "B" },
-        { "editorMode": "code", "expr": "sum by (service_name) (rate({__name__=~\"imaging_pipeline[._]pipeline[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",imaging_pipeline_pipeline_outcome=\"rejected\"}[$__rate_interval]))", "legendFormat": "{{service_name}} rejected", "range": true, "refId": "C" },
-        { "editorMode": "code", "expr": "sum by (service_name) (rate({__name__=~\"imaging_pipeline[._]pipeline[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",imaging_pipeline_pipeline_outcome=\"cancelled\"}[$__rate_interval]))", "legendFormat": "{{service_name}} cancelled", "range": true, "refId": "D" }
+        { "editorMode": "code", "expr": "sum by (service_name) (rate({__name__=~\"findair[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",findair_outcome=\"failure\"}[$__rate_interval]))", "legendFormat": "{{service_name}} failure", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "sum by (service_name) (rate({__name__=~\"findair[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",findair_outcome=\"retry\"}[$__rate_interval]))", "legendFormat": "{{service_name}} retry", "range": true, "refId": "B" },
+        { "editorMode": "code", "expr": "sum by (service_name) (rate({__name__=~\"findair[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",findair_outcome=\"rejected\"}[$__rate_interval]))", "legendFormat": "{{service_name}} rejected", "range": true, "refId": "C" },
+        { "editorMode": "code", "expr": "sum by (service_name) (rate({__name__=~\"findair[._]messages_total\",job=~\"$job\",service_name=~\"$metric_service\",findair_outcome=\"cancelled\"}[$__rate_interval]))", "legendFormat": "{{service_name}} cancelled", "range": true, "refId": "D" }
       ]
     },
     {
@@ -226,8 +226,8 @@
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8, "gradientMode": "none", "showPoints": "never", "spanNulls": false, "stacking": { "group": "A", "mode": "none" } } }, "overrides": [] },
       "options": { "legend": { "calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
       "targets": [
-        { "editorMode": "code", "expr": "max by (service_name) ({__name__=~\"imaging_pipeline[._]logs[._]queue[._]size\",job=~\"$job\",service_name=~\"$metric_service\"})", "legendFormat": "{{service_name}} queued", "range": true, "refId": "A" },
-        { "editorMode": "code", "expr": "sum by (service_name) (rate({__name__=~\"imaging_pipeline[._]logs[._]dropped_total\",job=~\"$job\",service_name=~\"$metric_service\"}[$__rate_interval]))", "legendFormat": "{{service_name}} dropped/s", "range": true, "refId": "B" }
+        { "editorMode": "code", "expr": "max by (service_name) ({__name__=~\"findair[._]logs[._]queue[._]size\",job=~\"$job\",service_name=~\"$metric_service\"})", "legendFormat": "{{service_name}} queued", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "sum by (service_name) (rate({__name__=~\"findair[._]logs[._]dropped_total\",job=~\"$job\",service_name=~\"$metric_service\"}[$__rate_interval]))", "legendFormat": "{{service_name}} dropped/s", "range": true, "refId": "B" }
       ]
     },
     {
@@ -256,7 +256,7 @@
       },
       "options": { "cellHeight": "sm", "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": false }, "showHeader": true },
       "targets": [{ "alias": "", "bucketAggs": [], "datasource": { "type": "elasticsearch", "uid": "${DS_ELASTICSEARCH_LOGS}" }, "metrics": [{ "id": "1", "type": "logs" }], "query": "service.environment:$environment AND trace.id:$trace_id", "refId": "A", "timeField": "@timestamp" }],
-      "transformations": [{ "id": "organize", "options": { "excludeByName": { "_id": true, "_index": true, "_type": true, "sort": true }, "indexByName": { "@timestamp": 0, "log.level": 1, "service.name": 2, "event.code": 3, "message": 4, "trace.id": 5, "span.id": 6, "imaging_pipeline.tenant.id": 7, "imaging_pipeline.rule.id": 8, "imaging_pipeline.image.id": 9, "imaging_pipeline.task.id": 10 }, "renameByName": { "@timestamp": "Time", "event.code": "Event", "log.level": "Level", "message": "Message", "service.name": "Service", "trace.id": "Trace ID" } } }]
+      "transformations": [{ "id": "organize", "options": { "excludeByName": { "_id": true, "_index": true, "_type": true, "sort": true }, "indexByName": { "@timestamp": 0, "log.level": 1, "service.name": 2, "event.code": 3, "message": 4, "trace.id": 5, "span.id": 6, "findair.tenant.id": 7, "findair.rule.id": 8, "findair.image.id": 9, "findair.task.id": 10 }, "renameByName": { "@timestamp": "Time", "event.code": "Event", "log.level": "Level", "message": "Message", "service.name": "Service", "trace.id": "Trace ID" } } }]
     },
     {
       "id": 18,
@@ -266,7 +266,7 @@
       "gridPos": { "h": 12, "w": 15, "x": 0, "y": 60 },
       "datasource": { "type": "elasticsearch", "uid": "${DS_ELASTICSEARCH_LOGS}" },
       "options": { "dedupStrategy": "none", "enableInfiniteScrolling": false, "enableLogDetails": true, "prettifyLogMessage": false, "showCommonLabels": false, "showLabels": false, "showTime": true, "sortOrder": "Descending", "wrapLogMessage": true },
-      "targets": [{ "alias": "", "bucketAggs": [], "datasource": { "type": "elasticsearch", "uid": "${DS_ELASTICSEARCH_LOGS}" }, "metrics": [{ "id": "1", "type": "logs" }], "query": "service.environment:$environment AND service.name:$log_service AND imaging_pipeline.tenant.id:$tenant_id AND imaging_pipeline.rule.id:$rule_id AND imaging_pipeline.algorithm.name:$algorithm AND imaging_pipeline.image.id:$image_id AND imaging_pipeline.task.id:$task_id", "refId": "A", "timeField": "@timestamp" }]
+      "targets": [{ "alias": "", "bucketAggs": [], "datasource": { "type": "elasticsearch", "uid": "${DS_ELASTICSEARCH_LOGS}" }, "metrics": [{ "id": "1", "type": "logs" }], "query": "service.environment:$environment AND service.name:$log_service AND findair.tenant.id:$tenant_id AND findair.rule.id:$rule_id AND findair.algorithm.names:$algorithm AND findair.area.name:$area_name AND findair.sensor.name:$sensor_name AND findair.image.id:$image_id AND findair.task.id:$task_id", "refId": "A", "timeField": "@timestamp" }]
     },
     {
       "id": 19,
@@ -296,14 +296,34 @@
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "continuous-GrYlRd" } }, "overrides": [{ "matcher": { "id": "byRegexp", "options": "/.*age.*/" }, "properties": [{ "id": "unit", "value": "s" }] }] },
       "options": { "displayMode": "gradient", "maxVizHeight": 300, "minVizHeight": 16, "minVizWidth": 8, "namePlacement": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "sizing": "auto", "valueMode": "color" },
       "targets": [
-        { "editorMode": "code", "expr": "max by (k8s_pod_name) ({__name__=~\"imaging_pipeline[._]gateway[._]rule_cache[._]entries\",job=~\"$job\"})", "instant": true, "legendFormat": "{{k8s_pod_name}} entries", "range": false, "refId": "A" },
-        { "editorMode": "code", "expr": "max by (k8s_pod_name) ({__name__=~\"imaging_pipeline[._]gateway[._]rule_cache[._]age_seconds\",job=~\"$job\"})", "instant": true, "legendFormat": "{{k8s_pod_name}} age", "range": false, "refId": "B" }
+        { "editorMode": "code", "expr": "max by (k8s_pod_name) ({__name__=~\"findair[._]gateway[._]rule_cache[._]entries\",job=~\"$job\"})", "instant": true, "legendFormat": "{{k8s_pod_name}} entries", "range": false, "refId": "A" },
+        { "editorMode": "code", "expr": "max by (k8s_pod_name) ({__name__=~\"findair[._]gateway[._]rule_cache[._]age_seconds\",job=~\"$job\"})", "instant": true, "legendFormat": "{{k8s_pod_name}} age", "range": false, "refId": "B" }
+      ]
+    },
+    {
+      "id": 22,
+      "type": "bargauge",
+      "title": "Successful tasks by area",
+      "description": "Gateway-created tenant tasks grouped by normalized country/area name.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 80 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "continuous-GrYlRd" } }, "overrides": [] },
+      "options": { "displayMode": "gradient", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "showUnfilled": true, "valueMode": "color" },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (findair_area_name) (increase({__name__=~\"findair[._]tasks_total\",job=~\"$job\",service_name=~\"$metric_service\",findair_direction=\"egress\",findair_outcome=\"success\"}[$__range]))",
+          "instant": true,
+          "legendFormat": "{{findair_area_name}}",
+          "range": false,
+          "refId": "A"
+        }
       ]
     }
   ],
   "refresh": "30s",
   "schemaVersion": 39,
-  "tags": ["findair", "imaging-pipeline", "observability", "prometheus", "elasticsearch"],
+  "tags": ["findair", "observability", "prometheus", "elasticsearch"],
   "templating": {
     "list": [
       {
@@ -369,7 +389,7 @@
         "label": "Tenant ID",
         "type": "query",
         "datasource": { "type": "elasticsearch", "uid": "${DS_ELASTICSEARCH_LOGS}" },
-        "query": "{\"find\":\"terms\",\"field\":\"imaging_pipeline.tenant.id\",\"query\":\"service.environment:$environment\",\"size\":1000}",
+        "query": "{\"find\":\"terms\",\"field\":\"findair.tenant.id\",\"query\":\"service.environment:$environment\",\"size\":1000}",
         "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
         "allValue": "*",
         "includeAll": true,
@@ -383,7 +403,7 @@
         "label": "Rule ID",
         "type": "query",
         "datasource": { "type": "elasticsearch", "uid": "${DS_ELASTICSEARCH_LOGS}" },
-        "query": "{\"find\":\"terms\",\"field\":\"imaging_pipeline.rule.id\",\"query\":\"service.environment:$environment AND imaging_pipeline.tenant.id:$tenant_id\",\"size\":1000}",
+        "query": "{\"find\":\"terms\",\"field\":\"findair.rule.id\",\"query\":\"service.environment:$environment AND findair.tenant.id:$tenant_id\",\"size\":1000}",
         "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
         "allValue": "*",
         "includeAll": true,
@@ -397,7 +417,7 @@
         "label": "Algorithm",
         "type": "query",
         "datasource": { "type": "elasticsearch", "uid": "${DS_ELASTICSEARCH_LOGS}" },
-        "query": "{\"find\":\"terms\",\"field\":\"imaging_pipeline.algorithm.name\",\"query\":\"service.environment:$environment\",\"size\":100}",
+        "query": "{\"find\":\"terms\",\"field\":\"findair.algorithm.names\",\"query\":\"service.environment:$environment\",\"size\":100}",
         "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
         "allValue": "*",
         "includeAll": true,
@@ -407,6 +427,33 @@
         "sort": 1
       },
       {
+        "name": "area_name",
+        "label": "Area",
+        "type": "query",
+        "datasource": { "type": "elasticsearch", "uid": "${DS_ELASTICSEARCH_LOGS}" },
+        "query": "{\"find\":\"terms\",\"field\":\"findair.area.name\",\"query\":\"service.environment:$environment\",\"size\":250}",
+        "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
+        "allValue": "*",
+        "includeAll": true,
+        "multi": true,
+        "options": [],
+        "refresh": 2,
+        "sort": 1
+      },
+      {
+        "name": "sensor_name",
+        "label": "Sensor",
+        "type": "query",
+        "datasource": { "type": "elasticsearch", "uid": "${DS_ELASTICSEARCH_LOGS}" },
+        "query": "{\"find\":\"terms\",\"field\":\"findair.sensor.name\",\"query\":\"service.environment:$environment\",\"size\":500}",
+        "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
+        "allValue": "*",
+        "includeAll": true,
+        "multi": true,
+        "options": [],
+        "refresh": 2,
+        "sort": 1
+      },      {
         "name": "image_id",
         "label": "Image ID",
         "type": "textbox",
@@ -443,7 +490,7 @@
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
-  "title": "FindAir Pipeline Observability",
+  "title": "FindAir Observability",
   "uid": "findair-pipeline-observability",
   "version": 1,
   "weekStart": "monday"

@@ -2,7 +2,7 @@ namespace ImagingPipeline.Observability;
 
 public static class PipelineTimingHeaders
 {
-    public const string StartUnixMilliseconds = "x-pipeline-start-unix-ms";
+    public const string StartUnixMilliseconds = "findair-started-at-unix-ms";
     public static readonly TimeSpan DefaultMaximumAge = TimeSpan.FromHours(24);
     public static readonly TimeSpan DefaultMaximumFutureClockSkew = TimeSpan.FromSeconds(5);
 

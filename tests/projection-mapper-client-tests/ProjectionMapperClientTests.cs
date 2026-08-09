@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Net;
 using System.Net.Http.Json;
+using ImagingPipeline.Observability;
 using ImagingPipeline.ProjectionMapperClient.Tests.Fakes;
 using Microsoft.Extensions.Options;
 
@@ -86,7 +87,7 @@ public sealed class ProjectionMapperClientTests
         Activity? completed = null;
         using var listener = new ActivityListener
         {
-            ShouldListenTo = source => source.Name == "ImagingPipeline.ProjectionMapper",
+            ShouldListenTo = source => source.Name == "FindAir.ProjectionMapper",
             Sample = static (ref ActivityCreationOptions<ActivityContext> _) =>
                 ActivitySamplingResult.AllDataAndRecorded,
             ActivityStopped = activity => completed = activity
@@ -107,10 +108,47 @@ public sealed class ProjectionMapperClientTests
         Assert.Equal("projection_mapper ground_to_image", span.OperationName);
         Assert.Equal(
             "overlay-with-high-cardinality-id",
-            span.GetTagItem("imaging_pipeline.image.id"));
+            span.GetTagItem("findair.image.id"));
         Assert.Equal(2, span.GetTagItem("projection_mapper.batch.size"));
+        Assert.Equal("POST", span.GetTagItem("http.request.method"));
+        Assert.Equal("http://projection-mapper.test/flare/g2i-by-id", span.GetTagItem("url.full"));
+        Assert.Equal("/flare/g2i-by-id", span.GetTagItem("url.path"));
+        Assert.Equal("/flare/g2i-by-id", span.GetTagItem("http.route"));
+        Assert.Equal("projection-mapper.test", span.GetTagItem("server.address"));
+        Assert.Equal("ground_to_image", span.GetTagItem(TelemetryAttributeNames.ProjectionMode));
     }
 
+    [Fact]
+    public async Task RegistrationOperationExposesBoundedProjectionModeAndSanitizedRoute()
+    {
+        Activity? completed = null;
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == "FindAir.ProjectionMapper",
+            Sample = static (ref ActivityCreationOptions<ActivityContext> _) =>
+                ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = activity => completed = activity
+        };
+        ActivitySource.AddActivityListener(listener);
+        var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = JsonContent.Create(new ProjectionMapperResponseDto { Coordinates = [[31, 32]] })
+        });
+        var client = CreateClient(handler);
+
+        await client.ProcessBatchByRegistrationAsync(
+            "SHR-image-1",
+            [[1, 2]],
+            "MSP",
+            "http://grid.test/grid.json");
+
+        var span = Assert.IsType<Activity>(completed);
+        Assert.Equal(
+            "image_to_ground_registration",
+            span.GetTagItem(TelemetryAttributeNames.ProjectionMode));
+        Assert.Equal("/flare/i2g-by-registration", span.GetTagItem("http.route"));
+        Assert.Equal(string.Empty, handler.LastRequest!.RequestUri!.Query);
+    }
     [Fact]
     public async Task DependencyMetricsUseBoundedDimensionsAndExcludeOverlayId()
     {
@@ -118,7 +156,7 @@ public sealed class ProjectionMapperClientTests
         using var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
-            if (instrument.Meter.Name == "ImagingPipeline.Dependencies")
+            if (instrument.Meter.Name == TelemetrySourceNames.Dependencies)
             {
                 meterListener.EnableMeasurementEvents(instrument);
             }
@@ -141,22 +179,22 @@ public sealed class ProjectionMapperClientTests
             static tag => tag.Key.Contains("overlay", StringComparison.OrdinalIgnoreCase) ||
                           Equals(tag.Value, "overlay-must-not-be-a-metric-label"));
         Assert.Contains(measurements, static measurement =>
-            measurement.Name == "imaging_pipeline.dependency.batch.size" &&
+            measurement.Name == "findair.dependency.batch.size" &&
             measurement.Value == 2 &&
             measurement.Tags.Any(tag =>
-                tag.Key == "imaging_pipeline.pipeline.item" &&
+                tag.Key == "findair.item" &&
                 Equals(tag.Value, "ground_point")) &&
             measurement.Tags.Any(tag =>
-                tag.Key == "imaging_pipeline.dependency.operation" &&
+                tag.Key == "findair.dependency.operation" &&
                 Equals(tag.Value, "ground_to_image")));
         Assert.Contains(measurements, static measurement =>
-            measurement.Name == "imaging_pipeline.dependency.operations" &&
+            measurement.Name == "findair.dependency.operations" &&
             measurement.Value == 1);
         Assert.Contains(measurements, static measurement =>
-            measurement.Name == "imaging_pipeline.dependency.payload.size" &&
+            measurement.Name == "findair.dependency.payload.size" &&
             measurement.Value > 0 &&
             measurement.Tags.Any(tag =>
-                tag.Key == "imaging_pipeline.pipeline.direction" &&
+                tag.Key == "findair.direction" &&
                 Equals(tag.Value, "ingress")));
     }
 

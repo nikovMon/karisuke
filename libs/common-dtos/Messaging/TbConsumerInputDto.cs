@@ -28,6 +28,12 @@ public sealed class TbConsumerInputDto
     [JsonPropertyName("requestId")]
     public string RequestId { get; set; } = string.Empty;
 
+    [JsonPropertyName("totalAmount")]
+    public int TotalAmount { get; set; }
+
+    [JsonPropertyName("batchTilesAmount")]
+    public int BatchTilesAmount { get; set; }
+
     [JsonPropertyName("metadata")]
     public TileBuilderMetadataDto Metadata { get; set; } = new();
 

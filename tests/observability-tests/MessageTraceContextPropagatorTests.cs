@@ -83,7 +83,7 @@ public sealed class MessageTraceContextPropagatorTests
     }
 
     [Fact]
-    public void InjectAndExtract_RoundTripsBaggage()
+    public void Inject_RemovesBaggageAndExtractIgnoresExternalBaggage()
     {
         var previous = Baggage.Current;
         try
@@ -93,48 +93,22 @@ public sealed class MessageTraceContextPropagatorTests
                 ActivityTraceId.CreateRandom(),
                 ActivitySpanId.CreateRandom(),
                 ActivityTraceFlags.Recorded);
-            var headers = new Dictionary<string, object?>();
+            var headers = new Dictionary<string, object?>
+            {
+                ["baggage"] = "secret=stale"
+            };
 
             propagator.Inject(headers, context);
             var extracted = propagator.Extract(headers);
 
-            Assert.Contains("tenant=north", Utf8(headers["baggage"]), StringComparison.Ordinal);
-            Assert.Equal("north", extracted.Baggage.GetBaggage("tenant"));
+            Assert.False(headers.ContainsKey("baggage"));
+            Assert.Empty(extracted.Baggage.GetBaggage());
         }
         finally
         {
             Baggage.Current = previous;
         }
     }
-
-    [Fact]
-    public void Baggage_IsAllowlistedAndSizeBounded()
-    {
-        var previous = Baggage.Current;
-        try
-        {
-            Baggage.SetBaggage("tenant", "north");
-            Baggage.SetBaggage("secret", "must-not-propagate");
-            Baggage.SetBaggage(
-                TelemetryAttributeNames.PipelineRequestId,
-                new string('x', 300));
-            var headers = new Dictionary<string, object?>();
-
-            propagator.Inject(headers, default);
-            var extracted = propagator.Extract(headers);
-
-            var baggageHeader = Utf8(headers["baggage"]);
-            Assert.Contains("tenant=north", baggageHeader, StringComparison.Ordinal);
-            Assert.DoesNotContain("secret", baggageHeader, StringComparison.Ordinal);
-            Assert.Null(extracted.Baggage.GetBaggage("secret"));
-            Assert.Null(extracted.Baggage.GetBaggage(TelemetryAttributeNames.PipelineRequestId));
-        }
-        finally
-        {
-            Baggage.Current = previous;
-        }
-    }
-
     [Fact]
     public void OversizedExternalBaggage_IsDroppedWithoutDroppingTraceContext()
     {

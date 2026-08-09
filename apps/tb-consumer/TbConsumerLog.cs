@@ -38,10 +38,11 @@ internal static partial class TbConsumerLog
         int publishedCount,
         int totalCount);
 
-    [LoggerMessage(4015, LogLevel.Debug, "TB Consumer processed {TileCount} tiles, received {MappedCoordinateCount} mapped coordinate pairs, and published {OutputCount} Embedder inputs.")]
+    [LoggerMessage(4015, LogLevel.Information, "TB Consumer processed a Tile Builder batch containing {BatchTileCount} of {TotalTileCount} request tiles, received {MappedCoordinateCount} mapped coordinate pairs, and published {OutputCount} Embedder inputs.")]
     public static partial void MessageProcessed(
         this ILogger logger,
-        int tileCount,
+        int batchTileCount,
+        int totalTileCount,
         int mappedCoordinateCount,
         int outputCount);
 
@@ -50,4 +51,12 @@ internal static partial class TbConsumerLog
         this ILogger logger,
         int expectedResultCount,
         int actualResultCount);
+    [LoggerMessage(4017, LogLevel.Information, "TB Consumer published and broker-confirmed tile {TileId} at index {TileIndex} to Embedder. TileUri: {TileUri}; ResolutionMPerPx: {ResolutionMPerPx}; TileSizeMeters: {TileSizeMeters}")]
+    public static partial void TileSentToEmbedder(
+        this ILogger logger,
+        string tileId,
+        int tileIndex,
+        string tileUri,
+        double? resolutionMPerPx,
+        double? tileSizeMeters);
 }

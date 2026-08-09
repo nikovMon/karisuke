@@ -24,7 +24,8 @@ public sealed class WorkerTests
             new EmbedderInputMessageBuilder(),
             Mock.Of<IRabbitMqPublisher>(),
             TimeProvider.System,
-            NullLogger<TbMessageHandler>.Instance);
+            NullLogger<TbMessageHandler>.Instance,
+            new W3CMessageTraceContextPropagator());
         var worker = new Worker(
             new ReturningConsumer(),
             handler,

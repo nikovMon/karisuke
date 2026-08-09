@@ -179,10 +179,19 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
                 }
             }
 
-            Activity.Current.AddPipelineContext(imageId: input.ImageId);
+            Activity.Current.AddPipelineContext(
+                imageId: input.ImageId,
+                areaName: input.AreaOfInterest,
+                sensorName: input.SensorName);
 
             using var pipelineScope = _logger.BeginTelemetryScope(new TelemetryLogContext(
-                ImageId: input.ImageId));
+                ImageId: input.ImageId,
+                AreaName: input.AreaOfInterest,
+                SensorName: input.SensorName));
+            if (input.AreaOfInterest is null)
+            {
+                _logger.MissingAreaOfInterest(input.ImageId);
+            }
 
             IReadOnlyList<RuleMatchResult> matches;
             using (var matchActivity = StartStageActivity("match"))
@@ -194,8 +203,8 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
                     matchActivity.AddPipelineContext(imageId: input.ImageId);
                     if (matchActivity?.IsAllDataRequested == true)
                     {
-                        matchActivity.SetTag("imaging_pipeline.gateway.rules.evaluated", rulesEvaluated);
-                        matchActivity.SetTag("imaging_pipeline.gateway.rules.matched", rulesMatched);
+                        matchActivity.SetTag("findair.gateway.rules.evaluated", rulesEvaluated);
+                        matchActivity.SetTag("findair.gateway.rules.matched", rulesMatched);
                     }
                     matchActivity.SetTelemetrySuccess();
                 }
@@ -227,7 +236,7 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
                     buildActivity.AddPipelineContext(imageId: input.ImageId);
                     if (buildActivity?.IsAllDataRequested == true)
                     {
-                        buildActivity.SetTag("imaging_pipeline.pipeline.output.count", outputCount);
+                        buildActivity.SetTag("findair.output.count", outputCount);
                     }
                     buildActivity.SetTelemetrySuccess();
                 }
@@ -248,12 +257,11 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
 
             if (Activity.Current?.IsAllDataRequested == true)
             {
-                Activity.Current.SetTag("imaging_pipeline.gateway.rules.evaluated", rulesEvaluated);
-                Activity.Current.SetTag("imaging_pipeline.gateway.rules.matched", rulesMatched);
-                Activity.Current.SetTag("imaging_pipeline.pipeline.output.count", outputCount);
+                Activity.Current.SetTag("findair.gateway.rules.evaluated", rulesEvaluated);
+                Activity.Current.SetTag("findair.gateway.rules.matched", rulesMatched);
+                Activity.Current.SetTag("findair.output.count", outputCount);
             }
 
-            var correlationId = message.CorrelationId ?? message.MessageId;
             var outputMessages = new RabbitMqMessageEnvelope[outputs.Count];
 
             for (var outputIndex = 0; outputIndex < outputs.Count; outputIndex++)
@@ -264,7 +272,10 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
                         MessageId = CreateOutputMessageId(input.ImageId, outputs[outputIndex]),
                         Body = outputs[outputIndex].Body,
                         ContentType = "application/json",
-                        CorrelationId = correlationId
+                        Headers = FindAirMessageHeaders.Forward(
+                            message.Headers,
+                            outputs[outputIndex].AlgorithmNames),
+                        CorrelationId = null
                     };
 
                 PipelineTelemetry.RecordPayloadSize(
@@ -280,6 +291,26 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
             // and fan-out are recorded here; confirmed transport outcomes come from the
             // RabbitMQ client metrics in RabbitMqOutcomeRouter.
             _logger.MessageProcessed(rulesEvaluated, rulesMatched, outputCount);
+            WorkloadTelemetry.RecordImage(
+                TelemetryOutcome.Success,
+                input.AreaOfInterest,
+                input.SensorName);
+            foreach (var match in matches)
+            {
+                var algorithmNames = string.Join(",", match.Rule.AlgorithmNames);
+                foreach (var tenant in match.Rule.TenantsInfo)
+                {
+                    WorkloadTelemetry.RecordTask(
+                        PipelineDirection.Egress,
+                        TelemetryOutcome.Success,
+                        match.Rule.Id,
+                        tenant.TenantId,
+                        input.AreaOfInterest,
+                        input.SensorName,
+                        algorithmNames);
+                }
+            }
+
             return Task.FromResult(RabbitMqMessageProcessingResult.Success(outputMessages));
         }
         catch (GatewayValidationException ex)
@@ -334,7 +365,7 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
         if (activity?.IsAllDataRequested == true)
         {
             activity.SetTag(TelemetryAttributeNames.PipelineStage, "gateway");
-            activity.SetTag("imaging_pipeline.pipeline.operation", operation);
+            activity.SetTag("findair.operation", operation);
         }
         return activity;
     }

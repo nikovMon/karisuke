@@ -87,14 +87,14 @@ Consumer configuration:
     "OutputPublishConcurrency": 4,
     "RetryDelayMilliseconds": 10000,
     "MaxRetryAttempts": 3,
-    "RetryCountHeader": "x-retry-count",
+    "RetryCountHeader": "retry-count",
     "RetryQueues": [
       {
         "RetryCount": 1,
         "Queue": "int.algo.gateway_rules.retry.1",
         "DelayMilliseconds": 10000,
         "BindingArguments": {
-          "x-retry-count": 1
+          "retry-count": 1
         }
       },
       {
@@ -102,7 +102,7 @@ Consumer configuration:
         "Queue": "int.algo.gateway_rules.retry.2",
         "DelayMilliseconds": 10000,
         "BindingArguments": {
-          "x-retry-count": 2
+          "retry-count": 2
         }
       },
       {
@@ -110,7 +110,7 @@ Consumer configuration:
         "Queue": "int.algo.gateway_rules.retry.3",
         "DelayMilliseconds": 10000,
         "BindingArguments": {
-          "x-retry-count": 3
+          "retry-count": 3
         }
       }
     ],
@@ -159,7 +159,10 @@ Exchange and routing settings:
   used. `RetryRoutingKey` is the routing key used when publishing to
   `RetryExchange`; with a headers retry exchange, queue selection is done by
   headers instead.
-- If an exchange name is empty, the client skips declaring that exchange and
+- A headers exchange matches exact binding-argument values; it does not parse a
+  comma-separated header as a list. For `algorithmName`, bind the combined
+  `FindAir,Rpn` value separately to both algorithm queues when both must receive
+  the same publication.- If an exchange name is empty, the client skips declaring that exchange and
   skips binding the queue to it. Publishing with an empty exchange uses
   RabbitMQ's default exchange.
 
@@ -179,7 +182,7 @@ DLQ settings:
 Retry settings:
 
 - Retryable failures are republished after the client increments the
-  `RetryCountHeader` header, which defaults to `x-retry-count`. The message body
+  `RetryCountHeader` header, which defaults to `retry-count`. The message body
   is not changed.
 - When `RetryQueues` is configured, `RetryExchangeType` must be `headers`.
   The client publishes the retry message once to `RetryExchange`; RabbitMQ
@@ -280,18 +283,13 @@ thrown by handlers are treated as retryable failures.
   names are stable and do not contain routing keys. The library adds only internal
   handler/batch spans through `ImagingPipeline.RabbitMq`, avoiding duplicate
   producer or consumer spans.
-- The native RabbitMQ context injector/extractor uses the common W3C propagator.
-  `traceparent`, `tracestate`, and bounded allowlisted OpenTelemetry `baggage`
-  therefore cross every publish/consume boundary, including retry and output
-  publishing. Handler logs run
-  inside the processing span and include trace correlation plus message metadata via
-  structured scopes.
-- `x-pipeline-start-unix-ms` is created only when missing and is preserved across
-  services for end-to-end latency. `x-pipeline-published-unix-ms` is replaced
+- The native RabbitMQ injector/extractor uses W3C traceparent and tracestate. The shared publisher removes baggage and arbitrary business headers, forwarding only trace context, timing, algorithmName, contract version, and retry count. Handler logs remain trace-correlated and receive business identifiers from validated payload scopes.
+- `findair-started-at-unix-ms` is created only when missing and is preserved across
+  services for end-to-end latency. `findair-published-at-unix-ms` is replaced
   immediately before every publish made by this library. It normally measures one
   RabbitMQ broker hop. If an external processor forwards that timestamp unchanged,
   configure `RabbitMq:ForwardedInputStage` on its downstream consumer. The first
-  delivery is then recorded as `imaging_pipeline.pipeline.external_stage.duration`
+  delivery is then recorded as `findair.external_stage.duration`
   for that bounded stage and is omitted from the RabbitMQ-only delivery histogram.
   Retry publishes refresh the timestamp and continue to report normal broker delay.
   Neither header is used as a metric dimension. A timestamp up to five seconds ahead
@@ -335,7 +333,7 @@ alongside it.
   RabbitMQ routes them from `InputQueue` through the configured
   `DeadLetterExchange` into `DeadLetterQueue`.
 - Retryable failures are published to the retry queue for the incremented
-  `x-retry-count` header. If retry is disabled, exhausted, or the retry count
+  `retry-count` header. If retry is disabled, exhausted, or the retry count
   header is invalid, they are routed to the DLQ instead.
 - If output publishing or acknowledgement fails, the input is negatively
   left unacknowledged and the consumer channel is closed. RabbitMQ requeues the

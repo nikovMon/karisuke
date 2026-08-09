@@ -51,7 +51,7 @@ public sealed class GatewayOutputMessageDto : IValidatableObject
     public required string SensorName { get; init; }
 
     [JsonPropertyName("areaOfInterest")]
-    public required string AreaOfInterest { get; init; }
+    public string? AreaOfInterest { get; init; }
 
     [JsonPropertyName("gridType")]
     public required string GridType { get; init; }
