@@ -77,6 +77,8 @@ spec:
               value: "10000"
             - name: Observability__Logs__Logstash__PriorityQueueCapacity
               value: "1000"
+            - name: Observability__Logs__Logstash__WarningQueueCapacity
+              value: "1000"
             - name: Observability__Logs__Logstash__BatchSize
               value: "100"
             - name: Observability__Logs__Logstash__FlushIntervalMilliseconds

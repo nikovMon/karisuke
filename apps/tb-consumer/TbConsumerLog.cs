@@ -24,8 +24,15 @@ internal static partial class TbConsumerLog
     [LoggerMessage(4010, LogLevel.Warning, "TB Consumer rejected an input message because JSON deserialization failed: {ValidationError}")]
     public static partial void DeserializationRejected(this ILogger logger, string validationError);
 
-    [LoggerMessage(4011, LogLevel.Warning, "TB Consumer rejected an input message because validation failed: {ValidationError}")]
-    public static partial void MessageRejected(this ILogger logger, string validationError);
+    [LoggerMessage(4011, LogLevel.Warning, "TB Consumer rejected an input message because validation failed with code {ValidationCode}: {ValidationError}. TilesAmount: {TilesAmount}; BatchTilesAmount: {BatchTilesAmount}; ActualBatchTileCount: {ActualBatchTileCount}; OffendingTileIndex: {OffendingTileIndex}")]
+    public static partial void MessageRejected(
+        this ILogger logger,
+        string validationCode,
+        string validationError,
+        int? tilesAmount,
+        int? batchTilesAmount,
+        int? actualBatchTileCount,
+        int? offendingTileIndex);
 
     [LoggerMessage(4013, LogLevel.Warning, "TB Consumer Projection Mapper processing failed for a batch of {TileCount} tiles; RabbitMQ will retry the message.")]
     public static partial void ProjectionScheduledForRetry(

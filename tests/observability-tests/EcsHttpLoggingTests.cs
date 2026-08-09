@@ -196,6 +196,52 @@ public sealed class EcsHttpLoggingTests
     }
 
     [Fact]
+    public void Buffer_ReservesCapacityAndPriorityForWarnings()
+    {
+        var options = CreateOptions() with
+        {
+            QueueCapacity = 6,
+            PriorityQueueCapacity = 1,
+            WarningQueueCapacity = 1
+        };
+        var buffer = new EcsLogBuffer(options);
+        for (var index = 0; index < 4; index++)
+        {
+            Assert.True(buffer.TryWrite(CreateEvent($"info-{index}")));
+        }
+
+        Assert.True(buffer.TryWrite(CreateEvent("warning", LogLevel.Warning)));
+
+        Assert.True(buffer.TryRead(out var first));
+        Assert.NotNull(first);
+        Assert.Equal(LogLevel.Warning, first.Level);
+        Assert.Equal("warning", first.Message);
+    }
+
+    [Fact]
+    public void Buffer_ReservesCapacityAndHighestPriorityForErrors()
+    {
+        var options = CreateOptions() with
+        {
+            QueueCapacity = 6,
+            PriorityQueueCapacity = 1,
+            WarningQueueCapacity = 1
+        };
+        var buffer = new EcsLogBuffer(options);
+        Assert.True(buffer.TryWrite(CreateEvent("warning", LogLevel.Warning)));
+        for (var index = 0; index < 4; index++)
+        {
+            Assert.True(buffer.TryWrite(CreateEvent($"info-{index}")));
+        }
+
+        Assert.True(buffer.TryWrite(CreateEvent("error", LogLevel.Error)));
+
+        Assert.True(buffer.TryRead(out var first));
+        Assert.NotNull(first);
+        Assert.Equal(LogLevel.Error, first.Level);
+        Assert.Equal("error", first.Message);
+    }
+    [Fact]
     public async Task ProviderSpecificFilter_KeepsDebugOutOfLogstash()
     {
         var builder = Host.CreateApplicationBuilder();
@@ -294,6 +340,7 @@ public sealed class EcsHttpLoggingTests
         new Uri("http://logstash:8081/"),
         QueueCapacity: 100,
         PriorityQueueCapacity: 10,
+        WarningQueueCapacity: 10,
         BatchSize: 10,
         FlushInterval: TimeSpan.FromMilliseconds(50),
         RequestTimeout: TimeSpan.FromSeconds(1),
@@ -320,9 +367,11 @@ public sealed class EcsHttpLoggingTests
         ClusterName = "cluster-1"
     };
 
-    private static EcsLogEvent CreateEvent(string message) => new(
+    private static EcsLogEvent CreateEvent(
+        string message,
+        LogLevel level = LogLevel.Information) => new(
         DateTimeOffset.UtcNow,
-        LogLevel.Information,
+        level,
         "ImagingPipeline.Tests",
         new EventId(1, "test"),
         message,

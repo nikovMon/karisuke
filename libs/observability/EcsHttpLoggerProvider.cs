@@ -209,14 +209,18 @@ internal sealed class EcsHttpLoggerProvider : ILoggerProvider, ISupportExternalS
 internal sealed class EcsLogBuffer
 {
     private readonly Channel<EcsLogEvent> _priority;
+    private readonly Channel<EcsLogEvent> _warnings;
     private readonly Channel<EcsLogEvent> _normal;
     private readonly SemaphoreSlim _available = new(0, int.MaxValue);
     private int _completed;
 
     public EcsLogBuffer(LogstashHttpOptions options)
     {
-        var normalCapacity = options.QueueCapacity - options.PriorityQueueCapacity;
+        var normalCapacity = options.QueueCapacity
+            - options.PriorityQueueCapacity
+            - options.WarningQueueCapacity;
         _priority = CreateChannel(options.PriorityQueueCapacity);
+        _warnings = CreateChannel(options.WarningQueueCapacity);
         _normal = CreateChannel(normalCapacity);
     }
 
@@ -225,6 +229,7 @@ internal sealed class EcsLogBuffer
     public bool IsDrained =>
         IsCompleted
         && !_priority.Reader.TryPeek(out _)
+        && !_warnings.Reader.TryPeek(out _)
         && !_normal.Reader.TryPeek(out _);
 
     public bool TryWrite(EcsLogEvent logEvent)
@@ -235,17 +240,30 @@ internal sealed class EcsLogBuffer
             return false;
         }
 
-        var isPriority = logEvent.Level is LogLevel.Error or LogLevel.Critical;
-        var written = isPriority
-            ? _priority.Writer.TryWrite(logEvent) || _normal.Writer.TryWrite(logEvent)
-            : _normal.Writer.TryWrite(logEvent);
+        var written = logEvent.Level switch
+        {
+            LogLevel.Error or LogLevel.Critical =>
+                _priority.Writer.TryWrite(logEvent)
+                || _warnings.Writer.TryWrite(logEvent)
+                || _normal.Writer.TryWrite(logEvent),
+            LogLevel.Warning =>
+                _warnings.Writer.TryWrite(logEvent)
+                || _normal.Writer.TryWrite(logEvent),
+            _ => _normal.Writer.TryWrite(logEvent)
+        };
         if (!written)
         {
-            ObservabilityInternalTelemetry.RecordDroppedLogs(
-                isPriority ? "priority_queue_full" : "queue_full");
-            if (isPriority)
+            var reason = logEvent.Level switch
             {
-                EcsEmergencyLog.Write("An error or critical log record was dropped because both bounded Logstash queues were full.");
+                LogLevel.Error or LogLevel.Critical => "priority_queues_full",
+                LogLevel.Warning => "warning_queues_full",
+                _ => "queue_full"
+            };
+            ObservabilityInternalTelemetry.RecordDroppedLogs(reason);
+            if (logEvent.Level >= LogLevel.Warning)
+            {
+                EcsEmergencyLog.Write(
+                    $"A {logEvent.Level} log record was dropped because its bounded Logstash queues were full.");
             }
 
             return false;
@@ -292,6 +310,7 @@ internal sealed class EcsLogBuffer
         }
 
         _priority.Writer.TryComplete();
+        _warnings.Writer.TryComplete();
         _normal.Writer.TryComplete();
         _available.Release();
     }
@@ -310,6 +329,7 @@ internal sealed class EcsLogBuffer
     private bool TryTake(out EcsLogEvent? logEvent)
     {
         if (_priority.Reader.TryRead(out logEvent)
+            || _warnings.Reader.TryRead(out logEvent)
             || _normal.Reader.TryRead(out logEvent))
         {
             ObservabilityInternalTelemetry.AddQueuedLogs(-1);

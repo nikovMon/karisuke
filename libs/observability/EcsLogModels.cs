@@ -42,6 +42,7 @@ internal sealed record LogstashHttpOptions(
     Uri Endpoint,
     int QueueCapacity,
     int PriorityQueueCapacity,
+    int WarningQueueCapacity,
     int BatchSize,
     TimeSpan FlushInterval,
     TimeSpan RequestTimeout,
@@ -88,7 +89,13 @@ internal sealed record LogstashHttpOptions(
             $"{Prefix}:PriorityQueueCapacity",
             Math.Min(1_000, queueCapacity / 2),
             1,
-            queueCapacity - 1);
+            queueCapacity - 2);
+        var warningQueueCapacity = ReadInt(
+            configuration,
+            $"{Prefix}:WarningQueueCapacity",
+            Math.Min(1_000, (queueCapacity - priorityQueueCapacity) / 2),
+            1,
+            queueCapacity - priorityQueueCapacity - 1);
         var batchSize = ReadInt(
             configuration,
             $"{Prefix}:BatchSize",
@@ -100,6 +107,7 @@ internal sealed record LogstashHttpOptions(
             endpoint,
             queueCapacity,
             priorityQueueCapacity,
+            warningQueueCapacity,
             batchSize,
             TimeSpan.FromMilliseconds(
                 ReadInt(configuration, $"{Prefix}:FlushIntervalMilliseconds", 1_000, 50, 60_000)),
