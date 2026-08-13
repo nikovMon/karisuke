@@ -29,6 +29,12 @@ public sealed class RabbitMqFlowControlOptions
             return false;
         }
 
+        if (MaxWaitSeconds < 0)
+        {
+            error = "FlowControl MaxWaitSeconds must not be negative.";
+            return false;
+        }
+
         if (ManagementPort is < 1 or > 65535)
         {
             error = "FlowControl ManagementPort must be a valid port number.";
