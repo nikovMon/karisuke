@@ -79,7 +79,9 @@ internal sealed class RabbitMqFlowControl : IRabbitMqFlowControl, IHostedService
                 return Task.CompletedTask;
             }
 
-            return _gate.Task.WaitAsync(cancellationToken);
+            return _options.MaxWaitSeconds > 0
+                ? _gate.Task.WaitAsync(TimeSpan.FromSeconds(_options.MaxWaitSeconds), cancellationToken)
+                : _gate.Task.WaitAsync(cancellationToken);
         }
     }
 

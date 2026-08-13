@@ -10,6 +10,7 @@ public sealed class RabbitMqFlowControlOptions
     public string Username { get; set; } = "guest";
     public string Password { get; set; } = "guest";
     public string VirtualHost { get; set; } = "/";
+    public int MaxWaitSeconds { get; set; } = 1500;
     public List<WatchedQueueOptions> WatchedQueues { get; set; } = [];
 
     internal Uri ManagementUri => new($"http://{Host}:{ManagementPort}");
