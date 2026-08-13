@@ -26,6 +26,7 @@ internal sealed class RabbitMqFlowControl : IRabbitMqFlowControl, IHostedService
     private volatile bool _throttled;
     private CancellationTokenSource? _pollCancellation;
     private Task? _pollTask;
+    private bool _pollFailing;
 
     public RabbitMqFlowControl(
         IOptions<RabbitMqFlowControlOptions> options,
@@ -71,7 +72,15 @@ internal sealed class RabbitMqFlowControl : IRabbitMqFlowControl, IHostedService
             return Task.CompletedTask;
         }
 
-        return _gate.Task.WaitAsync(cancellationToken);
+        lock (_gateLock)
+        {
+            if (!_throttled)
+            {
+                return Task.CompletedTask;
+            }
+
+            return _gate.Task.WaitAsync(cancellationToken);
+        }
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -81,7 +90,7 @@ internal sealed class RabbitMqFlowControl : IRabbitMqFlowControl, IHostedService
             return Task.CompletedTask;
         }
 
-        _pollCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _pollCancellation = new CancellationTokenSource();
         _pollTask = PollLoopAsync(_pollCancellation.Token);
         RabbitMqLog.FlowControlStarted(
             _logger,
@@ -120,9 +129,9 @@ internal sealed class RabbitMqFlowControl : IRabbitMqFlowControl, IHostedService
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(_options.PollIntervalSeconds), cancellationToken);
                 var shouldThrottle = await CheckQueuesAsync(vhost, cancellationToken);
                 UpdateThrottleState(shouldThrottle);
+                await Task.Delay(TimeSpan.FromSeconds(_options.PollIntervalSeconds), cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -130,7 +139,13 @@ internal sealed class RabbitMqFlowControl : IRabbitMqFlowControl, IHostedService
             }
             catch (Exception ex)
             {
-                RabbitMqLog.FlowControlPollFailed(_logger, ex);
+                if (!_pollFailing)
+                {
+                    _pollFailing = true;
+                    RabbitMqLog.FlowControlPollFailed(_logger, ex);
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(_options.PollIntervalSeconds), cancellationToken);
             }
         }
     }
@@ -140,15 +155,19 @@ internal sealed class RabbitMqFlowControl : IRabbitMqFlowControl, IHostedService
         foreach (var watched in _options.WatchedQueues)
         {
             var queue = Uri.EscapeDataString(watched.Queue);
-            var response = await _httpClient.GetAsync(
+            using var response = await _httpClient.GetAsync(
                 $"/api/queues/{vhost}/{queue}",
                 cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                RabbitMqLog.FlowControlQueueCheckFailed(
-                    _logger,
-                    watched.Queue,
-                    (int)response.StatusCode);
+                if (!_pollFailing)
+                {
+                    RabbitMqLog.FlowControlQueueCheckFailed(
+                        _logger,
+                        watched.Queue,
+                        (int)response.StatusCode);
+                }
+
                 continue;
             }
 
@@ -158,7 +177,6 @@ internal sealed class RabbitMqFlowControl : IRabbitMqFlowControl, IHostedService
                 continue;
             }
 
-            var threshold = _throttled ? watched.LowWatermark : watched.HighWatermark;
             var breached = _throttled
                 ? info.Messages > watched.LowWatermark
                 : info.Messages >= watched.HighWatermark;
@@ -174,10 +192,12 @@ internal sealed class RabbitMqFlowControl : IRabbitMqFlowControl, IHostedService
                         watched.HighWatermark);
                 }
 
+                _pollFailing = false;
                 return true;
             }
         }
 
+        _pollFailing = false;
         return false;
     }
 
