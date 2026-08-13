@@ -2,6 +2,7 @@ using ImagingPipeline.Observability;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace ImagingPipeline.RabbitMqClient;
@@ -21,6 +22,8 @@ public static class RabbitMqClientServiceCollectionExtensions
         AddRabbitMqOptions(services, configuration)
             .Validate(options => options.IsPublisherValid(out _), "RabbitMq publisher configuration is invalid.")
             .ValidateOnStart();
+
+        AddFlowControl(services, configuration);
 
         services.TryAddSingleton<IRabbitMqPublisherConnectionManager, RabbitMqPublisherConnectionManager>();
         services.TryAddSingleton<IRabbitMqPublisherChannelPool, RabbitMqPublisherChannelPool>();
@@ -63,6 +66,55 @@ public static class RabbitMqClientServiceCollectionExtensions
         IConfiguration configuration)
     {
         return services.AddRabbitMqConsumer(configuration);
+    }
+
+    private static void AddFlowControl(
+        IServiceCollection services,
+        IConfiguration configuration)
+    {
+        if (services.Any(d => d.ServiceType == typeof(IRabbitMqFlowControl)))
+        {
+            return;
+        }
+
+        var flowControlSection = configuration.GetSection(RabbitMqFlowControlOptions.SectionName);
+        var rabbitSection = configuration.GetSection(RabbitMqClientOptions.SectionName);
+
+        services.AddOptions<RabbitMqFlowControlOptions>()
+            .Bind(flowControlSection)
+            .PostConfigure<IOptions<RabbitMqClientOptions>>((flowControl, rabbitOptions) =>
+            {
+                var rabbit = rabbitOptions.Value;
+                if (string.Equals(flowControl.Host, "localhost", StringComparison.Ordinal) &&
+                    !flowControlSection.GetSection("Host").Exists())
+                {
+                    flowControl.Host = rabbit.Host;
+                }
+
+                if (string.Equals(flowControl.Username, "guest", StringComparison.Ordinal) &&
+                    !flowControlSection.GetSection("Username").Exists())
+                {
+                    flowControl.Username = rabbit.Username;
+                }
+
+                if (string.Equals(flowControl.Password, "guest", StringComparison.Ordinal) &&
+                    !flowControlSection.GetSection("Password").Exists())
+                {
+                    flowControl.Password = rabbit.Password;
+                }
+
+                if (string.Equals(flowControl.VirtualHost, "/", StringComparison.Ordinal) &&
+                    !flowControlSection.GetSection("VirtualHost").Exists())
+                {
+                    flowControl.VirtualHost = rabbit.VirtualHost;
+                }
+            })
+            .Validate(options => options.IsValid(out _), "RabbitMq FlowControl configuration is invalid.")
+            .ValidateOnStart();
+
+        services.AddSingleton<RabbitMqFlowControl>();
+        services.AddSingleton<IRabbitMqFlowControl>(sp => sp.GetRequiredService<RabbitMqFlowControl>());
+        services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<RabbitMqFlowControl>());
     }
 
     private static OptionsBuilder<RabbitMqClientOptions> AddRabbitMqOptions(
