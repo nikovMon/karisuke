@@ -15,6 +15,8 @@ public static class WorkloadTelemetry
         TelemetryMetricNames.TileBatches, "{batch}", "Tile Builder output batches processed.");
     private static readonly Counter<long> Tiles = TelemetryMeters.Pipeline.CreateCounter<long>(
         TelemetryMetricNames.Tiles, "{tile}", "Logical tiles processed.");
+    private static readonly Counter<long> TilesReceived = TelemetryMeters.Pipeline.CreateCounter<long>(
+        TelemetryMetricNames.TilesReceived, "{tile}", "Tiles received by TB Consumer on first delivery attempt.");
     private static readonly Counter<long> TilePublishAttempts = TelemetryMeters.Pipeline.CreateCounter<long>(
         TelemetryMetricNames.TilePublishAttempts, "{attempt}", "Attempts to publish tiles to Embedder.");
 
@@ -82,6 +84,17 @@ public static class WorkloadTelemetry
         tags.Add("findair.tile.size", $"{tileWidth}x{tileHeight}");
         Tiles.Add(Math.Max(0, count), tags);
     }
+
+    public static void RecordTilesReceived(
+        string ruleId,
+        string tenantId,
+        string? areaName,
+        string sensorName,
+        string algorithmNames,
+        long count) =>
+        TilesReceived.Add(
+            Math.Max(0, count),
+            BusinessTags(TelemetryOutcome.Success, ruleId, tenantId, areaName, sensorName, algorithmNames));
 
     public static void RecordTilePublishAttempt(
         TelemetryOutcome outcome,

@@ -328,6 +328,7 @@ public sealed class TelemetryContractTests
                     TelemetryMetricNames.TileRequests or
                     TelemetryMetricNames.TileBatches or
                     TelemetryMetricNames.Tiles or
+                    TelemetryMetricNames.TilesReceived or
                     TelemetryMetricNames.TilePublishAttempts)
                 {
                     meterListener.EnableMeasurementEvents(instrument);
@@ -371,6 +372,13 @@ public sealed class TelemetryContractTests
             512,
             512,
             2);
+        WorkloadTelemetry.RecordTilesReceived(
+            "rule-1",
+            "tenant-1",
+            "Israel",
+            "sensor-x",
+            "FindAir,Rpn",
+            4);
         WorkloadTelemetry.RecordTilePublishAttempt(
             TelemetryOutcome.Success,
             "rule-1",
@@ -379,7 +387,7 @@ public sealed class TelemetryContractTests
             "sensor-x",
             "FindAir,Rpn");
 
-        Assert.Equal(6, measurements.Count);
+        Assert.Equal(7, measurements.Count);
         var tags = measurements.SelectMany(measurement => measurement.Tags).ToArray();
         Assert.Contains(tags, tag =>
             tag.Key == TelemetryAttributeNames.AreaName && Equals(tag.Value, "Israel"));        Assert.Contains(tags, tag =>

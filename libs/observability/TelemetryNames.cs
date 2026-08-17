@@ -75,6 +75,7 @@ public static class TelemetryMetricNames
     public const string TileRequests = "findair.tile.requests";
     public const string TileBatches = "findair.tile.batches";
     public const string Tiles = "findair.tiles";
+    public const string TilesReceived = "findair.tiles.received";
     public const string TilePublishAttempts = "findair.tile.publish.attempts";
 
     public const string GatewayRuleCacheEntries = "findair.gateway.rule_cache.entries";
