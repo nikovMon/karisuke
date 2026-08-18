@@ -8,11 +8,13 @@ public static class FindAirMessageHeaders
     public const string PublishedAtUnixMilliseconds = "findair-published-at-unix-ms";
     public const string AlgorithmName = "algorithmName";
     public const string ContractVersion = "findair-contract-version";
+    public const string TenantId = "tenantId";
     public const int CurrentContractVersion = 1;
 
     public static Dictionary<string, object?> Forward(
         IReadOnlyDictionary<string, object?>? source,
-        string? algorithmNames = null)
+        string? algorithmNames = null,
+        string? tenantId = null)
     {
         var headers = new Dictionary<string, object?>(StringComparer.Ordinal);
         CopyIfPresent(source, headers, TraceParent);
@@ -22,6 +24,11 @@ public static class FindAirMessageHeaders
         if (algorithmName is not null)
         {
             headers[AlgorithmName] = algorithmName;
+        }
+
+        if (tenantId is not null)
+        {
+            headers[TenantId] = tenantId;
         }
 
         headers[ContractVersion] = CurrentContractVersion;
