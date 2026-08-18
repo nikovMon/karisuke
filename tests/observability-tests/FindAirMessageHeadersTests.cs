@@ -25,4 +25,20 @@ public sealed class FindAirMessageHeadersTests
         Assert.DoesNotContain("business-header", result.Keys);
         Assert.DoesNotContain("algorithm_name", result.Keys);
     }
+
+    [Fact]
+    public void ForwardIncludesTenantIdWhenProvided()
+    {
+        var result = FindAirMessageHeaders.Forward(null, tenantId: "tenant-42");
+
+        Assert.Equal("tenant-42", result[FindAirMessageHeaders.TenantId]);
+    }
+
+    [Fact]
+    public void ForwardOmitsTenantIdWhenNull()
+    {
+        var result = FindAirMessageHeaders.Forward(null, tenantId: null);
+
+        Assert.DoesNotContain(FindAirMessageHeaders.TenantId, result.Keys);
+    }
 }
