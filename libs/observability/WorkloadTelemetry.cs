@@ -7,6 +7,8 @@ public static class WorkloadTelemetry
 {
     private static readonly Counter<long> Images = TelemetryMeters.Pipeline.CreateCounter<long>(
         TelemetryMetricNames.Images, "{image}", "Logical image messages processed by Gateway.");
+    private static readonly Counter<long> MatchedImages = TelemetryMeters.Pipeline.CreateCounter<long>(
+        TelemetryMetricNames.MatchedImages, "{image}", "Images matched to at least one rule at Gateway.");
     private static readonly Counter<long> Tasks = TelemetryMeters.Pipeline.CreateCounter<long>(
         TelemetryMetricNames.Tasks, "{task}", "Logical rule and tenant tasks processed.");
     private static readonly Counter<long> TileRequests = TelemetryMeters.Pipeline.CreateCounter<long>(
@@ -29,6 +31,16 @@ public static class WorkloadTelemetry
         AddDimension(ref tags, TelemetryAttributeNames.AreaName, areaName);
         AddIfPresent(ref tags, TelemetryAttributeNames.SensorName, sensorName);
         Images.Add(1, tags);
+    }
+
+    public static void RecordMatchedImage(
+        string? areaName,
+        string sensorName)
+    {
+        var tags = new TagList();
+        AddDimension(ref tags, TelemetryAttributeNames.AreaName, areaName);
+        AddIfPresent(ref tags, TelemetryAttributeNames.SensorName, sensorName);
+        MatchedImages.Add(1, tags);
     }
 
     public static void RecordTask(

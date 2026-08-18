@@ -324,6 +324,7 @@ public sealed class TelemetryContractTests
             {
                 if (instrument.Name is
                     TelemetryMetricNames.Images or
+                    TelemetryMetricNames.MatchedImages or
                     TelemetryMetricNames.Tasks or
                     TelemetryMetricNames.TileRequests or
                     TelemetryMetricNames.TileBatches or
@@ -340,6 +341,7 @@ public sealed class TelemetryContractTests
         listener.Start();
 
         WorkloadTelemetry.RecordImage(TelemetryOutcome.Success, null, "sensor-x");
+        WorkloadTelemetry.RecordMatchedImage("Israel", "sensor-x");
         WorkloadTelemetry.RecordTask(
             PipelineDirection.Egress,
             TelemetryOutcome.Success,
@@ -387,7 +389,7 @@ public sealed class TelemetryContractTests
             "sensor-x",
             "FindAir,Rpn");
 
-        Assert.Equal(7, measurements.Count);
+        Assert.Equal(8, measurements.Count);
         var tags = measurements.SelectMany(measurement => measurement.Tags).ToArray();
         Assert.Contains(tags, tag =>
             tag.Key == TelemetryAttributeNames.AreaName && Equals(tag.Value, "Israel"));        Assert.Contains(tags, tag =>

@@ -295,6 +295,13 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
                 TelemetryOutcome.Success,
                 input.AreaOfInterest,
                 input.SensorName);
+            if (matches.Count > 0)
+            {
+                WorkloadTelemetry.RecordMatchedImage(
+                    input.AreaOfInterest,
+                    input.SensorName);
+            }
+
             foreach (var match in matches)
             {
                 var algorithmNames = string.Join(",", match.Rule.AlgorithmNames);
