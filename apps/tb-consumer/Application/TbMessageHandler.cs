@@ -185,7 +185,8 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
 
         var outgoingHeaders = FindAirMessageHeaders.Forward(
             message.Headers,
-            algorithmNameText);
+            algorithmNameText,
+            input.Metadata.MissionMetadata.TenantId);
         var headers = new ReadOnlyDictionary<string, object?>(outgoingHeaders);
 
         var tileCorners = input.Tiles

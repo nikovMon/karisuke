@@ -130,6 +130,7 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
                 || string.Equals(header.Key, FindAirMessageHeaders.StartedAtUnixMilliseconds, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(header.Key, FindAirMessageHeaders.AlgorithmName, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(header.Key, FindAirMessageHeaders.ContractVersion, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(header.Key, FindAirMessageHeaders.TenantId, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(header.Key, retryCountHeader, StringComparison.OrdinalIgnoreCase))
             {
                 filtered[header.Key] = header.Value;
