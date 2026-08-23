@@ -4,11 +4,6 @@ namespace ImagingPipeline.RabbitMqClient;
 
 internal static class RabbitMqTopology
 {
-    /// <summary>
-    /// Declares the full topology (input and output side) on one channel/broker. Used
-    /// when RabbitMqClientOptions.InputCluster is not configured, i.e. a single-cluster
-    /// deployment where every entity lives on the same broker.
-    /// </summary>
     public static async Task DeclareAsync(
         IChannel channel,
         RabbitMqClientOptions options,
@@ -18,11 +13,6 @@ internal static class RabbitMqTopology
         await DeclareOutputAsync(channel, options, cancellationToken);
     }
 
-    /// <summary>
-    /// Declares the input/retry/dead-letter side only: InputQueue, DeadLetterQueue, and
-    /// RetryQueues, plus their exchanges and bindings. Retry/DLX topology is native
-    /// RabbitMQ broker behavior, so this must run against the same broker as InputQueue.
-    /// </summary>
     public static async Task DeclareInputAsync(
         IChannel channel,
         RabbitMqClientOptions options,
@@ -63,11 +53,6 @@ internal static class RabbitMqTopology
         }
     }
 
-    /// <summary>
-    /// Declares the output side only: OutputQueue plus its exchange and binding. Used on
-    /// the cluster that receives gateway output, which stays the primary/local cluster
-    /// even when InputCluster is configured.
-    /// </summary>
     public static async Task DeclareOutputAsync(
         IChannel channel,
         RabbitMqClientOptions options,

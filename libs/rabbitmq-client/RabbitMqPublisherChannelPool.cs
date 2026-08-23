@@ -10,21 +10,13 @@ internal interface IRabbitMqPublisherChannelPool : IAsyncDisposable
     ValueTask<RabbitMqPublisherChannelLease> LeaseAsync(CancellationToken cancellationToken = default);
 }
 
-/// <summary>
-/// Marker for the channel pool that publishes to the input/retry side (PublishToInputAsync,
-/// retry republish) when RabbitMqClientOptions.InputCluster is configured. Only registered
-/// in DI when a gateway-style app actually configures InputCluster.
-/// </summary>
 internal interface IRabbitMqInputClusterChannelPool : IRabbitMqPublisherChannelPool
 {
 }
 
 internal enum RabbitMqPublisherPoolRole
 {
-    /// <summary>Publishes OutputQueue on the primary/local cluster.</summary>
     Output,
-
-    /// <summary>Publishes input/retry messages on the configured InputCluster.</summary>
     InputCluster
 }
 
@@ -125,12 +117,6 @@ internal class RabbitMqPublisherChannelPool : IRabbitMqPublisherChannelPool
         }
     }
 
-    /// <summary>
-    /// The InputCluster pool always declares only the input/retry/DLQ side (it is on a
-    /// separate broker from OutputQueue). The Output pool declares only the output side
-    /// when InputCluster is configured, or the full combined topology otherwise, matching
-    /// pre-split single-cluster behavior exactly.
-    /// </summary>
     private Task DeclareTopologyAsync(IChannel channel, CancellationToken cancellationToken) =>
         _role switch
         {

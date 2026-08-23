@@ -11,13 +11,6 @@ public sealed class RabbitMqClientOptions
     public string Username { get; set; } = "admin";
     public string Password { get; set; } = "admin";
     public string VirtualHost { get; set; } = "/";
-    /// <summary>
-    /// When set, the consumer connection, input/retry/dead-letter topology, and any
-    /// publish targeting the input/retry side (PublishToInputAsync, retry republish)
-    /// connect to this cluster instead of Host/Port/.../VirtualHost above. OutputQueue
-    /// publishing always uses the primary Host/Port/.../VirtualHost. Leave unset for the
-    /// default single-cluster behavior.
-    /// </summary>
     public RabbitMqRemoteClusterOptions? InputCluster { get; set; }
     public string InputQueue { get; set; } = string.Empty;
     public string OutputQueue { get; set; } = string.Empty;
@@ -246,11 +239,6 @@ public sealed class RabbitMqClientOptions
         };
 }
 
-/// <summary>
-/// Deliberately has no defaults (unlike RabbitMqClientOptions' primary connection fields):
-/// this only ever activates when a caller sets InputCluster, so a missing field should
-/// fail startup validation instead of silently falling back to a guessed broker/credential.
-/// </summary>
 public sealed class RabbitMqRemoteClusterOptions
 {
     public string Host { get; set; } = string.Empty;

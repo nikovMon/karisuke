@@ -52,12 +52,6 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
         await Task.WhenAll(consumers);
     }
 
-    /// <summary>
-    /// When InputCluster is configured, this channel is on the remote input cluster and
-    /// must only declare the input/retry/DLQ side; OutputQueue lives on the primary
-    /// cluster and is declared separately by the output publisher pool. Otherwise, this
-    /// is the single shared broker and the full topology is declared as before.
-    /// </summary>
     private Task DeclareConsumerTopologyAsync(IChannel channel, CancellationToken cancellationToken) =>
         _options.InputCluster is not null
             ? RabbitMqTopology.DeclareInputAsync(channel, _options, cancellationToken)

@@ -43,11 +43,6 @@ internal sealed class RabbitMqConsumerConnectionManager : RabbitMqConnectionMana
     }
 }
 
-/// <summary>
-/// Publishes to the input/retry side (PublishToInputAsync, retry republish) when
-/// RabbitMqClientOptions.InputCluster is configured. Only registered in DI when a
-/// gateway-style app actually configures InputCluster.
-/// </summary>
 internal sealed class RabbitMqInputClusterConnectionManager : RabbitMqConnectionManager, IRabbitMqInputClusterConnectionManager
 {
     public RabbitMqInputClusterConnectionManager(
@@ -58,11 +53,6 @@ internal sealed class RabbitMqInputClusterConnectionManager : RabbitMqConnection
     }
 }
 
-/// <summary>
-/// Selects which broker (primary/output cluster, or the optional InputCluster) a
-/// connection manager targets. Input falls back to Primary when InputCluster is unset,
-/// so single-cluster apps see no behavior change.
-/// </summary>
 internal sealed record RabbitMqConnectionSettings(
     string Host,
     int Port,

@@ -17,8 +17,6 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
     {
         _channels = channels;
         _options = options.Value;
-        // Falls back to the same pool as output when InputCluster is not configured,
-        // which reproduces today's single-cluster behavior exactly.
         _inputClusterChannels = inputClusterChannels ?? channels;
     }
 
@@ -53,10 +51,6 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
             resetRetryCount: false,
             cancellationToken);
 
-    /// <summary>
-    /// The retry exchange dead-letters back into InputExchange on the same broker as
-    /// InputQueue, so retry publishes must land on the input cluster too, not output.
-    /// </summary>
     private bool TargetsInputCluster(string exchange, string routingKey) =>
         string.Equals(exchange, _options.InputExchange, StringComparison.Ordinal) &&
             string.Equals(routingKey, _options.EffectiveInputRoutingKey, StringComparison.Ordinal) ||
