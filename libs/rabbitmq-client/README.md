@@ -134,12 +134,17 @@ Connection settings:
 - `InputCluster` (optional) points the consumer connection and the
   input/retry/dead-letter topology at a second broker instead of the primary
   `Host`/`Port`/`Username`/`Password`/`VirtualHost` above. It takes the same
-  five fields. When set, `OutputQueue` publishing still uses the primary
-  connection, so the app consumes from one cluster and publishes output to
-  another. `PublishToInputAsync` and retry republish also use `InputCluster`,
-  because RabbitMQ's dead-letter routing only works within one broker and
-  the retry/DLQ topology is declared alongside `InputQueue`. Leave unset for
-  the default single-cluster behavior; every other app in this repo does.
+  five fields, and unlike the primary connection fields, `Host`, `Username`,
+  and `Password` have no defaults: if `InputCluster` is set at all, all three
+  must be explicitly configured or `ValidateOnStart()` fails at startup. This
+  is deliberate — a partially configured `InputCluster` should never silently
+  fall back to a guessed host or credential. When set, `OutputQueue`
+  publishing still uses the primary connection, so the app consumes from one
+  cluster and publishes output to another. `PublishToInputAsync` and retry
+  republish also use `InputCluster`, because RabbitMQ's dead-letter routing
+  only works within one broker and the retry/DLQ topology is declared
+  alongside `InputQueue`. Leave unset for the default single-cluster
+  behavior; every other app in this repo does.
 
 Queue settings:
 

@@ -269,7 +269,9 @@ public sealed class RabbitMqServiceCollectionTests
         var configuration = Configuration(new Dictionary<string, string?>
         {
             ["RabbitMq:InputCluster:Host"] = "hoshen-broker",
-            ["RabbitMq:InputCluster:Port"] = "5672"
+            ["RabbitMq:InputCluster:Port"] = "5672",
+            ["RabbitMq:InputCluster:Username"] = "hoshen-user",
+            ["RabbitMq:InputCluster:Password"] = "hoshen-pass"
         });
 
         await using var provider = new ServiceCollection()

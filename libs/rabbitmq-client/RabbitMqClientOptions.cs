@@ -150,9 +150,12 @@ public sealed class RabbitMqClientOptions
         }
 
         if (InputCluster is { } inputCluster &&
-            (string.IsNullOrWhiteSpace(inputCluster.Host) || inputCluster.Port is < 1 or > 65535))
+            (string.IsNullOrWhiteSpace(inputCluster.Host) ||
+             inputCluster.Port is < 1 or > 65535 ||
+             string.IsNullOrWhiteSpace(inputCluster.Username) ||
+             string.IsNullOrWhiteSpace(inputCluster.Password)))
         {
-            error = "RabbitMq InputCluster Host and Port must be valid.";
+            error = "RabbitMq InputCluster Host, Port, Username, and Password must all be explicitly configured.";
             return false;
         }
 
@@ -243,12 +246,17 @@ public sealed class RabbitMqClientOptions
         };
 }
 
+/// <summary>
+/// Deliberately has no defaults (unlike RabbitMqClientOptions' primary connection fields):
+/// this only ever activates when a caller sets InputCluster, so a missing field should
+/// fail startup validation instead of silently falling back to a guessed broker/credential.
+/// </summary>
 public sealed class RabbitMqRemoteClusterOptions
 {
-    public string Host { get; set; } = "localhost";
+    public string Host { get; set; } = string.Empty;
     public int Port { get; set; } = 5672;
-    public string Username { get; set; } = "guest";
-    public string Password { get; set; } = "guest";
+    public string Username { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
     public string VirtualHost { get; set; } = "/";
 }
 
