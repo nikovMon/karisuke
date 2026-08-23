@@ -143,12 +143,9 @@ public sealed class RabbitMqClientOptions
         }
 
         if (InputCluster is { } inputCluster &&
-            (string.IsNullOrWhiteSpace(inputCluster.Host) ||
-             inputCluster.Port is < 1 or > 65535 ||
-             string.IsNullOrWhiteSpace(inputCluster.Username) ||
-             string.IsNullOrWhiteSpace(inputCluster.Password)))
+            (string.IsNullOrWhiteSpace(inputCluster.Host) || inputCluster.Port is < 1 or > 65535))
         {
-            error = "RabbitMq InputCluster Host, Port, Username, and Password must all be explicitly configured.";
+            error = "RabbitMq InputCluster Host and Port must be valid.";
             return false;
         }
 
@@ -241,10 +238,10 @@ public sealed class RabbitMqClientOptions
 
 public sealed class RabbitMqRemoteClusterOptions
 {
-    public string Host { get; set; } = string.Empty;
+    public string Host { get; set; } = "localhost";
     public int Port { get; set; } = 5672;
-    public string Username { get; set; } = string.Empty;
-    public string Password { get; set; } = string.Empty;
+    public string Username { get; set; } = "guest";
+    public string Password { get; set; } = "guest";
     public string VirtualHost { get; set; } = "/";
 }
 

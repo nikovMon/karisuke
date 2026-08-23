@@ -459,9 +459,7 @@ public sealed class RabbitMqClientOptionsTests
             InputCluster = new RabbitMqRemoteClusterOptions
             {
                 Host = "hoshen-broker",
-                Port = 5672,
-                Username = "hoshen-user",
-                Password = "hoshen-pass"
+                Port = 5672
             }
         };
 
@@ -470,12 +468,10 @@ public sealed class RabbitMqClientOptionsTests
     }
 
     [Theory]
-    [InlineData("", 5672, "user", "pass")]
-    [InlineData("hoshen-broker", 0, "user", "pass")]
-    [InlineData("hoshen-broker", 65536, "user", "pass")]
-    [InlineData("hoshen-broker", 5672, "", "pass")]
-    [InlineData("hoshen-broker", 5672, "user", "")]
-    public void ConsumerValidationRejectsIncompleteInputCluster(string host, int port, string username, string password)
+    [InlineData("", 5672)]
+    [InlineData("hoshen-broker", 0)]
+    [InlineData("hoshen-broker", 65536)]
+    public void ConsumerValidationRejectsInvalidInputClusterHostOrPort(string host, int port)
     {
         var options = new RabbitMqClientOptions
         {
@@ -486,23 +482,11 @@ public sealed class RabbitMqClientOptionsTests
             InputCluster = new RabbitMqRemoteClusterOptions
             {
                 Host = host,
-                Port = port,
-                Username = username,
-                Password = password
+                Port = port
             }
         };
 
         Assert.False(options.IsConsumerValid(out var error));
-        Assert.Equal("RabbitMq InputCluster Host, Port, Username, and Password must all be explicitly configured.", error);
-    }
-
-    [Fact]
-    public void InputClusterFieldsHaveNoInsecureDefaults()
-    {
-        var remote = new RabbitMqRemoteClusterOptions();
-
-        Assert.Equal(string.Empty, remote.Host);
-        Assert.Equal(string.Empty, remote.Username);
-        Assert.Equal(string.Empty, remote.Password);
+        Assert.Equal("RabbitMq InputCluster Host and Port must be valid.", error);
     }
 }
