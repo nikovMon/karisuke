@@ -131,6 +131,15 @@ Connection settings:
 - `ReconnectDelaySeconds` is used as RabbitMQ client's network recovery
   interval after an established connection drops. The client does not run its
   own connection retry loop.
+- `InputCluster` (optional) points the consumer connection and the
+  input/retry/dead-letter topology at a second broker instead of the primary
+  `Host`/`Port`/`Username`/`Password`/`VirtualHost` above. It takes the same
+  five fields. When set, `OutputQueue` publishing still uses the primary
+  connection, so the app consumes from one cluster and publishes output to
+  another. `PublishToInputAsync` and retry republish also use `InputCluster`,
+  because RabbitMQ's dead-letter routing only works within one broker and
+  the retry/DLQ topology is declared alongside `InputQueue`. Leave unset for
+  the default single-cluster behavior; every other app in this repo does.
 
 Queue settings:
 

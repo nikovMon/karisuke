@@ -7,18 +7,24 @@ namespace ImagingPipeline.RabbitMqClient;
 internal sealed class RabbitMqPublisher : IRabbitMqPublisher
 {
     private readonly IRabbitMqPublisherChannelPool _channels;
+    private readonly IRabbitMqPublisherChannelPool _inputClusterChannels;
     private readonly RabbitMqClientOptions _options;
 
     public RabbitMqPublisher(
         IRabbitMqPublisherChannelPool channels,
-        IOptions<RabbitMqClientOptions> options)
+        IOptions<RabbitMqClientOptions> options,
+        IRabbitMqInputClusterChannelPool? inputClusterChannels = null)
     {
         _channels = channels;
         _options = options.Value;
+        // Falls back to the same pool as output when InputCluster is not configured,
+        // which reproduces today's single-cluster behavior exactly.
+        _inputClusterChannels = inputClusterChannels ?? channels;
     }
 
     public Task PublishToInputAsync(RabbitMqMessageEnvelope message, CancellationToken cancellationToken = default) =>
         PublishCoreAsync(
+            _inputClusterChannels,
             _options.InputExchange,
             _options.EffectiveInputRoutingKey,
             message,
@@ -27,6 +33,7 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
 
     public Task PublishToOutputAsync(RabbitMqMessageEnvelope message, CancellationToken cancellationToken = default) =>
         PublishCoreAsync(
+            _channels,
             _options.OutputExchange,
             _options.EffectiveOutputRoutingKey,
             message,
@@ -38,9 +45,26 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
         string routingKey,
         RabbitMqMessageEnvelope message,
         CancellationToken cancellationToken = default) =>
-        PublishCoreAsync(exchange, routingKey, message, resetRetryCount: false, cancellationToken);
+        PublishCoreAsync(
+            TargetsInputCluster(exchange, routingKey) ? _inputClusterChannels : _channels,
+            exchange,
+            routingKey,
+            message,
+            resetRetryCount: false,
+            cancellationToken);
+
+    /// <summary>
+    /// The retry exchange dead-letters back into InputExchange on the same broker as
+    /// InputQueue, so retry publishes must land on the input cluster too, not output.
+    /// </summary>
+    private bool TargetsInputCluster(string exchange, string routingKey) =>
+        string.Equals(exchange, _options.InputExchange, StringComparison.Ordinal) &&
+            string.Equals(routingKey, _options.EffectiveInputRoutingKey, StringComparison.Ordinal) ||
+        string.Equals(exchange, _options.RetryExchange, StringComparison.Ordinal) &&
+            string.Equals(routingKey, _options.EffectiveRetryRoutingKey, StringComparison.Ordinal);
 
     private async Task PublishCoreAsync(
+        IRabbitMqPublisherChannelPool channels,
         string exchange,
         string routingKey,
         RabbitMqMessageEnvelope message,
@@ -78,7 +102,7 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
                 Headers = headers
             };
 
-            await using var lease = await _channels.LeaseAsync(cancellationToken);
+            await using var lease = await channels.LeaseAsync(cancellationToken);
             // This clock measures only the current broker hop. Native RabbitMQ tracing injects
             // trace context from the producer span during BasicPublishAsync.
             MessagingTimingHeaders.StampPublished(headers);

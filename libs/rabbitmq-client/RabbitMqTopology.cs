@@ -4,22 +4,38 @@ namespace ImagingPipeline.RabbitMqClient;
 
 internal static class RabbitMqTopology
 {
+    /// <summary>
+    /// Declares the full topology (input and output side) on one channel/broker. Used
+    /// when RabbitMqClientOptions.InputCluster is not configured, i.e. a single-cluster
+    /// deployment where every entity lives on the same broker.
+    /// </summary>
     public static async Task DeclareAsync(
+        IChannel channel,
+        RabbitMqClientOptions options,
+        CancellationToken cancellationToken)
+    {
+        await DeclareInputAsync(channel, options, cancellationToken);
+        await DeclareOutputAsync(channel, options, cancellationToken);
+    }
+
+    /// <summary>
+    /// Declares the input/retry/dead-letter side only: InputQueue, DeadLetterQueue, and
+    /// RetryQueues, plus their exchanges and bindings. Retry/DLX topology is native
+    /// RabbitMQ broker behavior, so this must run against the same broker as InputQueue.
+    /// </summary>
+    public static async Task DeclareInputAsync(
         IChannel channel,
         RabbitMqClientOptions options,
         CancellationToken cancellationToken)
     {
         await DeclareExchangeAsync(channel, options.EffectiveInputExchange, options.EffectiveInputExchangeType,
             options.InputExchangeHeaders, cancellationToken);
-        await DeclareExchangeAsync(channel, options.OutputExchange, options.OutputExchangeType,
-            options.OutputExchangeHeaders, cancellationToken);
         await DeclareExchangeAsync(channel, options.EffectiveDeadLetterExchange, options.DeadLetterExchangeType,
             options.DeadLetterExchangeHeaders, cancellationToken);
         await DeclareExchangeAsync(channel, options.RetryExchange, options.RetryExchangeType,
             options.RetryExchangeHeaders, cancellationToken);
 
         await DeclareQueueAsync(channel, options.InputQueue, BuildInputQueueArguments(options), cancellationToken);
-        await DeclareQueueAsync(channel, options.OutputQueue, options.OutputQueueHeaders, cancellationToken);
         await DeclareQueueAsync(channel, options.EffectiveDeadLetterQueue, options.DeadLetterQueueHeaders, cancellationToken);
         foreach (var retryQueue in options.EffectiveRetryQueues)
         {
@@ -33,8 +49,6 @@ internal static class RabbitMqTopology
 
         await BindQueueAsync(channel, options.InputQueue, options.EffectiveInputExchange, options.EffectiveInputRoutingKey,
             options.InputBindingArguments, cancellationToken);
-        await BindQueueAsync(channel, options.OutputQueue, options.OutputExchange, options.EffectiveOutputRoutingKey,
-            options.OutputBindingArguments, cancellationToken);
         await BindQueueAsync(channel, options.EffectiveDeadLetterQueue, options.EffectiveDeadLetterExchange,
             options.EffectiveDeadLetterRoutingKey, options.DeadLetterBindingArguments, cancellationToken);
         foreach (var retryQueue in options.EffectiveRetryQueues)
@@ -47,6 +61,23 @@ internal static class RabbitMqTopology
             await BindQueueAsync(channel, retryQueue.Queue, options.RetryExchange,
                 retryQueue.EffectiveRoutingKey, BuildRetryBindingArguments(options, retryQueue), cancellationToken);
         }
+    }
+
+    /// <summary>
+    /// Declares the output side only: OutputQueue plus its exchange and binding. Used on
+    /// the cluster that receives gateway output, which stays the primary/local cluster
+    /// even when InputCluster is configured.
+    /// </summary>
+    public static async Task DeclareOutputAsync(
+        IChannel channel,
+        RabbitMqClientOptions options,
+        CancellationToken cancellationToken)
+    {
+        await DeclareExchangeAsync(channel, options.OutputExchange, options.OutputExchangeType,
+            options.OutputExchangeHeaders, cancellationToken);
+        await DeclareQueueAsync(channel, options.OutputQueue, options.OutputQueueHeaders, cancellationToken);
+        await BindQueueAsync(channel, options.OutputQueue, options.OutputExchange, options.EffectiveOutputRoutingKey,
+            options.OutputBindingArguments, cancellationToken);
     }
 
     private static Dictionary<string, object?> BuildInputQueueArguments(RabbitMqClientOptions options)

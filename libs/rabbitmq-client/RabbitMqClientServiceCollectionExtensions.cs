@@ -42,8 +42,27 @@ public static class RabbitMqClientServiceCollectionExtensions
         services.TryAddSingleton<RabbitMqOutcomeRouter>();
         services.TryAddSingleton<IRabbitMqConsumer, RabbitMqConsumer>();
         services.TryAddSingleton<IRabbitMqClient, RabbitMqClient>();
+
+        if (HasInputCluster(configuration))
+        {
+            services.TryAddSingleton<IRabbitMqInputClusterConnectionManager, RabbitMqInputClusterConnectionManager>();
+            services.TryAddSingleton<IRabbitMqInputClusterChannelPool, RabbitMqInputClusterChannelPool>();
+        }
+
         return services;
     }
+
+    /// <summary>
+    /// Checked at registration time (not from bound options) so the extra connection
+    /// manager/channel pool are only added to the container when a gateway-style app
+    /// actually configures "RabbitMq:InputCluster". Apps that don't configure it get
+    /// zero behavior or connection-count change.
+    /// </summary>
+    private static bool HasInputCluster(IConfiguration configuration) =>
+        configuration
+            .GetSection(RabbitMqClientOptions.SectionName)
+            .GetSection(nameof(RabbitMqClientOptions.InputCluster))
+            .Exists();
 
     public static IServiceCollection AddRabbitMqClient(
         this IServiceCollection services,

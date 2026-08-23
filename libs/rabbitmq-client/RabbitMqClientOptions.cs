@@ -11,6 +11,14 @@ public sealed class RabbitMqClientOptions
     public string Username { get; set; } = "admin";
     public string Password { get; set; } = "admin";
     public string VirtualHost { get; set; } = "/";
+    /// <summary>
+    /// When set, the consumer connection, input/retry/dead-letter topology, and any
+    /// publish targeting the input/retry side (PublishToInputAsync, retry republish)
+    /// connect to this cluster instead of Host/Port/.../VirtualHost above. OutputQueue
+    /// publishing always uses the primary Host/Port/.../VirtualHost. Leave unset for the
+    /// default single-cluster behavior.
+    /// </summary>
+    public RabbitMqRemoteClusterOptions? InputCluster { get; set; }
     public string InputQueue { get; set; } = string.Empty;
     public string OutputQueue { get; set; } = string.Empty;
     public string DeadLetterQueue { get; set; } = string.Empty;
@@ -141,6 +149,13 @@ public sealed class RabbitMqClientOptions
             return false;
         }
 
+        if (InputCluster is { } inputCluster &&
+            (string.IsNullOrWhiteSpace(inputCluster.Host) || inputCluster.Port is < 1 or > 65535))
+        {
+            error = "RabbitMq InputCluster Host and Port must be valid.";
+            return false;
+        }
+
         error = string.Empty;
         return true;
     }
@@ -226,6 +241,15 @@ public sealed class RabbitMqClientOptions
             byte[] bytes => System.Text.Encoding.UTF8.GetString(bytes),
             _ => Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty
         };
+}
+
+public sealed class RabbitMqRemoteClusterOptions
+{
+    public string Host { get; set; } = "localhost";
+    public int Port { get; set; } = 5672;
+    public string Username { get; set; } = "guest";
+    public string Password { get; set; } = "guest";
+    public string VirtualHost { get; set; } = "/";
 }
 
 public sealed class RabbitMqRetryQueueOptions
