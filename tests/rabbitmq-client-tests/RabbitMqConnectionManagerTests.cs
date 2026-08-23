@@ -141,21 +141,21 @@ public sealed class RabbitMqConnectionManagerTests
             Host = "primary-host",
             InputCluster = new RabbitMqRemoteClusterOptions
             {
-                Host = "hoshen-host",
+                Host = "remote-host",
                 Port = 5673,
-                Username = "hoshen-user",
-                Password = "hoshen-pass",
-                VirtualHost = "/hoshen"
+                Username = "remote-user",
+                Password = "remote-pass",
+                VirtualHost = "/remote"
             }
         };
 
         var settings = RabbitMqConnectionSettings.Input(options);
 
-        Assert.Equal("hoshen-host", settings.Host);
+        Assert.Equal("remote-host", settings.Host);
         Assert.Equal(5673, settings.Port);
-        Assert.Equal("hoshen-user", settings.Username);
-        Assert.Equal("hoshen-pass", settings.Password);
-        Assert.Equal("/hoshen", settings.VirtualHost);
+        Assert.Equal("remote-user", settings.Username);
+        Assert.Equal("remote-pass", settings.Password);
+        Assert.Equal("/remote", settings.VirtualHost);
     }
 
     [Fact]
@@ -167,7 +167,7 @@ public sealed class RabbitMqConnectionManagerTests
             Port = 5672,
             InputCluster = new RabbitMqRemoteClusterOptions
             {
-                Host = "hoshen-host",
+                Host = "remote-host",
                 Port = 5673
             }
         };

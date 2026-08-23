@@ -52,10 +52,10 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
             cancellationToken);
 
     private bool TargetsInputCluster(string exchange, string routingKey) =>
-        string.Equals(exchange, _options.InputExchange, StringComparison.Ordinal) &&
-            string.Equals(routingKey, _options.EffectiveInputRoutingKey, StringComparison.Ordinal) ||
-        string.Equals(exchange, _options.RetryExchange, StringComparison.Ordinal) &&
-            string.Equals(routingKey, _options.EffectiveRetryRoutingKey, StringComparison.Ordinal);
+        (string.Equals(exchange, _options.InputExchange, StringComparison.Ordinal) &&
+            string.Equals(routingKey, _options.EffectiveInputRoutingKey, StringComparison.Ordinal)) ||
+        (string.Equals(exchange, _options.RetryExchange, StringComparison.Ordinal) &&
+            string.Equals(routingKey, _options.EffectiveRetryRoutingKey, StringComparison.Ordinal));
 
     private async Task PublishCoreAsync(
         IRabbitMqPublisherChannelPool channels,

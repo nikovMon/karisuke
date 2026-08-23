@@ -458,7 +458,7 @@ public sealed class RabbitMqClientOptionsTests
             RetryQueue = "retry",
             InputCluster = new RabbitMqRemoteClusterOptions
             {
-                Host = "hoshen-broker",
+                Host = "remote-broker",
                 Port = 5672
             }
         };
@@ -469,8 +469,8 @@ public sealed class RabbitMqClientOptionsTests
 
     [Theory]
     [InlineData("", 5672)]
-    [InlineData("hoshen-broker", 0)]
-    [InlineData("hoshen-broker", 65536)]
+    [InlineData("remote-broker", 0)]
+    [InlineData("remote-broker", 65536)]
     public void ConsumerValidationRejectsInvalidInputClusterHostOrPort(string host, int port)
     {
         var options = new RabbitMqClientOptions

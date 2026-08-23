@@ -268,7 +268,7 @@ public sealed class RabbitMqServiceCollectionTests
     {
         var configuration = Configuration(new Dictionary<string, string?>
         {
-            ["RabbitMq:InputCluster:Host"] = "hoshen-broker",
+            ["RabbitMq:InputCluster:Host"] = "remote-broker",
             ["RabbitMq:InputCluster:Port"] = "5672"
         });
 
