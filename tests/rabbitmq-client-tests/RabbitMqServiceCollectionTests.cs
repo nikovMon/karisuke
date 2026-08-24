@@ -250,6 +250,44 @@ public sealed class RabbitMqServiceCollectionTests
         Assert.Contains("RabbitMq publisher configuration is invalid.", exception.Failures);
     }
 
+    [Fact]
+    public async Task AddRabbitMqConsumerDoesNotRegisterInputClusterServicesWhenNotConfigured()
+    {
+        await using var provider = new ServiceCollection()
+            .AddSingleton<IConfiguration>(Configuration())
+            .AddLogging()
+            .AddRabbitMqConsumer(Configuration())
+            .BuildServiceProvider(validateScopes: true);
+
+        Assert.Null(provider.GetService<IRabbitMqInputClusterConnectionManager>());
+        Assert.Null(provider.GetService<IRabbitMqInputClusterChannelPool>());
+    }
+
+    [Fact]
+    public async Task AddRabbitMqConsumerRegistersInputClusterServicesWhenConfigured()
+    {
+        var configuration = Configuration(new Dictionary<string, string?>
+        {
+            ["RabbitMq:InputCluster:Host"] = "remote-broker",
+            ["RabbitMq:InputCluster:Port"] = "5672"
+        });
+
+        await using var provider = new ServiceCollection()
+            .AddSingleton<IConfiguration>(configuration)
+            .AddLogging()
+            .AddRabbitMqConsumer(configuration)
+            .BuildServiceProvider(validateScopes: true);
+
+        var inputClusterConnections = provider.GetService<IRabbitMqInputClusterConnectionManager>();
+        var consumerConnections = provider.GetService<IRabbitMqConsumerConnectionManager>();
+        var publisherConnections = provider.GetService<IRabbitMqPublisherConnectionManager>();
+
+        Assert.NotNull(inputClusterConnections);
+        Assert.NotNull(provider.GetService<IRabbitMqInputClusterChannelPool>());
+        Assert.NotSame(inputClusterConnections, consumerConnections);
+        Assert.NotSame(inputClusterConnections, publisherConnections);
+    }
+
     private static IConfiguration Configuration() =>
         Configuration(null);
 

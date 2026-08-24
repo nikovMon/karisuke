@@ -42,8 +42,21 @@ public static class RabbitMqClientServiceCollectionExtensions
         services.TryAddSingleton<RabbitMqOutcomeRouter>();
         services.TryAddSingleton<IRabbitMqConsumer, RabbitMqConsumer>();
         services.TryAddSingleton<IRabbitMqClient, RabbitMqClient>();
+
+        if (HasInputCluster(configuration))
+        {
+            services.TryAddSingleton<IRabbitMqInputClusterConnectionManager, RabbitMqInputClusterConnectionManager>();
+            services.TryAddSingleton<IRabbitMqInputClusterChannelPool, RabbitMqInputClusterChannelPool>();
+        }
+
         return services;
     }
+
+    private static bool HasInputCluster(IConfiguration configuration) =>
+        configuration
+            .GetSection(RabbitMqClientOptions.SectionName)
+            .GetSection(nameof(RabbitMqClientOptions.InputCluster))
+            .Exists();
 
     public static IServiceCollection AddRabbitMqClient(
         this IServiceCollection services,

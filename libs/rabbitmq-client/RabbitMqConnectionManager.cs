@@ -19,6 +19,10 @@ internal interface IRabbitMqConsumerConnectionManager : IRabbitMqConnectionManag
 {
 }
 
+internal interface IRabbitMqInputClusterConnectionManager : IRabbitMqConnectionManager
+{
+}
+
 internal sealed class RabbitMqPublisherConnectionManager : RabbitMqConnectionManager, IRabbitMqPublisherConnectionManager
 {
     public RabbitMqPublisherConnectionManager(
@@ -34,9 +38,35 @@ internal sealed class RabbitMqConsumerConnectionManager : RabbitMqConnectionMana
     public RabbitMqConsumerConnectionManager(
         IOptions<RabbitMqClientOptions> options,
         ILogger<RabbitMqConnectionManager> logger)
-        : base(options, logger, "consumer")
+        : base(options, logger, "consumer", useInputCluster: true)
     {
     }
+}
+
+internal sealed class RabbitMqInputClusterConnectionManager : RabbitMqConnectionManager, IRabbitMqInputClusterConnectionManager
+{
+    public RabbitMqInputClusterConnectionManager(
+        IOptions<RabbitMqClientOptions> options,
+        ILogger<RabbitMqConnectionManager> logger)
+        : base(options, logger, "input-cluster", useInputCluster: true)
+    {
+    }
+}
+
+internal sealed record RabbitMqConnectionSettings(
+    string Host,
+    int Port,
+    string Username,
+    string Password,
+    string VirtualHost)
+{
+    public static RabbitMqConnectionSettings Primary(RabbitMqClientOptions options) =>
+        new(options.Host, options.Port, options.Username, options.Password, options.VirtualHost);
+
+    public static RabbitMqConnectionSettings Input(RabbitMqClientOptions options) =>
+        options.InputCluster is { } remote
+            ? new(remote.Host, remote.Port, remote.Username, remote.Password, remote.VirtualHost)
+            : Primary(options);
 }
 
 internal class RabbitMqConnectionManager : IRabbitMqConnectionManager
@@ -48,6 +78,7 @@ internal class RabbitMqConnectionManager : IRabbitMqConnectionManager
     private readonly Func<CancellationToken, Task<IConnection>> _connectionFactory;
     private readonly TimeSpan _disposalTimeout;
     private readonly string _role;
+    private readonly bool _useInputCluster;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
     private readonly CancellationTokenSource _disposalCancellation = new();
     private readonly object _disposalSync = new();
@@ -74,8 +105,9 @@ internal class RabbitMqConnectionManager : IRabbitMqConnectionManager
     protected RabbitMqConnectionManager(
         IOptions<RabbitMqClientOptions> options,
         ILogger<RabbitMqConnectionManager> logger,
-        string role)
-        : this(options, logger, role, connectionFactory: null, DefaultDisposalTimeout)
+        string role,
+        bool useInputCluster = false)
+        : this(options, logger, role, connectionFactory: null, DefaultDisposalTimeout, useInputCluster)
     {
     }
 
@@ -84,7 +116,8 @@ internal class RabbitMqConnectionManager : IRabbitMqConnectionManager
         ILogger<RabbitMqConnectionManager> logger,
         string role,
         Func<CancellationToken, Task<IConnection>>? connectionFactory,
-        TimeSpan disposalTimeout)
+        TimeSpan disposalTimeout,
+        bool useInputCluster = false)
     {
         _options = options.Value;
         _logger = logger;
@@ -95,7 +128,11 @@ internal class RabbitMqConnectionManager : IRabbitMqConnectionManager
         _role = string.IsNullOrWhiteSpace(role)
             ? throw new ArgumentException("Connection role must not be empty.", nameof(role))
             : role;
+        _useInputCluster = useInputCluster;
     }
+
+    private RabbitMqConnectionSettings EffectiveConnectionSettings =>
+        _useInputCluster ? RabbitMqConnectionSettings.Input(_options) : RabbitMqConnectionSettings.Primary(_options);
 
     public async Task<IConnection> GetConnectionAsync(CancellationToken cancellationToken = default)
     {
@@ -175,12 +212,13 @@ internal class RabbitMqConnectionManager : IRabbitMqConnectionManager
             }
 
             MessagingTelemetry.RecordConnectionEvent(RabbitMqConnectionEvent.ConnectSuccess);
+            var connectedSettings = EffectiveConnectionSettings;
             RabbitMqLog.ConnectionEstablished(
                 _logger,
                 _role,
-                _options.Host,
-                _options.Port,
-                _options.VirtualHost);
+                connectedSettings.Host,
+                connectedSettings.Port,
+                connectedSettings.VirtualHost);
             return connection;
         }
         finally
@@ -191,13 +229,14 @@ internal class RabbitMqConnectionManager : IRabbitMqConnectionManager
 
     private Task<IConnection> CreateConnectionAsync(CancellationToken cancellationToken)
     {
+        var settings = EffectiveConnectionSettings;
         var factory = new ConnectionFactory
         {
-            HostName = _options.Host,
-            Port = _options.Port,
-            UserName = _options.Username,
-            Password = _options.Password,
-            VirtualHost = _options.VirtualHost,
+            HostName = settings.Host,
+            Port = settings.Port,
+            UserName = settings.Username,
+            Password = settings.Password,
+            VirtualHost = settings.VirtualHost,
             AutomaticRecoveryEnabled = true,
             TopologyRecoveryEnabled = true,
             NetworkRecoveryInterval = TimeSpan.FromSeconds(_options.ReconnectDelaySeconds),

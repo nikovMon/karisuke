@@ -112,6 +112,72 @@ public sealed class RabbitMqConnectionManagerTests
         Assert.Equal(0, ReadConnectionGaugeState(manager));
     }
 
+    [Fact]
+    public void InputSettingsFallBackToPrimaryWhenInputClusterIsNotConfigured()
+    {
+        var options = new RabbitMqClientOptions
+        {
+            Host = "primary-host",
+            Port = 5672,
+            Username = "primary-user",
+            Password = "primary-pass",
+            VirtualHost = "/primary"
+        };
+
+        var settings = RabbitMqConnectionSettings.Input(options);
+
+        Assert.Equal("primary-host", settings.Host);
+        Assert.Equal(5672, settings.Port);
+        Assert.Equal("primary-user", settings.Username);
+        Assert.Equal("primary-pass", settings.Password);
+        Assert.Equal("/primary", settings.VirtualHost);
+    }
+
+    [Fact]
+    public void InputSettingsUseInputClusterWhenConfigured()
+    {
+        var options = new RabbitMqClientOptions
+        {
+            Host = "primary-host",
+            InputCluster = new RabbitMqRemoteClusterOptions
+            {
+                Host = "remote-host",
+                Port = 5673,
+                Username = "remote-user",
+                Password = "remote-pass",
+                VirtualHost = "/remote"
+            }
+        };
+
+        var settings = RabbitMqConnectionSettings.Input(options);
+
+        Assert.Equal("remote-host", settings.Host);
+        Assert.Equal(5673, settings.Port);
+        Assert.Equal("remote-user", settings.Username);
+        Assert.Equal("remote-pass", settings.Password);
+        Assert.Equal("/remote", settings.VirtualHost);
+    }
+
+    [Fact]
+    public void PrimarySettingsIgnoreInputClusterEvenWhenConfigured()
+    {
+        var options = new RabbitMqClientOptions
+        {
+            Host = "primary-host",
+            Port = 5672,
+            InputCluster = new RabbitMqRemoteClusterOptions
+            {
+                Host = "remote-host",
+                Port = 5673
+            }
+        };
+
+        var settings = RabbitMqConnectionSettings.Primary(options);
+
+        Assert.Equal("primary-host", settings.Host);
+        Assert.Equal(5672, settings.Port);
+    }
+
     private static int ReadConnectionGaugeState(RabbitMqConnectionManager manager) =>
         (int)(typeof(RabbitMqConnectionManager)
             .GetField("_connectionCounted", BindingFlags.Instance | BindingFlags.NonPublic)?

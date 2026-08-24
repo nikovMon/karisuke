@@ -438,4 +438,55 @@ public sealed class RabbitMqClientOptionsTests
         Assert.True(options.IsConsumerValid(out var error));
         Assert.Equal(string.Empty, error);
     }
+
+    [Fact]
+    public void InputClusterDefaultsToNull()
+    {
+        var options = new RabbitMqClientOptions();
+
+        Assert.Null(options.InputCluster);
+    }
+
+    [Fact]
+    public void ConsumerValidationAcceptsValidInputCluster()
+    {
+        var options = new RabbitMqClientOptions
+        {
+            InputQueue = "input",
+            OutputQueue = "output",
+            DeadLetterQueue = "dlq",
+            RetryQueue = "retry",
+            InputCluster = new RabbitMqRemoteClusterOptions
+            {
+                Host = "remote-broker",
+                Port = 5672
+            }
+        };
+
+        Assert.True(options.IsConsumerValid(out var error));
+        Assert.Equal(string.Empty, error);
+    }
+
+    [Theory]
+    [InlineData("", 5672)]
+    [InlineData("remote-broker", 0)]
+    [InlineData("remote-broker", 65536)]
+    public void ConsumerValidationRejectsInvalidInputClusterHostOrPort(string host, int port)
+    {
+        var options = new RabbitMqClientOptions
+        {
+            InputQueue = "input",
+            OutputQueue = "output",
+            DeadLetterQueue = "dlq",
+            RetryQueue = "retry",
+            InputCluster = new RabbitMqRemoteClusterOptions
+            {
+                Host = host,
+                Port = port
+            }
+        };
+
+        Assert.False(options.IsConsumerValid(out var error));
+        Assert.Equal("RabbitMq InputCluster Host and Port must be valid.", error);
+    }
 }

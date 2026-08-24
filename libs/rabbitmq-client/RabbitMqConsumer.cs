@@ -52,6 +52,11 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
         await Task.WhenAll(consumers);
     }
 
+    private Task DeclareConsumerTopologyAsync(IChannel channel, CancellationToken cancellationToken) =>
+        _options.InputCluster is not null
+            ? RabbitMqTopology.DeclareInputAsync(channel, _options, cancellationToken)
+            : RabbitMqTopology.DeclareAsync(channel, _options, cancellationToken);
+
     private async Task ConsumeSingleAsync(
         IRabbitMqMessageHandler handler,
         int consumerIndex,
@@ -63,7 +68,7 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
 
         try
         {
-            await RabbitMqTopology.DeclareAsync(channel, _options, cancellationToken);
+            await DeclareConsumerTopologyAsync(channel, cancellationToken);
             await channel.BasicQosAsync(0, _options.PrefetchCount, global: false, cancellationToken);
 
             var lifetime = new RabbitMqConsumerLifetime();
@@ -270,7 +275,7 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
 
         try
         {
-            await RabbitMqTopology.DeclareAsync(channel, _options, cancellationToken);
+            await DeclareConsumerTopologyAsync(channel, cancellationToken);
             await channel.BasicQosAsync(0, _options.PrefetchCount, global: false, cancellationToken);
 
             var lifetime = new RabbitMqConsumerLifetime();

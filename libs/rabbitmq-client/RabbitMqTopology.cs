@@ -9,17 +9,23 @@ internal static class RabbitMqTopology
         RabbitMqClientOptions options,
         CancellationToken cancellationToken)
     {
+        await DeclareInputAsync(channel, options, cancellationToken);
+        await DeclareOutputAsync(channel, options, cancellationToken);
+    }
+
+    public static async Task DeclareInputAsync(
+        IChannel channel,
+        RabbitMqClientOptions options,
+        CancellationToken cancellationToken)
+    {
         await DeclareExchangeAsync(channel, options.EffectiveInputExchange, options.EffectiveInputExchangeType,
             options.InputExchangeHeaders, cancellationToken);
-        await DeclareExchangeAsync(channel, options.OutputExchange, options.OutputExchangeType,
-            options.OutputExchangeHeaders, cancellationToken);
         await DeclareExchangeAsync(channel, options.EffectiveDeadLetterExchange, options.DeadLetterExchangeType,
             options.DeadLetterExchangeHeaders, cancellationToken);
         await DeclareExchangeAsync(channel, options.RetryExchange, options.RetryExchangeType,
             options.RetryExchangeHeaders, cancellationToken);
 
         await DeclareQueueAsync(channel, options.InputQueue, BuildInputQueueArguments(options), cancellationToken);
-        await DeclareQueueAsync(channel, options.OutputQueue, options.OutputQueueHeaders, cancellationToken);
         await DeclareQueueAsync(channel, options.EffectiveDeadLetterQueue, options.DeadLetterQueueHeaders, cancellationToken);
         foreach (var retryQueue in options.EffectiveRetryQueues)
         {
@@ -33,8 +39,6 @@ internal static class RabbitMqTopology
 
         await BindQueueAsync(channel, options.InputQueue, options.EffectiveInputExchange, options.EffectiveInputRoutingKey,
             options.InputBindingArguments, cancellationToken);
-        await BindQueueAsync(channel, options.OutputQueue, options.OutputExchange, options.EffectiveOutputRoutingKey,
-            options.OutputBindingArguments, cancellationToken);
         await BindQueueAsync(channel, options.EffectiveDeadLetterQueue, options.EffectiveDeadLetterExchange,
             options.EffectiveDeadLetterRoutingKey, options.DeadLetterBindingArguments, cancellationToken);
         foreach (var retryQueue in options.EffectiveRetryQueues)
@@ -47,6 +51,18 @@ internal static class RabbitMqTopology
             await BindQueueAsync(channel, retryQueue.Queue, options.RetryExchange,
                 retryQueue.EffectiveRoutingKey, BuildRetryBindingArguments(options, retryQueue), cancellationToken);
         }
+    }
+
+    public static async Task DeclareOutputAsync(
+        IChannel channel,
+        RabbitMqClientOptions options,
+        CancellationToken cancellationToken)
+    {
+        await DeclareExchangeAsync(channel, options.OutputExchange, options.OutputExchangeType,
+            options.OutputExchangeHeaders, cancellationToken);
+        await DeclareQueueAsync(channel, options.OutputQueue, options.OutputQueueHeaders, cancellationToken);
+        await BindQueueAsync(channel, options.OutputQueue, options.OutputExchange, options.EffectiveOutputRoutingKey,
+            options.OutputBindingArguments, cancellationToken);
     }
 
     private static Dictionary<string, object?> BuildInputQueueArguments(RabbitMqClientOptions options)

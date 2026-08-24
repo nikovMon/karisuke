@@ -10,6 +10,16 @@ internal interface IRabbitMqPublisherChannelPool : IAsyncDisposable
     ValueTask<RabbitMqPublisherChannelLease> LeaseAsync(CancellationToken cancellationToken = default);
 }
 
+internal interface IRabbitMqInputClusterChannelPool : IRabbitMqPublisherChannelPool
+{
+}
+
+internal enum RabbitMqPublisherPoolRole
+{
+    Output,
+    InputCluster
+}
+
 internal readonly struct RabbitMqPublisherChannelLease : IAsyncDisposable
 {
     private readonly RabbitMqPublisherChannelPool _pool;
@@ -25,10 +35,11 @@ internal readonly struct RabbitMqPublisherChannelLease : IAsyncDisposable
     public ValueTask DisposeAsync() => _pool.ReturnAsync(Channel);
 }
 
-internal sealed class RabbitMqPublisherChannelPool : IRabbitMqPublisherChannelPool
+internal class RabbitMqPublisherChannelPool : IRabbitMqPublisherChannelPool
 {
-    private readonly IRabbitMqPublisherConnectionManager _connections;
+    private readonly IRabbitMqConnectionManager _connections;
     private readonly RabbitMqClientOptions _options;
+    private readonly RabbitMqPublisherPoolRole _role;
     private readonly ConcurrentQueue<IChannel> _channels = new();
     private readonly SemaphoreSlim _leases;
     private bool _disposed;
@@ -36,9 +47,18 @@ internal sealed class RabbitMqPublisherChannelPool : IRabbitMqPublisherChannelPo
     public RabbitMqPublisherChannelPool(
         IRabbitMqPublisherConnectionManager connections,
         IOptions<RabbitMqClientOptions> options)
+        : this((IRabbitMqConnectionManager)connections, options, RabbitMqPublisherPoolRole.Output)
+    {
+    }
+
+    internal RabbitMqPublisherChannelPool(
+        IRabbitMqConnectionManager connections,
+        IOptions<RabbitMqClientOptions> options,
+        RabbitMqPublisherPoolRole role)
     {
         _connections = connections;
         _options = options.Value;
+        _role = role;
         _leases = new SemaphoreSlim(_options.PublisherChannelPoolSize, _options.PublisherChannelPoolSize);
     }
 
@@ -87,7 +107,7 @@ internal sealed class RabbitMqPublisherChannelPool : IRabbitMqPublisherChannelPo
 
         try
         {
-            await RabbitMqTopology.DeclareAsync(channel, _options, cancellationToken);
+            await DeclareTopologyAsync(channel, cancellationToken);
             return channel;
         }
         catch
@@ -96,6 +116,14 @@ internal sealed class RabbitMqPublisherChannelPool : IRabbitMqPublisherChannelPo
             throw;
         }
     }
+
+    private Task DeclareTopologyAsync(IChannel channel, CancellationToken cancellationToken) =>
+        _role switch
+        {
+            RabbitMqPublisherPoolRole.InputCluster => RabbitMqTopology.DeclareInputAsync(channel, _options, cancellationToken),
+            _ when _options.InputCluster is not null => RabbitMqTopology.DeclareOutputAsync(channel, _options, cancellationToken),
+            _ => RabbitMqTopology.DeclareAsync(channel, _options, cancellationToken)
+        };
 
     internal async ValueTask ReturnAsync(IChannel channel)
     {
@@ -146,5 +174,15 @@ internal sealed class RabbitMqPublisherChannelPool : IRabbitMqPublisherChannelPo
         }
 
         _leases.Dispose();
+    }
+}
+
+internal sealed class RabbitMqInputClusterChannelPool : RabbitMqPublisherChannelPool, IRabbitMqInputClusterChannelPool
+{
+    public RabbitMqInputClusterChannelPool(
+        IRabbitMqInputClusterConnectionManager connections,
+        IOptions<RabbitMqClientOptions> options)
+        : base(connections, options, RabbitMqPublisherPoolRole.InputCluster)
+    {
     }
 }
