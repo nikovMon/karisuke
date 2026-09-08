@@ -84,25 +84,10 @@ public static class RabbitMqClientServiceCollectionExtensions
             .PostConfigure<IOptions<RabbitMqClientOptions>>((flowControl, rabbitOptions) =>
             {
                 var rabbit = rabbitOptions.Value;
-                if (!flowControlSection.GetSection("Host").Exists())
-                {
-                    flowControl.Host = rabbit.Host;
-                }
-
-                if (!flowControlSection.GetSection("Username").Exists())
-                {
-                    flowControl.Username = rabbit.Username;
-                }
-
-                if (!flowControlSection.GetSection("Password").Exists())
-                {
-                    flowControl.Password = rabbit.Password;
-                }
-
-                if (!flowControlSection.GetSection("VirtualHost").Exists())
-                {
-                    flowControl.VirtualHost = rabbit.VirtualHost;
-                }
+                InheritIfMissing(flowControlSection, "Host", rabbit.Host, v => flowControl.Host = v);
+                InheritIfMissing(flowControlSection, "Username", rabbit.Username, v => flowControl.Username = v);
+                InheritIfMissing(flowControlSection, "Password", rabbit.Password, v => flowControl.Password = v);
+                InheritIfMissing(flowControlSection, "VirtualHost", rabbit.VirtualHost, v => flowControl.VirtualHost = v);
             })
             .Validate(options => options.IsValid(out _), "RabbitMq FlowControl configuration is invalid.")
             .ValidateOnStart();
@@ -110,6 +95,18 @@ public static class RabbitMqClientServiceCollectionExtensions
         services.AddSingleton<RabbitMqFlowControl>();
         services.AddSingleton<IRabbitMqFlowControl>(sp => sp.GetRequiredService<RabbitMqFlowControl>());
         services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<RabbitMqFlowControl>());
+    }
+
+    private static void InheritIfMissing(
+        IConfigurationSection section,
+        string key,
+        string fallback,
+        Action<string> apply)
+    {
+        if (!section.GetSection(key).Exists())
+        {
+            apply(fallback);
+        }
     }
 
     private static OptionsBuilder<RabbitMqClientOptions> AddRabbitMqOptions(

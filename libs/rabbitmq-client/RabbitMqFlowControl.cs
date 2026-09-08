@@ -117,7 +117,7 @@ internal sealed class RabbitMqFlowControl : IRabbitMqFlowControl, IHostedService
             }
             catch (OperationCanceledException)
             {
-                // Expected during shutdown.
+                // The poll loop is cancelled during StopAsync — this is the normal shutdown path.
             }
         }
 
