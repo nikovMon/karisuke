@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Messaging;
 using ImagingPipeline.Common.Dtos.Rules.Models;
@@ -42,71 +43,26 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
         RabbitMqMessageEnvelope message,
         CancellationToken cancellationToken = default)
     {
-        var started = TelemetryTiming.StartTimestamp();
-        var outcome = TelemetryOutcome.Failure;
-        var error = TelemetryErrorCategory.Unknown;
-        var processingState = new HandlerTelemetryState();
-
-        PipelineTelemetry.RecordPayloadSize(PipelineStage.TbConsumer, PipelineDirection.Ingress, message.Body.LongLength);
+        using var stage = PipelineStageScope.Begin(PipelineStage.TbConsumer, message.Body.LongLength);
 
         try
         {
-            TbConsumerInputDto? input;
-            try
+            if (!TryDeserialize(message, out var input, out var deserializationError))
             {
-                input = JsonSerializer.Deserialize<TbConsumerInputDto>(
-                    message.BodyAsUtf8(),
-                    SerializerOptions);
-            }
-            catch (JsonException ex)
-            {
-                outcome = TelemetryOutcome.Rejected;
-                error = TelemetryErrorCategory.Serialization;
-                var deserializationError = $"Json deserialization failed: {ex.Message}";
-                _logger.DeserializationRejected(deserializationError);
-                return RabbitMqMessageProcessingResult.Failure(deserializationError);
-            }
-            catch (OperationCanceledException)
-            {
-                outcome = TelemetryOutcome.Cancelled;
-                error = TelemetryErrorCategory.Cancelled;
-                throw;
-            }
-            catch (Exception ex)
-            {
-                outcome = TelemetryOutcome.Rejected;
-                error = TelemetryErrorCategory.Serialization;
-                var deserializationError = $"Unhandled deserialization error: {ex.Message}";
+                stage.Rejected(TelemetryErrorCategory.Serialization);
                 _logger.DeserializationRejected(deserializationError);
                 return RabbitMqMessageProcessingResult.Failure(deserializationError);
             }
 
-            if (input is null)
-            {
-                outcome = TelemetryOutcome.Rejected;
-                error = TelemetryErrorCategory.Serialization;
-                const string deserializationError = "Deserialization produced null.";
-                _logger.DeserializationRejected(deserializationError);
-                return RabbitMqMessageProcessingResult.Failure(deserializationError);
-            }
-
-            var telemetryContext = CreateTelemetryContext(input);
-            using var pipelineScope = _logger.BeginTelemetryScope(telemetryContext);
-            Activity.Current.AddPipelineContext(
-                taskId: telemetryContext.TaskId,
-                requestId: telemetryContext.RequestId,
-                imageId: telemetryContext.ImageId,
-                ruleId: telemetryContext.RuleId,
-                tenantId: telemetryContext.TenantId,
-                algorithmName: telemetryContext.AlgorithmName,
-                areaName: telemetryContext.AreaName,
-                sensorName: telemetryContext.SensorName);
+            // Built from unvalidated input, so every field is normalised defensively.
+            var context = CreateTelemetryContext(input);
+            using var pipelineScope = _logger.BeginTelemetryScope(context);
+            Activity.Current.AddPipelineContext(context);
 
             var validationFailure = Validate(input);
             if (validationFailure is not null)
             {
-                outcome = TelemetryOutcome.Rejected;
-                error = TelemetryErrorCategory.Validation;
+                stage.Rejected(TelemetryErrorCategory.Validation);
                 _logger.MessageRejected(
                     validationFailure.Code,
                     validationFailure.Message,
@@ -117,78 +73,114 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                 return RabbitMqMessageProcessingResult.Failure(validationFailure.Message);
             }
 
-            var result = await HandleValidatedMessageAsync(input, message, cancellationToken, processingState);
-            outcome = processingState.Outcome;
-            error = processingState.Error;
-            return result;
+            return await HandleValidatedMessageAsync(input, message, stage, cancellationToken);
         }
         catch (OperationCanceledException)
         {
-            outcome = TelemetryOutcome.Cancelled;
-            error = TelemetryErrorCategory.Cancelled;
+            stage.Cancelled();
             throw;
         }
         catch
         {
-            if (processingState.Error != TelemetryErrorCategory.None)
-            {
-                outcome = processingState.Outcome;
-                error = processingState.Error;
-            }
-
-            if (outcome == TelemetryOutcome.Failure && error == TelemetryErrorCategory.Unknown)
-            {
-                outcome = TelemetryOutcome.Retry;
-                error = TelemetryErrorCategory.Handler;
-            }
-
+            stage.Faulted();
             throw;
-        }
-        finally
-        {
-            if (processingState.PublishedCount > 0)
-            {
-                PipelineTelemetry.RecordMessage(
-                    PipelineStage.TbConsumer,
-                    PipelineDirection.Egress,
-                    TelemetryOutcome.Success,
-                    count: processingState.PublishedCount);
-            }
-
-            if (processingState.Outcome == TelemetryOutcome.Success)
-            {
-                PipelineTelemetry.RecordFanOut(PipelineStage.TbConsumer, processingState.PublishedCount);
-            }
-            PipelineTelemetry.RecordMessage(PipelineStage.TbConsumer, PipelineDirection.Ingress, outcome, error);
-            PipelineTelemetry.RecordStageDuration(
-                PipelineStage.TbConsumer,
-                TelemetryTiming.ElapsedSeconds(started),
-                outcome,
-                error);
         }
     }
 
     private async Task<RabbitMqMessageProcessingResult> HandleValidatedMessageAsync(
         TbConsumerInputDto input,
         RabbitMqMessageEnvelope message,
-        CancellationToken cancellationToken,
-        HandlerTelemetryState telemetryState)
+        PipelineStageScope stage,
+        CancellationToken cancellationToken)
     {
-        var matchedAlgorithms = input.Metadata.MissionMetadata.Overlay.AlgorithmNames;
-        var algorithmNames = matchedAlgorithms
-            .Select(algorithm => algorithm.ToString())
-            .ToList();
-        var algorithmNameText = string.Join(",", algorithmNames);
         var overlay = input.Metadata.MissionMetadata.Overlay;
+        var tenantId = input.Metadata.MissionMetadata.TenantId;
+        var algorithmNameText = string.Join(",", overlay.AlgorithmNames.Select(algorithm => algorithm.ToString()));
 
-        PipelineTelemetry.RecordBatchSize(PipelineStage.TbConsumer, PipelineItem.Tile, input.Tiles.Count);
+        var context = new TelemetryLogContext(
+            TaskId: input.Metadata.TaskId,
+            RequestId: input.RequestId,
+            ImageId: overlay.ImageId,
+            RuleId: overlay.RuleId,
+            TenantId: tenantId,
+            AlgorithmName: algorithmNameText,
+            AreaName: overlay.AreaOfInterest,
+            SensorName: overlay.SensorName);
+        var workload = new WorkloadDimensions(
+            overlay.RuleId,
+            tenantId,
+            overlay.AreaOfInterest,
+            overlay.SensorName,
+            algorithmNameText);
 
-        var outgoingHeaders = FindAirMessageHeaders.Forward(
-            message.Headers,
-            algorithmNameText,
-            input.Metadata.MissionMetadata.TenantId);
-        var headers = new ReadOnlyDictionary<string, object?>(outgoingHeaders);
+        stage.RecordBatchSize(PipelineItem.Tile, input.Tiles.Count);
 
+        var outgoingHeaders = FindAirMessageHeaders.Forward(message.Headers, algorithmNameText, tenantId);
+
+        var projection = await MapTileCornersAsync(input, overlay, context, stage, cancellationToken);
+        if (projection.Mapped is null)
+        {
+            return RabbitMqMessageProcessingResult.RetryableFailure(projection.FailureReason!);
+        }
+
+        var mappedCoordinateCount = projection.Mapped.Sum(coordinates => coordinates.Count / 2);
+        stage.RecordBatchSize(PipelineItem.Coordinate, mappedCoordinateCount);
+
+        // The batch span deliberately outlives the publish loop: the end-of-message summary log and
+        // the workload counters below belong to it, so they stay visible on the batch in a trace.
+        // The context is narrower than the projection span's — area and sensor are intentionally
+        // omitted from the Embedder-facing producer span.
+        using var batchSpan = PipelineSpanScope.StartProducer(
+            PipelineStage.TbConsumer,
+            "embedder.publish_batch",
+            context with { AreaName = null, SensorName = null });
+        batchSpan.SetTag(TelemetryAttributeNames.TileCount, input.Tiles.Count);
+
+        await PublishToEmbedderAsync(
+            input,
+            projection.Mapped,
+            context,
+            workload,
+            outgoingHeaders,
+            batchSpan,
+            stage,
+            cancellationToken);
+
+        _logger.MessageProcessed(
+            input.Tiles.Count,
+            input.TilesAmount,
+            mappedCoordinateCount,
+            stage.PublishedCount);
+        WorkloadTelemetry.RecordTileBatch(TelemetryOutcome.Success, workload);
+        WorkloadTelemetry.RecordTiles(
+            TelemetryOutcome.Success,
+            workload,
+            input.Metadata.ModelMetadata.TbCropSizeX,
+            input.Metadata.ModelMetadata.TbCropSizeY,
+            stage.PublishedCount);
+        if (PipelineTimingHeaders.TryGetElapsedSeconds(
+                message.Headers,
+                out var elapsedSeconds,
+                _timeProvider))
+        {
+            stage.RecordEndToEndDuration(elapsedSeconds);
+        }
+
+        stage.Succeeded();
+        return RabbitMqMessageProcessingResult.Success();
+    }
+
+    /// <summary>
+    /// Maps each tile's ROI to ground coordinates, four corners per tile. A count mismatch is
+    /// reported as a failure reason rather than an exception because the batch is retryable.
+    /// </summary>
+    private async Task<ProjectionResult> MapTileCornersAsync(
+        TbConsumerInputDto input,
+        OverlayDto overlay,
+        TelemetryLogContext context,
+        PipelineStageScope stage,
+        CancellationToken cancellationToken)
+    {
         var tileCorners = input.Tiles
             .SelectMany(tile => new IReadOnlyList<double>[]
             {
@@ -199,120 +191,96 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
             })
             .ToList();
 
-        IReadOnlyList<IReadOnlyList<double>> batchMapped;
-        using (var projectionActivity = StartStageActivity("projection"))
-        {
-            try
-            {
-                projectionActivity.AddPipelineContext(
-                    taskId: input.Metadata.TaskId,
-                    requestId: input.RequestId,
-                    imageId: overlay.ImageId,
-                    ruleId: overlay.RuleId,
-                    tenantId: input.Metadata.MissionMetadata.TenantId,
-                    algorithmName: algorithmNameText,
-                    areaName: overlay.AreaOfInterest,
-                    sensorName: overlay.SensorName);
-                if (projectionActivity?.IsAllDataRequested == true)
-                {
-                    projectionActivity.SetTag(
-                        "findair.tile.count",
-                        input.Tiles.Count);
-                }
-                var useRegistrationEndpoint =
-                    string.Equals(overlay.GridType, "MSP", StringComparison.Ordinal) &&
-                    overlay.ImageId.StartsWith("SHR", StringComparison.OrdinalIgnoreCase);
+        using var span = PipelineSpanScope.StartStage(PipelineStage.TbConsumer, "projection", context);
+        span.SetTag(TelemetryAttributeNames.TileCount, input.Tiles.Count);
 
-                batchMapped = useRegistrationEndpoint
-                    ? await _projectionMapper.ProcessBatchByRegistrationAsync(
-                        overlay.ImageId,
-                        tileCorners,
-                        overlay.GridType,
-                        overlay.GridUri,
-                        cancellationToken)
-                    : await _projectionMapper.ProcessBatchAsync(
-                        overlay.ImageId,
-                        tileCorners,
-                        cancellationToken);
-
-                if (batchMapped.Count != input.Tiles.Count * 4)
-                {
-                    var failureReason =
-                        $"Projection mapper returned {batchMapped.Count} results for {input.Tiles.Count} requested tiles.";
-                    telemetryState.SetOutcome(TelemetryOutcome.Retry, TelemetryErrorCategory.Dependency);
-                    projectionActivity.SetTelemetryError(TelemetryErrorCategory.Dependency);
-                    _logger.ProjectionResultCountMismatchScheduledForRetry(
-                        input.Tiles.Count,
-                        batchMapped.Count);
-                    return RabbitMqMessageProcessingResult.RetryableFailure(failureReason);
-                }
-
-                if (projectionActivity?.IsAllDataRequested == true)
-                {
-                    projectionActivity.SetTag(
-                        "findair.coordinate.count",
-                        batchMapped.Count);
-                }
-                projectionActivity.SetTelemetrySuccess();
-            }
-            catch (OperationCanceledException ex)
-            {
-                telemetryState.SetOutcome(TelemetryOutcome.Cancelled, TelemetryErrorCategory.Cancelled);
-                projectionActivity.SetTelemetryError(
-                    TelemetryErrorCategory.Cancelled,
-                    ex,
-                    recordException: false);
-                throw;
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                telemetryState.SetOutcome(TelemetryOutcome.Retry, TelemetryErrorCategory.Dependency);
-                projectionActivity.SetTelemetryError(
-                    TelemetryErrorCategory.Dependency,
-                    ex,
-                    recordException: false);
-                // RabbitMQ's handler boundary owns the exception-bearing error log.
-                _logger.ProjectionScheduledForRetry(input.Tiles.Count);
-                throw;
-            }
-        }
-
-        var mappedCoordinateCount = batchMapped.Sum(coordinates => coordinates.Count / 2);
-        PipelineTelemetry.RecordBatchSize(PipelineStage.TbConsumer, PipelineItem.Coordinate, mappedCoordinateCount);
-
-        var publishedCount = 0;
-        using var buildActivity = StartEmbedderBatchActivity(input.Tiles.Count);
         try
         {
-            buildActivity.AddPipelineContext(
-                taskId: input.Metadata.TaskId,
-                requestId: input.RequestId,
-                imageId: overlay.ImageId,
-                ruleId: overlay.RuleId,
-                tenantId: input.Metadata.MissionMetadata.TenantId,
-                algorithmName: algorithmNameText);
-            if (buildActivity?.IsAllDataRequested == true)
+            var useRegistrationEndpoint =
+                string.Equals(overlay.GridType, "MSP", StringComparison.Ordinal) &&
+                overlay.ImageId.StartsWith("SHR", StringComparison.OrdinalIgnoreCase);
+
+            var mapped = useRegistrationEndpoint
+                ? await _projectionMapper.ProcessBatchByRegistrationAsync(
+                    overlay.ImageId,
+                    tileCorners,
+                    overlay.GridType,
+                    overlay.GridUri,
+                    cancellationToken)
+                : await _projectionMapper.ProcessBatchAsync(
+                    overlay.ImageId,
+                    tileCorners,
+                    cancellationToken);
+
+            if (mapped.Count != input.Tiles.Count * 4)
             {
-                buildActivity.SetTag("findair.tile.count", input.Tiles.Count);
+                stage.Retryable(TelemetryErrorCategory.Dependency);
+                span.Failed(TelemetryErrorCategory.Dependency);
+                _logger.ProjectionResultCountMismatchScheduledForRetry(input.Tiles.Count, mapped.Count);
+                return new ProjectionResult(
+                    null,
+                    $"Projection mapper returned {mapped.Count} results for {input.Tiles.Count} requested tiles.");
             }
 
-            if (buildActivity is not null)
+            span.SetTag("findair.coordinate.count", mapped.Count);
+            return new ProjectionResult(mapped, null);
+        }
+        catch (OperationCanceledException ex)
+        {
+            stage.Cancelled();
+            span.Cancelled(ex);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            stage.Retryable(TelemetryErrorCategory.Dependency);
+            span.Failed(TelemetryErrorCategory.Dependency, ex, recordException: false);
+            // RabbitMQ's handler boundary owns the exception-bearing error log.
+            _logger.ProjectionScheduledForRetry(input.Tiles.Count);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Publishes one Embedder input per tile. A failure part-way through leaves the already
+    /// published outputs in place; the input is not acknowledged, so RabbitMQ redelivers the batch.
+    /// </summary>
+    /// <remarks>
+    /// The batch span is owned by the caller, which keeps it open past this method so the
+    /// end-of-message summary is attributed to it.
+    /// </remarks>
+    private async Task PublishToEmbedderAsync(
+        TbConsumerInputDto input,
+        IReadOnlyList<IReadOnlyList<double>> mappedCoordinates,
+        TelemetryLogContext context,
+        WorkloadDimensions workload,
+        Dictionary<string, object?> outgoingHeaders,
+        PipelineSpanScope span,
+        PipelineStageScope stage,
+        CancellationToken cancellationToken)
+    {
+        // A live view, so the trace context injected below is visible on every outgoing message.
+        var headers = new ReadOnlyDictionary<string, object?>(outgoingHeaders);
+
+        try
+        {
+            if (span.Activity is { } batchActivity)
             {
-                _traceContextPropagator.Inject(outgoingHeaders, buildActivity.Context);
+                _traceContextPropagator.Inject(outgoingHeaders, batchActivity.Context);
             }
             else
             {
                 _traceContextPropagator.InjectCurrent(outgoingHeaders);
             }
 
-            var envelopes = _embedderInputMessageBuilder.Build(input, batchMapped, _timeProvider.GetUtcNow());
+            var envelopes = _embedderInputMessageBuilder.Build(input, mappedCoordinates, _timeProvider.GetUtcNow());
             for (var i = 0; i < envelopes.Count; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var envelope = envelopes[i];
                 var body = JsonSerializer.SerializeToUtf8Bytes(envelope, SerializerOptions);
-                PipelineTelemetry.RecordPayloadSize(PipelineStage.TbConsumer, PipelineDirection.Egress, body.LongLength);
+                stage.RecordEgressPayloadSize(body.LongLength);
                 var outgoing = new RabbitMqMessageEnvelope(
                     MessageId: Guid.NewGuid().ToString("N"),
                     Body: body,
@@ -325,114 +293,83 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                         await _publisher.PublishToOutputAsync(outgoing, cancellationToken);
                     }
 
-                    publishedCount++;
-                    telemetryState.PublishedCount = publishedCount;
-                    WorkloadTelemetry.RecordTilePublishAttempt(
-                        TelemetryOutcome.Success,
-                        overlay.RuleId,
-                        input.Metadata.MissionMetadata.TenantId,
-                        overlay.AreaOfInterest,
-                        overlay.SensorName,
-                        algorithmNameText);
-                    using var tileScope = _logger.BeginTelemetryScope(new TelemetryLogContext(
-                        TaskId: input.Metadata.TaskId,
-                        RequestId: input.RequestId,
-                        ImageId: overlay.ImageId,
-                        RuleId: overlay.RuleId,
-                        TenantId: input.Metadata.MissionMetadata.TenantId,
-                        AlgorithmName: algorithmNameText,
-                        AreaName: overlay.AreaOfInterest,
-                        SensorName: overlay.SensorName,
-                        TileId: envelope.EmbedderInput.TileId,
-                        TileIndex: input.Tiles[i].TileIndex));
-                    _logger.TileSentToEmbedder(
-                        envelope.EmbedderInput.TileId,
-                        input.Tiles[i].TileIndex,
-                        SanitizeUri(input.Tiles[i].Uri),
-                        envelope.EmbedderInput.Resolution,
-                        envelope.EmbedderInput.TilesSizeMeters);
+                    stage.MessagePublished();
+                    WorkloadTelemetry.RecordTilePublishAttempt(TelemetryOutcome.Success, workload);
+                    LogTileSentToEmbedder(context, input.Tiles[i], envelope);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    telemetryState.SetOutcome(TelemetryOutcome.Retry, TelemetryErrorCategory.Publish);
-                    WorkloadTelemetry.RecordTilePublishAttempt(
-                        TelemetryOutcome.Failure,
-                        overlay.RuleId,
-                        input.Metadata.MissionMetadata.TenantId,
-                        overlay.AreaOfInterest,
-                        overlay.SensorName,
-                        algorithmNameText);
-                    buildActivity.SetTelemetryError(
-                        TelemetryErrorCategory.Publish,
-                        ex,
-                        recordException: false);
+                    stage.Retryable(TelemetryErrorCategory.Publish);
+                    WorkloadTelemetry.RecordTilePublishAttempt(TelemetryOutcome.Failure, workload);
+                    span.Failed(TelemetryErrorCategory.Publish, ex, recordException: false);
                     // RabbitMQ's handler boundary owns the exception-bearing error log.
-                    _logger.OutputPublishScheduledForRetry(publishedCount, input.Tiles.Count);
+                    _logger.OutputPublishScheduledForRetry(stage.PublishedCount, input.Tiles.Count);
                     throw;
                 }
             }
-
-            buildActivity.SetTelemetrySuccess();
-            telemetryState.SetOutcome(TelemetryOutcome.Success, TelemetryErrorCategory.None);
         }
         catch (OperationCanceledException ex)
         {
-            telemetryState.SetOutcome(TelemetryOutcome.Cancelled, TelemetryErrorCategory.Cancelled);
-            buildActivity.SetTelemetryError(
-                TelemetryErrorCategory.Cancelled,
-                ex,
-                recordException: false);
+            stage.Cancelled();
+            span.Cancelled(ex);
             throw;
         }
         catch (Exception ex)
         {
-            if (telemetryState.Error == TelemetryErrorCategory.None)
+            if (stage.Faulted())
             {
-                telemetryState.SetOutcome(TelemetryOutcome.Retry, TelemetryErrorCategory.Handler);
-                buildActivity.SetTelemetryError(TelemetryErrorCategory.Handler, ex);
+                span.Failed(TelemetryErrorCategory.Handler, ex);
             }
 
             throw;
         }
         finally
         {
-            if (buildActivity?.IsAllDataRequested == true)
-            {
-                buildActivity.SetTag("findair.output.count", publishedCount);
-            }
+            span.SetTag("findair.output.count", stage.PublishedCount);
         }
+    }
 
-        _logger.MessageProcessed(
-            input.Tiles.Count,
-            input.TilesAmount,
-            mappedCoordinateCount,
-            publishedCount);
-        WorkloadTelemetry.RecordTileBatch(
-            TelemetryOutcome.Success,
-            overlay.RuleId,
-            input.Metadata.MissionMetadata.TenantId,
-            overlay.AreaOfInterest,
-            overlay.SensorName,
-            algorithmNameText);
-        WorkloadTelemetry.RecordTiles(
-            TelemetryOutcome.Success,
-            overlay.RuleId,
-            input.Metadata.MissionMetadata.TenantId,
-            overlay.AreaOfInterest,
-            overlay.SensorName,
-            algorithmNameText,
-            input.Metadata.ModelMetadata.TbCropSizeX,
-            input.Metadata.ModelMetadata.TbCropSizeY,
-            publishedCount);
-        if (PipelineTimingHeaders.TryGetElapsedSeconds(
-                message.Headers,
-                out var elapsedSeconds,
-                _timeProvider))
+    private void LogTileSentToEmbedder(
+        in TelemetryLogContext context,
+        TileBuilderTileOutput tile,
+        EmbedderInputDto envelope)
+    {
+        using var tileScope = _logger.BeginTelemetryScope(context with
         {
-            PipelineTelemetry.RecordEndToEndDuration(PipelineStage.TbConsumer, elapsedSeconds);
-        }
+            TileId = envelope.EmbedderInput.TileId,
+            TileIndex = tile.TileIndex
+        });
+        _logger.TileSentToEmbedder(
+            envelope.EmbedderInput.TileId,
+            tile.TileIndex,
+            SanitizeUri(tile.Uri),
+            envelope.EmbedderInput.Resolution,
+            envelope.EmbedderInput.TilesSizeMeters);
+    }
 
-        return RabbitMqMessageProcessingResult.Success();
+    private static bool TryDeserialize(
+        RabbitMqMessageEnvelope message,
+        [NotNullWhen(true)] out TbConsumerInputDto? input,
+        [NotNullWhen(false)] out string? error)
+    {
+        try
+        {
+            input = JsonSerializer.Deserialize<TbConsumerInputDto>(message.BodyAsUtf8(), SerializerOptions);
+            error = input is null ? "Deserialization produced null." : null;
+            return input is not null;
+        }
+        catch (JsonException ex)
+        {
+            input = null;
+            error = $"Json deserialization failed: {ex.Message}";
+            return false;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            input = null;
+            error = $"Unhandled deserialization error: {ex.Message}";
+            return false;
+        }
     }
 
     private static ValidationFailure? Validate(TbConsumerInputDto input)
@@ -592,19 +529,6 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
 
     private static string? NullIfWhiteSpace(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value;
-    private static Activity? StartEmbedderBatchActivity(int tileCount)
-    {
-        var activity = TelemetrySources.TbConsumer.StartActivity(
-            "embedder.publish_batch",
-            ActivityKind.Producer);
-        if (activity?.IsAllDataRequested == true)
-        {
-            activity.SetTag(TelemetryAttributeNames.PipelineStage, "tb_consumer");
-            activity.SetTag(TelemetryAttributeNames.TileCount, tileCount);
-        }
-
-        return activity;
-    }
 
     private static string SanitizeUri(string value)
     {
@@ -622,21 +546,9 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
         }.Uri.AbsoluteUri;
     }
 
-    private static Activity? StartStageActivity(string operation)
-    {
-        var spanName = operation switch
-        {
-            "projection" => "tb_consumer.projection",
-            _ => "tb_consumer.stage"
-        };
-        var activity = TelemetrySources.TbConsumer.StartActivity(spanName, ActivityKind.Internal);
-        if (activity?.IsAllDataRequested == true)
-        {
-            activity.SetTag(TelemetryAttributeNames.PipelineStage, "tb_consumer");
-            activity.SetTag("findair.operation", operation);
-        }
-        return activity;
-    }
+    private readonly record struct ProjectionResult(
+        IReadOnlyList<IReadOnlyList<double>>? Mapped,
+        string? FailureReason);
 
     private sealed record ValidationFailure(
         string Code,
@@ -658,19 +570,5 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                 input.BatchTilesAmount,
                 input.Tiles?.Count,
                 offendingTileIndex);
-    }
-    private sealed class HandlerTelemetryState
-    {
-        public TelemetryOutcome Outcome { get; private set; } = TelemetryOutcome.Failure;
-
-        public TelemetryErrorCategory Error { get; private set; } = TelemetryErrorCategory.None;
-
-        public int PublishedCount { get; set; }
-
-        public void SetOutcome(TelemetryOutcome outcome, TelemetryErrorCategory error)
-        {
-            Outcome = outcome;
-            Error = error;
-        }
     }
 }

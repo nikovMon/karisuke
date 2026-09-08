@@ -24,6 +24,18 @@ public static class TelemetrySources
     public static readonly ActivitySource TbConsumer = CreateActivitySource(TelemetrySourceNames.TbConsumer);
     public static readonly ActivitySource Embedder = CreateActivitySource(TelemetrySourceNames.Embedder);
 
+    /// <summary>The activity source that owns spans for a pipeline stage.</summary>
+    public static ActivitySource For(PipelineStage stage) => stage switch
+    {
+        PipelineStage.RulesApi => RulesApi,
+        PipelineStage.Gateway => Gateway,
+        PipelineStage.TbPublisher => TbPublisher,
+        PipelineStage.TileBuilder => TileBuilder,
+        PipelineStage.TbConsumer => TbConsumer,
+        PipelineStage.Embedder => Embedder,
+        _ => Pipeline
+    };
+
     private static ActivitySource CreateActivitySource(string name) => new(name, InstrumentationVersion);
 }
 
