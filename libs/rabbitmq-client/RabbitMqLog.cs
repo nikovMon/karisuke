@@ -96,4 +96,33 @@ internal static partial class RabbitMqLog
         ILogger logger,
         double timeoutSeconds,
         string connectionRole);
+
+    [LoggerMessage(200, LogLevel.Information,
+        "RabbitMQ flow control started, watching {QueueCount} queue(s) with poll interval {PollIntervalSeconds}s")]
+    public static partial void FlowControlStarted(
+        ILogger logger,
+        int queueCount,
+        int pollIntervalSeconds);
+
+    [LoggerMessage(201, LogLevel.Warning,
+        "RabbitMQ flow control throttling: queue {Queue} has {MessageCount} messages (high watermark: {HighWatermark})")]
+    public static partial void FlowControlThrottling(
+        ILogger logger,
+        string queue,
+        long messageCount,
+        long highWatermark);
+
+    [LoggerMessage(202, LogLevel.Information,
+        "RabbitMQ flow control resumed: all watched queues are below their low watermarks")]
+    public static partial void FlowControlResumed(ILogger logger);
+
+    [LoggerMessage(203, LogLevel.Warning, "RabbitMQ flow control poll failed")]
+    public static partial void FlowControlPollFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(204, LogLevel.Warning,
+        "RabbitMQ flow control could not check queue {Queue}: management API returned status {StatusCode}")]
+    public static partial void FlowControlQueueCheckFailed(
+        ILogger logger,
+        string queue,
+        int statusCode);
 }
