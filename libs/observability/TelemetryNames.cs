@@ -71,10 +71,12 @@ public static class TelemetryMetricNames
     public const string InvalidTimingHeaders = "findair.telemetry.invalid_timing_headers";
 
     public const string Images = "findair.images";
+    public const string MatchedImages = "findair.images.matched";
     public const string Tasks = "findair.tasks";
     public const string TileRequests = "findair.tile.requests";
     public const string TileBatches = "findair.tile.batches";
     public const string Tiles = "findair.tiles";
+    public const string TilesReceived = "findair.tiles.received";
     public const string TilePublishAttempts = "findair.tile.publish.attempts";
 
     public const string GatewayRuleCacheEntries = "findair.gateway.rule_cache.entries";

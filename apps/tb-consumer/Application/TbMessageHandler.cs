@@ -117,6 +117,19 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                 return RabbitMqMessageProcessingResult.Failure(validationFailure.Message);
             }
 
+            if (!IsRetry(message.Headers))
+            {
+                var overlay = input.Metadata.MissionMetadata.Overlay;
+                var algorithmNameText = string.Join(",", overlay.AlgorithmNames.Select(a => a.ToString()));
+                WorkloadTelemetry.RecordTilesReceived(
+                    overlay.RuleId,
+                    input.Metadata.MissionMetadata.TenantId,
+                    overlay.AreaOfInterest,
+                    overlay.SensorName,
+                    algorithmNameText,
+                    input.Tiles.Count);
+            }
+
             var result = await HandleValidatedMessageAsync(input, message, cancellationToken, processingState);
             outcome = processingState.Outcome;
             error = processingState.Error;
@@ -636,6 +649,35 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
             activity.SetTag("findair.operation", operation);
         }
         return activity;
+    }
+
+    private static bool IsRetry(IReadOnlyDictionary<string, object?>? headers)
+    {
+        if (headers is null)
+        {
+            return false;
+        }
+
+        foreach (var pair in headers)
+        {
+            if (!string.Equals(pair.Key, "retry-count", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var retryCount = pair.Value switch
+            {
+                int n => n,
+                long n => (int)n,
+                byte n => (int)n,
+                short n => (int)n,
+                _ => 0
+            };
+
+            return retryCount > 0;
+        }
+
+        return false;
     }
 
     private sealed record ValidationFailure(

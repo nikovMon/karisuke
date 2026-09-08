@@ -7,6 +7,8 @@ public static class WorkloadTelemetry
 {
     private static readonly Counter<long> Images = TelemetryMeters.Pipeline.CreateCounter<long>(
         TelemetryMetricNames.Images, "{image}", "Logical image messages processed by Gateway.");
+    private static readonly Counter<long> MatchedImages = TelemetryMeters.Pipeline.CreateCounter<long>(
+        TelemetryMetricNames.MatchedImages, "{image}", "Images matched to at least one rule at Gateway.");
     private static readonly Counter<long> Tasks = TelemetryMeters.Pipeline.CreateCounter<long>(
         TelemetryMetricNames.Tasks, "{task}", "Logical rule and tenant tasks processed.");
     private static readonly Counter<long> TileRequests = TelemetryMeters.Pipeline.CreateCounter<long>(
@@ -15,6 +17,8 @@ public static class WorkloadTelemetry
         TelemetryMetricNames.TileBatches, "{batch}", "Tile Builder output batches processed.");
     private static readonly Counter<long> Tiles = TelemetryMeters.Pipeline.CreateCounter<long>(
         TelemetryMetricNames.Tiles, "{tile}", "Logical tiles processed.");
+    private static readonly Counter<long> TilesReceived = TelemetryMeters.Pipeline.CreateCounter<long>(
+        TelemetryMetricNames.TilesReceived, "{tile}", "Tiles received by TB Consumer on first delivery attempt.");
     private static readonly Counter<long> TilePublishAttempts = TelemetryMeters.Pipeline.CreateCounter<long>(
         TelemetryMetricNames.TilePublishAttempts, "{attempt}", "Attempts to publish tiles to Embedder.");
 
@@ -27,6 +31,16 @@ public static class WorkloadTelemetry
         AddDimension(ref tags, TelemetryAttributeNames.AreaName, areaName);
         AddIfPresent(ref tags, TelemetryAttributeNames.SensorName, sensorName);
         Images.Add(1, tags);
+    }
+
+    public static void RecordMatchedImage(
+        string? areaName,
+        string sensorName)
+    {
+        var tags = new TagList();
+        AddDimension(ref tags, TelemetryAttributeNames.AreaName, areaName);
+        AddIfPresent(ref tags, TelemetryAttributeNames.SensorName, sensorName);
+        MatchedImages.Add(1, tags);
     }
 
     public static void RecordTask(
@@ -82,6 +96,17 @@ public static class WorkloadTelemetry
         tags.Add("findair.tile.size", $"{tileWidth}x{tileHeight}");
         Tiles.Add(Math.Max(0, count), tags);
     }
+
+    public static void RecordTilesReceived(
+        string ruleId,
+        string tenantId,
+        string? areaName,
+        string sensorName,
+        string algorithmNames,
+        long count) =>
+        TilesReceived.Add(
+            Math.Max(0, count),
+            BusinessTags(TelemetryOutcome.Success, ruleId, tenantId, areaName, sensorName, algorithmNames));
 
     public static void RecordTilePublishAttempt(
         TelemetryOutcome outcome,
