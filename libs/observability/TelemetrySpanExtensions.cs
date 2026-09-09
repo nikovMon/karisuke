@@ -80,6 +80,23 @@ public static class TelemetrySpanExtensions
         return activity;
     }
 
+    /// <summary>
+    /// Attaches the pipeline fields of a log context to a span, so a handler that already built
+    /// its logging context does not repeat the same values argument by argument.
+    /// </summary>
+    public static Activity? AddPipelineContext(this Activity? activity, in TelemetryLogContext context) =>
+        activity.AddPipelineContext(
+            taskId: context.TaskId,
+            requestId: context.RequestId,
+            imageId: context.ImageId,
+            ruleId: context.RuleId,
+            tenantId: context.TenantId,
+            algorithmName: context.AlgorithmName,
+            areaName: context.AreaName,
+            sensorName: context.SensorName,
+            tileId: context.TileId,
+            tileIndex: context.TileIndex);
+
     private static void SetIfPresent(Activity activity, string key, string? value)
     {
         if (!string.IsNullOrWhiteSpace(value))

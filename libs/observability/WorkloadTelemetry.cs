@@ -95,6 +95,43 @@ public static class WorkloadTelemetry
         TilePublishAttempts.Add(1, tags);
     }
 
+    public static void RecordTileBatch(TelemetryOutcome outcome, in WorkloadDimensions dimensions) =>
+        RecordTileBatch(
+            outcome,
+            dimensions.RuleId,
+            dimensions.TenantId,
+            dimensions.AreaName,
+            dimensions.SensorName,
+            dimensions.AlgorithmNames);
+
+    public static void RecordTiles(
+        TelemetryOutcome outcome,
+        in WorkloadDimensions dimensions,
+        int tileWidth,
+        int tileHeight,
+        long count) =>
+        RecordTiles(
+            outcome,
+            dimensions.RuleId,
+            dimensions.TenantId,
+            dimensions.AreaName,
+            dimensions.SensorName,
+            dimensions.AlgorithmNames,
+            tileWidth,
+            tileHeight,
+            count);
+
+    public static void RecordTilePublishAttempt(
+        TelemetryOutcome outcome,
+        in WorkloadDimensions dimensions) =>
+        RecordTilePublishAttempt(
+            outcome,
+            dimensions.RuleId,
+            dimensions.TenantId,
+            dimensions.AreaName,
+            dimensions.SensorName,
+            dimensions.AlgorithmNames);
+
     private static TagList BusinessTags(
         TelemetryOutcome outcome,
         string ruleId,
