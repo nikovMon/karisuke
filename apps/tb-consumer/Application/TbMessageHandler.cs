@@ -126,10 +126,7 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
         var mappedCoordinateCount = projection.Mapped.Sum(coordinates => coordinates.Count / 2);
         stage.RecordBatchSize(PipelineItem.Coordinate, mappedCoordinateCount);
 
-        // The batch span deliberately outlives the publish loop: the end-of-message summary log and
-        // the workload counters below belong to it, so they stay visible on the batch in a trace.
-        // The context is narrower than the projection span's — area and sensor are intentionally
-        // omitted from the Embedder-facing producer span.
+        // Deliberately outlives the publish loop so the summary below is attributed to the batch.
         using var batchSpan = PipelineSpanScope.StartProducer(
             PipelineStage.TbConsumer,
             "embedder.publish_batch",
