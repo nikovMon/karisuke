@@ -125,4 +125,10 @@ internal static partial class RabbitMqLog
         ILogger logger,
         string queue,
         int statusCode);
+
+    [LoggerMessage(205, LogLevel.Warning,
+        "RabbitMQ flow control wait timed out for message {MessageId}; requeuing without processing")]
+    public static partial void FlowControlRequeuing(
+        ILogger logger,
+        string messageId);
 }
