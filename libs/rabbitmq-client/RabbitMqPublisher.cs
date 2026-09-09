@@ -9,17 +9,14 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
     private readonly IRabbitMqPublisherChannelPool _channels;
     private readonly IRabbitMqPublisherChannelPool _inputClusterChannels;
     private readonly RabbitMqClientOptions _options;
-    private readonly IRabbitMqFlowControl _flowControl;
 
     public RabbitMqPublisher(
         IRabbitMqPublisherChannelPool channels,
         IOptions<RabbitMqClientOptions> options,
-        IRabbitMqFlowControl flowControl,
         IRabbitMqInputClusterChannelPool? inputClusterChannels = null)
     {
         _channels = channels;
         _options = options.Value;
-        _flowControl = flowControl;
         _inputClusterChannels = inputClusterChannels ?? channels;
     }
 
@@ -32,17 +29,14 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
             resetRetryCount: false,
             cancellationToken);
 
-    public async Task PublishToOutputAsync(RabbitMqMessageEnvelope message, CancellationToken cancellationToken = default)
-    {
-        await _flowControl.WaitAsync(cancellationToken);
-        await PublishCoreAsync(
+    public Task PublishToOutputAsync(RabbitMqMessageEnvelope message, CancellationToken cancellationToken = default) =>
+        PublishCoreAsync(
             _channels,
             _options.OutputExchange,
             _options.EffectiveOutputRoutingKey,
             message,
             resetRetryCount: true,
             cancellationToken);
-    }
 
     public Task PublishAsync(
         string exchange,

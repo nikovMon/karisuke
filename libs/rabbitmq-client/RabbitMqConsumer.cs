@@ -14,6 +14,7 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
     private readonly RabbitMqClientOptions _options;
     private readonly RabbitMqOutcomeRouter _outcomes;
     private readonly IMessageTraceContextPropagator _propagator;
+    private readonly IRabbitMqFlowControl _flowControl;
     private readonly ILogger<RabbitMqConsumer> _logger;
 
     public RabbitMqConsumer(
@@ -21,12 +22,14 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
         IOptions<RabbitMqClientOptions> options,
         RabbitMqOutcomeRouter outcomes,
         IMessageTraceContextPropagator propagator,
+        IRabbitMqFlowControl flowControl,
         ILogger<RabbitMqConsumer> logger)
     {
         _connections = connections;
         _options = options.Value;
         _outcomes = outcomes;
         _propagator = propagator;
+        _flowControl = flowControl;
         _logger = logger;
     }
 
@@ -111,6 +114,17 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
             {
                 var receivedAt = TelemetryTiming.StartTimestamp();
                 var delivery = RabbitMqDeliveryFactory.Create(args);
+                try
+                {
+                    await _flowControl.WaitAsync(cancellationToken);
+                }
+                catch (TimeoutException)
+                {
+                    RabbitMqLog.FlowControlRequeuing(_logger, delivery.Message.MessageId);
+                    await channel.BasicNackAsync(delivery.DeliveryTag, multiple: false, requeue: true, cancellationToken);
+                    return;
+                }
+
                 var parentContext = ExtractTransportContext(delivery.Message.Headers);
                 try
                 {
@@ -318,6 +332,17 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
             {
                 var receivedAt = TelemetryTiming.StartTimestamp();
                 var delivery = RabbitMqDeliveryFactory.Create(args);
+                try
+                {
+                    await _flowControl.WaitAsync(cancellationToken);
+                }
+                catch (TimeoutException)
+                {
+                    RabbitMqLog.FlowControlRequeuing(_logger, delivery.Message.MessageId);
+                    await channel.BasicNackAsync(delivery.DeliveryTag, multiple: false, requeue: true, cancellationToken);
+                    return;
+                }
+
                 var parentContext = ExtractTransportContext(delivery.Message.Headers);
                 var retryAttempt = ReadRetryAttempt(delivery.Message.Headers);
                 RabbitMqInputTelemetry.RecordConsumed(_options, delivery, retryAttempt);
