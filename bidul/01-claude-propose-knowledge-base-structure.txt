@@ -1,0 +1,44 @@
+Use the `knowledge-base-architect` skill.
+
+Analyze the existing KnowledgeBase and the entire repository before making any changes.
+
+Goals:
+- Preserve all useful existing knowledge.
+- Reorganize the KnowledgeBase around clear topics and responsibilities.
+- Keep the structure simple and shallow.
+- Use README.md files as navigation hubs.
+- Connect related topics with internal Markdown links.
+- Remove arbitrary numbered document ordering such as 01-, 02-, 03- unless sequence is genuinely required.
+- Avoid duplicated information. Each fact should have one canonical source of truth.
+- Separate verified facts, known risks, and open questions.
+- Do not invent facts that cannot be verified from the repository.
+- Make the KnowledgeBase easy for both developers and AI agents to navigate with minimal context.
+- Prefer focused documents instead of large catch-all files.
+- Identify orphan documents, duplicated content, conflicting information, missing documentation, and broken or outdated links.
+- Keep the current technical content unless it is duplicated, outdated, or belongs in a different canonical topic.
+
+Before proposing the new structure:
+1. Read the current KnowledgeBase.
+2. Inspect the repository structure.
+3. Identify the real applications, libraries, infrastructure components, external integrations, configuration areas, CI/CD, testing, operations, observability, APIs, workflows, and important failure modes.
+4. Build an inventory of the existing KnowledgeBase content.
+5. Map every existing document or important section to its proposed destination.
+6. Identify duplicates and unclear/uncertain information.
+
+Then show me ONLY a proposed restructuring plan.
+
+The proposal must include:
+- The complete proposed KnowledgeBase directory tree.
+- A short explanation of the purpose of every top-level topic.
+- Which current files/content will move into each new topic.
+- Which files should be merged, split, renamed, or removed because they are duplicates.
+- Which information should become the canonical source of truth.
+- Any open questions or gaps discovered.
+- Any risks of losing context during migration.
+- A short explanation of why the new structure is simpler and easier to navigate.
+
+Important:
+- DO NOT modify, move, rename, create, or delete any files yet.
+- DO NOT rewrite the current KnowledgeBase yet.
+- DO NOT apply the migration yet.
+- Wait for my explicit approval of the proposed structure.

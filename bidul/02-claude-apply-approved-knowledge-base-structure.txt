@@ -1,0 +1,46 @@
+The proposed KnowledgeBase structure is approved.
+
+Use the `knowledge-base-architect` skill and apply the approved restructuring now.
+
+Requirements:
+- Preserve all useful existing knowledge.
+- Do not silently lose technical details.
+- Move information into the correct canonical topic.
+- Merge duplicated information and keep only one source of truth.
+- Replace duplicated explanations in other documents with links to the canonical document.
+- Create or update README.md navigation hubs at the KnowledgeBase root and inside each major topic.
+- Update all internal Markdown links after moving or renaming files.
+- Keep the hierarchy shallow and topic-oriented.
+- Remove arbitrary 01-/02-/03-style ordering unless sequence is genuinely meaningful.
+- Keep verified facts separate from open questions and known risks.
+- Do not turn assumptions into facts.
+- Do not invent architecture or behavior that cannot be verified from the repository.
+- Prefer small focused documents over large mixed-topic documents.
+- Add Related Topics links where they improve navigation.
+- Keep naming consistent and readable.
+- Update the KnowledgeBase changelog for meaningful documentation changes.
+
+After applying the restructuring, validate the result.
+
+Validation must include:
+- Every internal Markdown link resolves.
+- Every important document is reachable from the root README through topic navigation.
+- No orphan Markdown documents remain.
+- No obvious duplicated sources of truth remain.
+- No useful existing knowledge was silently dropped.
+- Open questions remain clearly marked as uncertain.
+- Known risks remain clearly separated from normal documentation.
+- Filenames and headings are consistent.
+- The final tree matches the approved structure unless a necessary repository fact forced a small change.
+
+When finished, give me a concise migration report containing:
+1. Final KnowledgeBase directory tree.
+2. Files created.
+3. Files moved or renamed.
+4. Files merged or split.
+5. Duplicated information removed/consolidated.
+6. Broken links fixed.
+7. Open questions or documentation gaps still remaining.
+8. Any deviations from the approved plan and why they were necessary.
+
+Do not change application logic or source code unless I explicitly ask for it. This task is for KnowledgeBase/documentation restructuring only.
