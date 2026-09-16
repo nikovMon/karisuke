@@ -789,23 +789,21 @@ public sealed class GatewayWorkerTests
         var invalid = RabbitMqMessageEnvelope.FromUtf8(
             """
             {
-              "overlay": {
-                "id": "image-1",
-                "sensorName": "cam-001",
-                "sensorType": "EO",
-                "bestResolution": 25.9,
-                "areaOfInterest": "region-alpha",
-                "imageUrl": "/images/image-1.tiff",
-                "width": 4096,
-                "height": 3072,
-                "photoTime": "2026-06-30T06:54:07Z",
-                "roiFootprint": {
-                  "type": "Polygon",
-                  "coordinates": [[[34.7800, 32.0800], [34.7900, 32.0800], [34.7900, 32.0900], [34.7800, 32.0900], [34.7800, 32.0800]]]
-                },
-                "gridType": "EO",
-                "gridURI": "grid://default"
-              }
+              "id": "image-1",
+              "sensorName": "cam-001",
+              "sensorType": "EO",
+              "bestResolution": 25.9,
+              "areaOfInterest": "region-alpha",
+              "imageUrl": "/images/image-1.tiff",
+              "width": 4096,
+              "height": 3072,
+              "photoTime": "2026-06-30T06:54:07Z",
+              "roiFootprint": {
+                "type": "Polygon",
+                "coordinates": [[[34.7800, 32.0800], [34.7900, 32.0800], [34.7900, 32.0900], [34.7800, 32.0900], [34.7800, 32.0800]]]
+              },
+              "gridType": "EO",
+              "gridURI": "grid://default"
             }
             """,
             "message-1");
@@ -839,24 +837,22 @@ public sealed class GatewayWorkerTests
         RabbitMqMessageEnvelope.FromUtf8(
             $$"""
             {
-              "overlay": {
-                "id": "{{imageId}}",
-                "sensorName": "{{sensorName}}",
-                "sensorType": "EO",
-                "registrationQuality": "{{registrationQuality}}",
-                "bestResolution": 25.9,
-                "areaOfInterest": "region-alpha",
-                "imageUrl": "/images/image-1.tiff",
-                "width": 4096,
-                "height": 3072,
-                "photoTime": "2026-06-30T06:54:07Z",
-                "roiFootprint": {
-                  "type": "Polygon",
-                  "coordinates": [[[34.7800, 32.0800], [34.7900, 32.0800], [34.7900, 32.0900], [34.7800, 32.0900], [34.7800, 32.0800]]]
-                },
-                "gridType": "EO",
-                "gridURI": "grid://default"
-              }
+              "id": "{{imageId}}",
+              "sensorName": "{{sensorName}}",
+              "sensorType": "EO",
+              "registrationQuality": "{{registrationQuality}}",
+              "bestResolution": 25.9,
+              "areaOfInterest": "region-alpha",
+              "imageUrl": "/images/image-1.tiff",
+              "width": 4096,
+              "height": 3072,
+              "photoTime": "2026-06-30T06:54:07Z",
+              "roiFootprint": {
+                "type": "Polygon",
+                "coordinates": [[[34.7800, 32.0800], [34.7900, 32.0800], [34.7900, 32.0900], [34.7800, 32.0900], [34.7800, 32.0800]]]
+              },
+              "gridType": "EO",
+              "gridURI": "grid://default"
             }
             """,
             messageId);
