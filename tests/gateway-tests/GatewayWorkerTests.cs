@@ -35,8 +35,9 @@ public sealed class GatewayWorkerTests
 
         var inputEnvelope = InputMessage() with
         {
-            Headers = new Dictionary<string, object?>
+            Headers = new Dictionary<string, object?>(StringComparer.Ordinal)
             {
+                [GatewayWorker.UpdatedFieldsHeader] = new List<object> { Encoding.UTF8.GetBytes("gridType") },
                 ["findair-started-at-unix-ms"] =
                     DateTimeOffset.UtcNow.AddSeconds(-1).ToUnixTimeMilliseconds(),
                 ["business-header"] = "preserved"
@@ -751,7 +752,10 @@ public sealed class GatewayWorkerTests
     public async Task HandleAsyncReturnsFailureForInvalidInputSoBrokerCanDeadLetter()
     {
         await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
-        var invalid = RabbitMqMessageEnvelope.FromUtf8("""{"sensorName":"cam-001"}""", "message-1");
+        var invalid = new RabbitMqMessageEnvelope(
+            "message-1",
+            Encoding.UTF8.GetBytes("""{"sensorName":"cam-001"}"""),
+            Headers: UpdatedFieldsHeaders("gridType"));
 
         var result = await harness.GatewayWorker.HandleAsync(invalid);
 
@@ -772,7 +776,10 @@ public sealed class GatewayWorkerTests
             .Replace("\"areaOfInterest\": \"region-alpha\",", string.Empty, StringComparison.Ordinal);
 
         var result = await harness.GatewayWorker.HandleAsync(
-            RabbitMqMessageEnvelope.FromUtf8(json, "message-without-area"));
+            new RabbitMqMessageEnvelope(
+                "message-without-area",
+                Encoding.UTF8.GetBytes(json),
+                Headers: UpdatedFieldsHeaders("gridType")));
 
         Assert.True(result.IsSuccess);
         var output = Assert.Single(OutputMessages(result));
@@ -783,11 +790,39 @@ public sealed class GatewayWorkerTests
         Assert.Equal("image-1", warning.Properties["ImageId"]);
     }
     [Fact]
+    public async Task HandleAsyncSkipsMessageWhenUpdatedFieldsHeaderMissing()
+    {
+        await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
+        var message = RabbitMqMessageEnvelope.FromUtf8("{}", "message-1");
+
+        var result = await harness.GatewayWorker.HandleAsync(message);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.OutputMessages);
+    }
+
+    [Fact]
+    public async Task HandleAsyncSkipsMessageWhenGridTypeNotInUpdatedFields()
+    {
+        await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
+        var message = new RabbitMqMessageEnvelope(
+            "message-1",
+            Encoding.UTF8.GetBytes("{}"),
+            Headers: UpdatedFieldsHeaders("sensorName", "imageUrl"));
+
+        var result = await harness.GatewayWorker.HandleAsync(message);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.OutputMessages);
+    }
+
+    [Fact]
     public async Task HandleAsyncReturnsFailureWhenRegistrationQualityIsMissing()
     {
         await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
-        var invalid = RabbitMqMessageEnvelope.FromUtf8(
-            """
+        var invalid = new RabbitMqMessageEnvelope(
+            "message-1",
+            Encoding.UTF8.GetBytes("""
             {
               "id": "image-1",
               "sensorName": "cam-001",
@@ -805,8 +840,8 @@ public sealed class GatewayWorkerTests
               "gridType": "EO",
               "gridURI": "grid://default"
             }
-            """,
-            "message-1");
+            """),
+            Headers: UpdatedFieldsHeaders("gridType"));
 
         var result = await harness.GatewayWorker.HandleAsync(invalid);
 
@@ -829,13 +864,20 @@ public sealed class GatewayWorkerTests
         Assert.Empty(OutputMessages(result));
     }
 
+    private static IReadOnlyDictionary<string, object?> UpdatedFieldsHeaders(params string[] fields) =>
+        new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [GatewayWorker.UpdatedFieldsHeader] = fields.Select(f => (object)Encoding.UTF8.GetBytes(f)).ToList()
+        };
+
     private static RabbitMqMessageEnvelope InputMessage(
         string sensorName = "cam-001",
         string registrationQuality = "Accurate",
         string messageId = "message-1",
         string imageId = "image-1") =>
-        RabbitMqMessageEnvelope.FromUtf8(
-            $$"""
+        new(
+            messageId,
+            Encoding.UTF8.GetBytes($$"""
             {
               "id": "{{imageId}}",
               "sensorName": "{{sensorName}}",
@@ -854,8 +896,8 @@ public sealed class GatewayWorkerTests
               "gridType": "EO",
               "gridURI": "grid://default"
             }
-            """,
-            messageId);
+            """),
+            Headers: UpdatedFieldsHeaders("gridType"));
 
     private static RuleDto MatchingRule() =>
         new()

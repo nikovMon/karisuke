@@ -52,6 +52,9 @@ internal static partial class GatewayLog
     [LoggerMessage(2014, LogLevel.Warning, "Gateway input image {ImageId} has no areaOfInterest; processing continues without area metadata.")]
     public static partial void MissingAreaOfInterest(this ILogger logger, string imageId);
 
+    [LoggerMessage(2015, LogLevel.Debug, "Gateway skipped message because x-updated-fields header does not contain 'gridType'.")]
+    public static partial void MessageSkippedNoGridTypeUpdate(this ILogger logger);
+
     [LoggerMessage(2020, LogLevel.Information, "Gateway initialized its active-rule cache with {EntryCount} rules; {SkippedCount} invalid rules were skipped.")]
     public static partial void RuleCacheInitialized(
         this ILogger logger,
