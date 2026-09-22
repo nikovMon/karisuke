@@ -3,6 +3,10 @@
 This is the application-side contract for logs, traces, metrics, and RabbitMQ
 propagation. Deployment examples are under deploy/observability.
 
+This document defines which signals must exist.
+[pipeline-telemetry-pattern.md](pipeline-telemetry-pattern.md) defines how
+handler code emits them, and is the guide to follow when migrating a service.
+
 ## Signal routes
 
 | Signal | Application output | Backend route |
