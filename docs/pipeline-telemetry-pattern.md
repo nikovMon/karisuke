@@ -50,6 +50,12 @@ Rules:
   nothing has classified yet, which keeps nested catch blocks idempotent.
 - **Call `Faulted()` from the handler's catch-all**, so an unexpected exception
   becomes `retry` / `handler` instead of the meaningless `failure` / `unknown`.
+- **Classify from a single flow.** The scope is not thread-safe: its fields are
+  unsynchronised and `Faulted()` checks and sets its guard non-atomically. A
+  handler that fans work out concurrently — a parallelised publish loop, say —
+  can race a per-item classification against the catch-all and silently break
+  first-wins, and can lose published counts. Add synchronisation to the scope
+  before parallelising a handler, not after.
 
 ### PipelineSpanScope
 

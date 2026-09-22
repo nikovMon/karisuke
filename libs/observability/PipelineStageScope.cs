@@ -20,6 +20,14 @@ namespace ImagingPipeline.Observability;
 /// Disposing records the ingress message, the stage duration, and — when the handler published
 /// anything — the egress messages and fan-out.
 /// </para>
+/// <para>
+/// This type is not thread-safe and assumes single-consumer async usage: one scope per message,
+/// driven by one sequential handler. Classification and the published count are plain fields with
+/// no synchronisation, and <see cref="Faulted"/> checks and sets its guard non-atomically. If a
+/// handler ever fans its work out concurrently — a parallelised publish loop, for example — a
+/// per-item classification could race the outer catch-all and silently break first-wins, and the
+/// published count could be lost. Classify from a single flow, or add synchronisation here first.
+/// </para>
 /// </remarks>
 public sealed class PipelineStageScope : IDisposable
 {
