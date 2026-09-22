@@ -244,8 +244,7 @@ public sealed class GatewayWorkerTests
     public async Task HandleAsyncAcknowledgesWithoutPublishingWhenNoRulesMatch()
     {
         var rule = MatchingRule();
-        rule.Sensors.Clear();
-        rule.Sensors["other-camera"] = [RegistrationQuality.Accurate];
+        rule.Sensors = [new SensorConfig { Name = "other-camera", RegistrationQualities = [RegistrationQuality.Accurate] }];
         await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
 
         var result = await harness.GatewayWorker.HandleAsync(InputMessage());
@@ -663,20 +662,11 @@ public sealed class GatewayWorkerTests
         }
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ActiveRuleCacheRejectsInvalidSensorCollections(bool nullSensors)
+    [Fact]
+    public async Task ActiveRuleCacheRejectsNullSensors()
     {
         var invalidRule = MatchingRule();
-        if (nullSensors)
-        {
-            invalidRule.Sensors = null!;
-        }
-        else
-        {
-            invalidRule.Sensors["cam-001"] = [];
-        }
+        invalidRule.Sensors = null!;
 
         var health = new GatewayHealthState();
         var cache = new ActiveRuleCache(
@@ -724,7 +714,7 @@ public sealed class GatewayWorkerTests
     public async Task HandleAsyncRequiresMatchingRegistrationQualityForSensorName()
     {
         var rule = MatchingRule();
-        rule.Sensors["cam-001"] = [RegistrationQuality.Sensor];
+        rule.Sensors = [new SensorConfig { Name = "cam-001", RegistrationQualities = [RegistrationQuality.Sensor] }];
         await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
 
         var result = await harness.GatewayWorker.HandleAsync(InputMessage(registrationQuality: "Accurate"));
@@ -746,6 +736,97 @@ public sealed class GatewayWorkerTests
 
         Assert.True(result.IsSuccess);
         Assert.Single(OutputMessages(result));
+    }
+
+    [Fact]
+    public async Task HandleAsyncMatchesWhenGridTypeIsInAllowedList()
+    {
+        var rule = MatchingRule();
+        rule.Sensors = [new SensorConfig
+        {
+            Name = "cam-001",
+            RegistrationQualities = [RegistrationQuality.Accurate],
+            GridTypes = ["EO", "IR"]
+        }];
+        await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
+
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage());
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(OutputMessages(result));
+    }
+
+    [Fact]
+    public async Task HandleAsyncRejectsWhenGridTypeNotInAllowedList()
+    {
+        var rule = MatchingRule();
+        rule.Sensors = [new SensorConfig
+        {
+            Name = "cam-001",
+            RegistrationQualities = [RegistrationQuality.Accurate],
+            GridTypes = ["IR"]
+        }];
+        await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
+
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage());
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(OutputMessages(result));
+    }
+
+    [Fact]
+    public async Task HandleAsyncMatchesAnyGridTypeWhenGridTypesListIsEmpty()
+    {
+        var rule = MatchingRule();
+        rule.Sensors = [new SensorConfig
+        {
+            Name = "cam-001",
+            RegistrationQualities = [RegistrationQuality.Accurate],
+            GridTypes = []
+        }];
+        await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
+
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage());
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(OutputMessages(result));
+    }
+
+    [Fact]
+    public async Task HandleAsyncMatchesAnyRegistrationQualityWhenListIsEmpty()
+    {
+        var rule = MatchingRule();
+        rule.Sensors = [new SensorConfig
+        {
+            Name = "cam-001",
+            RegistrationQualities = [],
+            GridTypes = ["EO"]
+        }];
+        await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
+
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage());
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(OutputMessages(result));
+    }
+
+    [Fact]
+    public async Task HandleAsyncRequiresBothCriteriaWhenBothSpecified()
+    {
+        var rule = MatchingRule();
+        rule.Sensors = [new SensorConfig
+        {
+            Name = "cam-001",
+            RegistrationQualities = [RegistrationQuality.Sensor],
+            GridTypes = ["EO"]
+        }];
+        await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
+
+        // Input has registrationQuality=Accurate but rule requires Sensor
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage(registrationQuality: "Accurate"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(OutputMessages(result));
     }
 
     [Fact]
@@ -906,10 +987,7 @@ public sealed class GatewayWorkerTests
             RuleName = "FindSuspiciousAreaRule",
             Description = "Rule that detects suspicious activity in a configured geographic area",
             AlgorithmNames = [AlgorithmName.FindAir, AlgorithmName.Rpn],
-            Sensors = new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal)
-            {
-                ["cam-001"] = [RegistrationQuality.Accurate]
-            },
+            Sensors = [new SensorConfig { Name = "cam-001", RegistrationQualities = [RegistrationQuality.Accurate] }],
             IsActive = true,
             TenantsInfo = [Tenant("der", Tiling(5, 5))],
             MinimumResolution = 0.5,

@@ -370,8 +370,8 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
             rule.IsPhotoOld is true,
             geometry);
 
-    private static IReadOnlyDictionary<string, int> BuildSensorSnapshot(
-        IReadOnlyDictionary<string, List<RegistrationQuality>>? sensors)
+    private static IReadOnlyDictionary<string, SensorMatchCriteria> BuildSensorSnapshot(
+        List<SensorConfig>? sensors)
     {
         if (sensors is null)
         {
@@ -380,19 +380,21 @@ public sealed class ActiveRuleCache : IHostedService, IDisposable
 
         if (sensors.Count == 0)
         {
-            return new Dictionary<string, int>(0, StringComparer.Ordinal);
+            return new Dictionary<string, SensorMatchCriteria>(0, StringComparer.Ordinal);
         }
 
-        var snapshot = new Dictionary<string, int>(sensors.Count, StringComparer.Ordinal);
+        var snapshot = new Dictionary<string, SensorMatchCriteria>(sensors.Count, StringComparer.Ordinal);
         foreach (var sensor in sensors)
         {
-            if (sensor.Value is null || sensor.Value.Count == 0)
-            {
-                throw new InvalidDataException(
-                    $"Rule sensor '{sensor.Key}' must contain at least one registration quality.");
-            }
+            var qualityMask = sensor.RegistrationQualities is { Count: > 0 }
+                ? RegistrationQualityMask.From(sensor.RegistrationQualities)
+                : 0;
 
-            snapshot[sensor.Key] = RegistrationQualityMask.From(sensor.Value);
+            var gridTypes = sensor.GridTypes is { Count: > 0 }
+                ? (IReadOnlySet<string>)new HashSet<string>(sensor.GridTypes, StringComparer.Ordinal)
+                : null;
+
+            snapshot[sensor.Name] = new SensorMatchCriteria(qualityMask, gridTypes);
         }
 
         return snapshot;

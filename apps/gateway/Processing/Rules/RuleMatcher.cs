@@ -48,7 +48,7 @@ public sealed class RuleMatcher
                 continue;
             }
 
-            if (!MatchesSensor(input.SensorName, registrationQualityMask, activeRule) ||
+            if (!MatchesSensor(input.SensorName, registrationQualityMask, input.GridType, activeRule) ||
                 !MatchesResolution(input, activeRule))
             {
                 continue;
@@ -101,6 +101,7 @@ public sealed class RuleMatcher
     private static bool MatchesSensor(
         string sensorName,
         int registrationQualityMask,
+        string gridType,
         ActiveRule rule)
     {
         if (rule.Sensors.Count == 0)
@@ -108,8 +109,24 @@ public sealed class RuleMatcher
             return true;
         }
 
-        return rule.Sensors.TryGetValue(sensorName, out var allowedRegistrationQualities) &&
-            (allowedRegistrationQualities & registrationQualityMask) != 0;
+        if (!rule.Sensors.TryGetValue(sensorName, out var criteria))
+        {
+            return false;
+        }
+
+        if (criteria.RegistrationQualityMask != 0 &&
+            (criteria.RegistrationQualityMask & registrationQualityMask) == 0)
+        {
+            return false;
+        }
+
+        if (criteria.AllowedGridTypes is { Count: > 0 } &&
+            !criteria.AllowedGridTypes.Contains(gridType))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static bool MatchesResolution(GatewayInputMessage input, ActiveRule rule) =>
