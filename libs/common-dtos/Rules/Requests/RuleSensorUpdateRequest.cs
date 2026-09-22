@@ -8,6 +8,9 @@ public sealed class RuleSensorUpdateRequest
     [JsonPropertyName("sensorName")]
     public string SensorName { get; set; } = string.Empty;
 
-    [JsonPropertyName("values")]
-    public List<RegistrationQuality> Values { get; set; } = [];
+    [JsonPropertyName("registrationQualities")]
+    public List<RegistrationQuality>? RegistrationQualities { get; set; }
+
+    [JsonPropertyName("gridTypes")]
+    public List<string>? GridTypes { get; set; }
 }

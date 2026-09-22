@@ -128,19 +128,19 @@ public sealed class RuleValidationTests
         var request = new RuleSensorUpdateRequest
         {
             SensorName = "camera",
-            Values = [Accurate, Sensor]
+            RegistrationQualities = [Accurate, Sensor]
         };
 
         var parsed = JsonSerializer.Deserialize<RuleSensorUpdateRequest>(
-            """{"sensorName":"camera","values":["Accurate","Sensor"]}""",
+            """{"sensorName":"camera","registrationQualities":["Accurate","Sensor"]}""",
             options);
         var json = JsonSerializer.Serialize(request, options);
 
         Assert.Throws<JsonException>(() => JsonSerializer.Deserialize<RuleSensorUpdateRequest>(
-            """{"sensorName":"camera","values":["accurate","sensor"]}""",
+            """{"sensorName":"camera","registrationQualities":["accurate","sensor"]}""",
             options));
-        Assert.Contains("\"values\":[\"Accurate\",\"Sensor\"]", json, StringComparison.Ordinal);
-        Assert.Equal([Accurate, Sensor], parsed?.Values);
+        Assert.Contains("\"registrationQualities\":[\"Accurate\",\"Sensor\"]", json, StringComparison.Ordinal);
+        Assert.Equal([Accurate, Sensor], parsed?.RegistrationQualities);
     }
 
     [Fact]
@@ -187,71 +187,63 @@ public sealed class RuleValidationTests
         var duplicateRequest = new RuleSensorUpdateRequest
         {
             SensorName = "",
-            Values = [Accurate, Accurate]
+            RegistrationQualities = [Accurate, Accurate]
         };
-        var emptyValuesRequest = new RuleSensorUpdateRequest
+        var noValuesRequest = new RuleSensorUpdateRequest
         {
-            SensorName = "camera",
-            Values = []
+            SensorName = "camera"
         };
 
         var duplicateErrors = RuleValidation.ValidateSensorRequest(duplicateRequest);
-        var emptyValueErrors = RuleValidation.ValidateSensorRequest(emptyValuesRequest);
+        var noValueErrors = RuleValidation.ValidateSensorRequest(noValuesRequest);
 
         Assert.Contains("sensorName cannot be empty.", duplicateErrors);
-        Assert.Contains("sensor values must be unique.", duplicateErrors);
-        Assert.Contains("sensor values cannot be empty.", emptyValueErrors);
+        Assert.Contains("registrationQualities values must be unique.", duplicateErrors);
+        Assert.Contains("At least one of registrationQualities or gridTypes must be provided with values.", noValueErrors);
     }
 
     [Fact]
     public void SensorValidationRejectsNullCollectionsWithoutThrowing()
     {
         var rule = ValidRule();
-        rule.Sensors = new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal)
-        {
-            ["camera"] = null!
-        };
+        rule.Sensors = [null!];
         var update = new UpdateRuleRequest
         {
-            Sensors = new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal)
-            {
-                ["camera"] = null!
-            }
+            Sensors = [null!]
         };
         update.ProvidedFields.Add("sensors");
+        var requestErrors = RuleValidation.ValidateSensorRequest(new RuleSensorUpdateRequest
+        {
+            SensorName = "camera"
+        });
 
         var ruleErrors = RuleValidation.ValidateRule(rule);
         var updateErrors = RuleValidation.ValidateUpdate(update);
-        var requestErrors = RuleValidation.ValidateSensorRequest(new RuleSensorUpdateRequest
-        {
-            SensorName = "camera",
-            Values = null!
-        });
 
         Assert.Contains(ruleErrors, error => error.Contains("cannot be null", StringComparison.Ordinal));
-        Assert.Contains("sensor value lists cannot be null.", updateErrors);
-        Assert.Contains("sensor values cannot be empty.", requestErrors);
+        Assert.Contains(updateErrors, error => error.Contains("cannot be null", StringComparison.Ordinal));
+        Assert.Contains("At least one of registrationQualities or gridTypes must be provided with values.", requestErrors);
     }
 
     [Fact]
-    public void SensorValidationRejectsEmptyRuleSensorValueLists()
+    public void SensorValidationAllowsEmptyRegistrationQualitiesAndGridTypes()
     {
         var rule = ValidRule();
-        rule.Sensors["camera"] = [];
+        rule.Sensors = [new SensorConfig { Name = "camera" }];
         var update = new UpdateRuleRequest
         {
-            Sensors = new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal)
-            {
-                ["camera"] = []
-            }
+            Sensors =
+            [
+                new SensorConfig { Name = "camera" }
+            ]
         };
         update.ProvidedFields.Add("sensors");
 
         var ruleErrors = RuleValidation.ValidateRule(rule);
         var updateErrors = RuleValidation.ValidateUpdate(update);
 
-        Assert.Contains("sensor value lists cannot be empty", ruleErrors);
-        Assert.Contains("sensor value lists cannot be empty.", updateErrors);
+        Assert.DoesNotContain(ruleErrors, error => error.Contains("cannot be empty", StringComparison.Ordinal) && error.Contains("sensor", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(updateErrors, error => error.Contains("cannot be empty", StringComparison.Ordinal) && error.Contains("sensor", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
