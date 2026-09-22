@@ -143,16 +143,16 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
             PipelineTelemetry.RecordEndToEndDuration(PipelineStage.Gateway, elapsedSeconds);
         }
 
-        if (!HasUpdatedField(message.Headers, "gridType"))
-        {
-            _logger.MessageSkippedNoGridTypeUpdate();
-            outcome = TelemetryOutcome.Success;
-            error = TelemetryErrorCategory.None;
-            return Task.FromResult(RabbitMqMessageProcessingResult.Success());
-        }
-
         try
         {
+            if (!HasUpdatedField(message.Headers, "gridType"))
+            {
+                _logger.MessageSkippedNoGridTypeUpdate();
+                outcome = TelemetryOutcome.Success;
+                error = TelemetryErrorCategory.None;
+                return Task.FromResult(RabbitMqMessageProcessingResult.Success());
+            }
+
             var rules = _ruleCache.Current;
             rulesEvaluated = rules.Count;
             PipelineTelemetry.RecordBatchSize(PipelineStage.Gateway, PipelineItem.Rule, rulesEvaluated);
@@ -394,8 +394,7 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
             return false;
         }
 
-        object? raw = null;
-        if (!headers.TryGetValue(UpdatedFieldsHeader, out raw))
+        if (!headers.TryGetValue(UpdatedFieldsHeader, out var raw))
         {
             foreach (var pair in headers)
             {

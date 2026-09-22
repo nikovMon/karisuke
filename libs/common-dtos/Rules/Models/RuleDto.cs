@@ -143,6 +143,7 @@ public sealed class RuleDto : IValidatableObject
 
     private static IEnumerable<ValidationResult> ValidateSensors(IReadOnlyList<SensorConfig> sensors)
     {
+        var names = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 0; i < sensors.Count; i++)
         {
             var sensor = sensors[i];
@@ -158,6 +159,12 @@ public sealed class RuleDto : IValidatableObject
             {
                 yield return new ValidationResult(
                     $"sensors[{i}].name cannot be empty",
+                    [nameof(Sensors)]);
+            }
+            else if (!names.Add(sensor.Name))
+            {
+                yield return new ValidationResult(
+                    $"Duplicate sensor name '{sensor.Name}'",
                     [nameof(Sensors)]);
             }
 

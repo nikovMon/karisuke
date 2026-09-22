@@ -571,6 +571,9 @@ public sealed class RuleService : IRuleService
                 request.GridTypes.Contains(value, StringComparer.Ordinal));
         }
 
+        // Remove the sensor entry entirely when both criteria lists are empty.
+        // An empty entry would mean "match all" for this sensor, which is unlikely
+        // to be the intent after explicitly removing all filter values.
         if (sensor.RegistrationQualities.Count == 0 && sensor.GridTypes.Count == 0)
         {
             rule.Sensors.Remove(sensor);
