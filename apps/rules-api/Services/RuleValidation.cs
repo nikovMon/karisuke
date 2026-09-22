@@ -155,36 +155,9 @@ public static class RuleValidation
             return;
         }
 
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        for (var i = 0; i < sensors.Count; i++)
+        foreach (var error in SensorConfig.ValidateCollection(sensors))
         {
-            var sensor = sensors[i];
-            if (sensor is null)
-            {
-                errors.Add($"sensors[{i}] cannot be null.");
-                continue;
-            }
-
-            if (string.IsNullOrWhiteSpace(sensor.Name))
-            {
-                errors.Add($"sensors[{i}].name cannot be empty.");
-            }
-            else if (!names.Add(sensor.Name))
-            {
-                errors.Add($"Duplicate sensor name '{sensor.Name}'.");
-            }
-
-            if (sensor.RegistrationQualities is not null &&
-                sensor.RegistrationQualities.Any(value => !Enum.IsDefined(value)))
-            {
-                errors.Add($"sensors[{i}].registrationQualities contains invalid values.");
-            }
-
-            if (sensor.GridTypes is not null &&
-                sensor.GridTypes.Any(string.IsNullOrWhiteSpace))
-            {
-                errors.Add($"sensors[{i}].gridTypes contains empty or whitespace values.");
-            }
+            errors.Add(error);
         }
     }
 }

@@ -226,7 +226,7 @@ public sealed class RuleValidationTests
     }
 
     [Fact]
-    public void SensorValidationAllowsEmptyRegistrationQualitiesAndGridTypes()
+    public void SensorValidationRejectsBothRegistrationQualitiesAndGridTypesEmpty()
     {
         var rule = ValidRule();
         rule.Sensors = [new SensorConfig { Name = "camera" }];
@@ -242,8 +242,8 @@ public sealed class RuleValidationTests
         var ruleErrors = RuleValidation.ValidateRule(rule);
         var updateErrors = RuleValidation.ValidateUpdate(update);
 
-        Assert.DoesNotContain(ruleErrors, error => error.Contains("cannot be empty", StringComparison.Ordinal) && error.Contains("sensor", StringComparison.OrdinalIgnoreCase));
-        Assert.DoesNotContain(updateErrors, error => error.Contains("cannot be empty", StringComparison.Ordinal) && error.Contains("sensor", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(ruleErrors, error => error.Contains("at least one registrationQuality or gridType", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(updateErrors, error => error.Contains("at least one registrationQuality or gridType", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]

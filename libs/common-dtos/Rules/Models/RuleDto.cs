@@ -143,46 +143,9 @@ public sealed class RuleDto : IValidatableObject
 
     private static IEnumerable<ValidationResult> ValidateSensors(IReadOnlyList<SensorConfig> sensors)
     {
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        for (var i = 0; i < sensors.Count; i++)
+        foreach (var error in SensorConfig.ValidateCollection(sensors))
         {
-            var sensor = sensors[i];
-            if (sensor is null)
-            {
-                yield return new ValidationResult(
-                    $"sensors[{i}] cannot be null",
-                    [nameof(Sensors)]);
-                continue;
-            }
-
-            if (string.IsNullOrWhiteSpace(sensor.Name))
-            {
-                yield return new ValidationResult(
-                    $"sensors[{i}].name cannot be empty",
-                    [nameof(Sensors)]);
-            }
-            else if (!names.Add(sensor.Name))
-            {
-                yield return new ValidationResult(
-                    $"Duplicate sensor name '{sensor.Name}'",
-                    [nameof(Sensors)]);
-            }
-
-            if (sensor.RegistrationQualities is not null &&
-                sensor.RegistrationQualities.Any(value => !Enum.IsDefined(value)))
-            {
-                yield return new ValidationResult(
-                    $"sensors[{i}].registrationQualities contains invalid values",
-                    [nameof(Sensors)]);
-            }
-
-            if (sensor.GridTypes is not null &&
-                sensor.GridTypes.Any(string.IsNullOrWhiteSpace))
-            {
-                yield return new ValidationResult(
-                    $"sensors[{i}].gridTypes contains empty or whitespace values",
-                    [nameof(Sensors)]);
-            }
+            yield return new ValidationResult(error, [nameof(Sensors)]);
         }
     }
 
