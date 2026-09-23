@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>ImagingPipeline.UnifiedGateway</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\libs\pipeline-catalog\ImagingPipeline.PipelineCatalog.csproj" />
+    <ProjectReference Include="..\..\libs\pipeline-contracts\ImagingPipeline.PipelineContracts.csproj" />
+    <ProjectReference Include="..\..\libs\observability\ImagingPipeline.Observability.csproj" />
+  </ItemGroup>
+</Project>
