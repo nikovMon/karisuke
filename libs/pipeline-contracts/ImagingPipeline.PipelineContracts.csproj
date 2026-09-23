@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>ImagingPipeline.PipelineContracts</AssemblyName>
+    <RootNamespace>ImagingPipeline.PipelineContracts</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\common-dtos\ImagingPipeline.Common.Dtos.csproj" />
+  </ItemGroup>
+</Project>

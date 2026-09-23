@@ -16,11 +16,14 @@ Nx is the monorepo task orchestrator. `dotnet` and MSBuild perform the actual re
 ```text
 apps/
   gateway/
+  unified-gateway/
   tb-publisher/
   tb-consumer/
   rules-api/
 libs/
   common-dtos/
+  pipeline-catalog/
+  pipeline-contracts/
   elasticsearch-client/
   geometry-utils/
   observability/
@@ -29,6 +32,9 @@ libs/
 tests/
   elasticsearch-client-tests/
   gateway-tests/
+  unified-gateway-tests/
+  pipeline-catalog-tests/
+  pipeline-contracts-tests/
   observability-tests/
   projection-mapper-client-tests/
   rabbitmq-client-tests/
@@ -39,6 +45,8 @@ tests/
 ```
 
 `libs/common-dtos` contains DTO contracts shared by multiple apps. `libs/observability` is the central OpenTelemetry contract and host bootstrap. The RabbitMQ, Projection Mapper, and Elasticsearch libraries own their dependency instrumentation while using that common contract.
+
+`apps/unified-gateway` implements the Catalog & Contracts Foundation: a validated pipeline catalog, ASD payload preparation, per-pipeline extra JSON data and pipeline metadata GET routes. HTTP/RabbitMQ settings describe future destinations; this application does not consume or send messages. Transport, dispatch, retries, rule matching and snapshots belong to later tickets. The Rules API is unchanged. See [its README](apps/unified-gateway/README.md) for configuration, validation, observability and Nx commands.
 
 Tile Builder and Embedder implementations are not present in this repository; their current integration boundary is represented by RabbitMQ DTOs and the publisher/consumer applications.
 
