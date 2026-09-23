@@ -22,7 +22,7 @@ public sealed class RuleDto : IValidatableObject
     public required List<AlgorithmName> AlgorithmNames { get; set; }
 
     [JsonPropertyName("sensors")]
-    public Dictionary<string, List<RegistrationQuality>> Sensors { get; set; } = new(StringComparer.Ordinal);
+    public List<SensorConfig> Sensors { get; set; } = [];
 
     [JsonPropertyName("isActive")]
     public bool IsActive { get; set; } = true;
@@ -111,21 +111,12 @@ public sealed class RuleDto : IValidatableObject
         {
             yield return new ValidationResult("sensors cannot be null", [nameof(Sensors)]);
         }
-        else if (Sensors.Any(sensor => sensor.Value is null))
+        else
         {
-            yield return new ValidationResult("sensor value lists cannot be null", [nameof(Sensors)]);
-        }
-        else if (Sensors.Any(sensor => sensor.Value.Count == 0))
-        {
-            yield return new ValidationResult(
-                "sensor value lists cannot be empty",
-                [nameof(Sensors)]);
-        }
-        else if (Sensors.Any(sensor => sensor.Value.Any(value => !Enum.IsDefined(value))))
-        {
-            yield return new ValidationResult(
-                "sensor values must be valid registration qualities",
-                [nameof(Sensors)]);
+            foreach (var result in ValidateSensors(Sensors))
+            {
+                yield return result;
+            }
         }
 
         if (TenantsInfo is null || TenantsInfo.Count == 0)
@@ -147,6 +138,14 @@ public sealed class RuleDto : IValidatableObject
             yield return new ValidationResult(
                 "locationWkt is required",
                 [nameof(LocationWkt)]);
+        }
+    }
+
+    private static IEnumerable<ValidationResult> ValidateSensors(IReadOnlyList<SensorConfig> sensors)
+    {
+        foreach (var error in SensorConfig.ValidateCollection(sensors))
+        {
+            yield return new ValidationResult(error, [nameof(Sensors)]);
         }
     }
 

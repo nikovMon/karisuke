@@ -52,16 +52,17 @@ public sealed class RuleServiceTests
         var repository = new InMemoryRuleRepository();
         var service = CreateService(repository);
         var request = ValidCreateRequest("one");
-        request.Sensors["camera"] = [Accurate, Accurate, Sensor];
-        request.Sensors[" "] = [Sensor];
+        request.Sensors =
+        [
+            new SensorConfig { Name = "camera", RegistrationQualities = [Accurate, Accurate, Sensor] }
+        ];
 
         var result = await service.CreateAsync(request);
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
         Assert.False(string.IsNullOrWhiteSpace(result.Value?.Id));
         Assert.NotEqual("rule-1", result.Value?.Id);
-        Assert.Equal([Accurate, Sensor], result.Value?.Sensors["camera"]);
-        Assert.False(result.Value?.Sensors.ContainsKey(" "));
+        Assert.Equal([Accurate, Sensor], result.Value?.Sensors.First(s => s.Name == "camera").RegistrationQualities);
         Assert.True(result.Value?.CreationTime > DateTimeOffset.MinValue);
         Assert.True(result.Value?.UpdateTime > DateTimeOffset.MinValue);
     }
@@ -197,7 +198,7 @@ public sealed class RuleServiceTests
         var repository = new InMemoryRuleRepository();
         var rule = ValidRule("rule-1", "one");
         rule.Description = "old description";
-        rule.Sensors["camera"] = [Accurate];
+        rule.Sensors = [new SensorConfig { Name = "camera", RegistrationQualities = [Accurate] }];
         rule.TenantsInfo =
         [
             new TenantInfo
@@ -218,10 +219,10 @@ public sealed class RuleServiceTests
         var request = new UpdateRuleRequest
         {
             Description = null,
-            Sensors = new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal)
-            {
-                ["thermal"] = [Sensor, Sensor, Accurate]
-            },
+            Sensors =
+            [
+                new SensorConfig { Name = "thermal", RegistrationQualities = [Sensor, Sensor, Accurate] }
+            ],
             TenantsInfo =
             [
                 new TenantInfo
@@ -248,8 +249,8 @@ public sealed class RuleServiceTests
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
         Assert.Null(result.Value?.Description);
-        Assert.False(result.Value?.Sensors.ContainsKey("camera"));
-        Assert.Equal([Sensor, Accurate], result.Value?.Sensors["thermal"]);
+        Assert.False(result.Value?.Sensors.Any(s => s.Name == "camera"));
+        Assert.Equal([Sensor, Accurate], result.Value?.Sensors.First(s => s.Name == "thermal").RegistrationQualities);
         var tenant = Assert.Single(result.Value?.TenantsInfo ?? []);
         Assert.Equal("new-tenant", tenant.TenantId);
         var tiling = Assert.Single(tenant.TilingConfigs);
@@ -361,19 +362,19 @@ public sealed class RuleServiceTests
     {
         var repository = new InMemoryRuleRepository();
         var rule = ValidRule("rule-1", "one");
-        rule.Sensors["camera"] = [Accurate];
+        rule.Sensors = [new SensorConfig { Name = "camera", RegistrationQualities = [Accurate] }];
         repository.Add(rule);
         var service = CreateService(repository);
 
         var result = await service.AddSensorsAsync(["rule-1"], new RuleSensorUpdateRequest
         {
             SensorName = "camera",
-            Values = [Accurate, Sensor]
+            RegistrationQualities = [Accurate, Sensor]
         });
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
         var updated = await repository.GetByIdAsync("rule-1");
-        Assert.Equal([Accurate, Sensor], updated?.Sensors["camera"]);
+        Assert.Equal([Accurate, Sensor], updated?.Sensors.First(s => s.Name == "camera").RegistrationQualities);
     }
 
     [Fact]
@@ -389,7 +390,7 @@ public sealed class RuleServiceTests
         var result = await service.AddSensorsAsync(missingIds, new RuleSensorUpdateRequest
         {
             SensorName = "camera",
-            Values = [Accurate]
+            RegistrationQualities = [Accurate]
         });
 
         Assert.Equal(12, result.Value?.FailedIds.Count);
@@ -417,12 +418,12 @@ public sealed class RuleServiceTests
         var result = await service.AddSensorsAsync(["rule-1"], new RuleSensorUpdateRequest
         {
             SensorName = "thermal",
-            Values = [Sensor, Accurate]
+            RegistrationQualities = [Sensor, Accurate]
         });
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
         var updated = await repository.GetByIdAsync("rule-1");
-        Assert.Equal([Sensor, Accurate], updated?.Sensors["thermal"]);
+        Assert.Equal([Sensor, Accurate], updated?.Sensors.First(s => s.Name == "thermal").RegistrationQualities);
     }
 
     [Fact]
@@ -430,19 +431,19 @@ public sealed class RuleServiceTests
     {
         var repository = new InMemoryRuleRepository();
         var rule = ValidRule("rule-1", "one");
-        rule.Sensors["camera"] = [Accurate];
+        rule.Sensors = [new SensorConfig { Name = "camera", RegistrationQualities = [Accurate] }];
         repository.Add(rule);
         var service = CreateService(repository);
 
         var result = await service.RemoveSensorsAsync(["rule-1"], new RuleSensorUpdateRequest
         {
             SensorName = "camera",
-            Values = [Accurate]
+            RegistrationQualities = [Accurate]
         });
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
         var updated = await repository.GetByIdAsync("rule-1");
-        Assert.False(updated?.Sensors.ContainsKey("camera"));
+        Assert.False(updated?.Sensors.Any(s => s.Name == "camera"));
     }
 
     [Fact]
@@ -450,19 +451,19 @@ public sealed class RuleServiceTests
     {
         var repository = new InMemoryRuleRepository();
         var rule = ValidRule("rule-1", "one");
-        rule.Sensors["camera"] = [Accurate];
+        rule.Sensors = [new SensorConfig { Name = "camera", RegistrationQualities = [Accurate] }];
         repository.Add(rule);
         var service = CreateService(repository);
 
         var result = await service.RemoveSensorsAsync(["rule-1"], new RuleSensorUpdateRequest
         {
             SensorName = "thermal",
-            Values = [Sensor]
+            RegistrationQualities = [Sensor]
         });
 
         Assert.Equal(RuleOperationStatus.Success, result.Status);
         var updated = await repository.GetByIdAsync("rule-1");
-        Assert.Equal([Accurate], updated?.Sensors["camera"]);
+        Assert.Equal([Accurate], updated?.Sensors.First(s => s.Name == "camera").RegistrationQualities);
     }
 
     [Fact]
@@ -475,18 +476,17 @@ public sealed class RuleServiceTests
         var result = await service.AddSensorsAsync(["rule-1"], new RuleSensorUpdateRequest
         {
             SensorName = "camera",
-            Values = [Accurate, Accurate]
+            RegistrationQualities = [Accurate, Accurate]
         });
-        var nullValuesResult = await service.AddSensorsAsync(["rule-1"], new RuleSensorUpdateRequest
+        var noValuesResult = await service.AddSensorsAsync(["rule-1"], new RuleSensorUpdateRequest
         {
-            SensorName = "camera",
-            Values = null!
+            SensorName = "camera"
         });
 
         Assert.Equal(RuleOperationStatus.ValidationFailed, result.Status);
         Assert.Contains("unique", result.Error, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(RuleOperationStatus.ValidationFailed, nullValuesResult.Status);
-        Assert.Contains("empty", nullValuesResult.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(RuleOperationStatus.ValidationFailed, noValuesResult.Status);
+        Assert.Contains("At least one of", noValuesResult.Error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

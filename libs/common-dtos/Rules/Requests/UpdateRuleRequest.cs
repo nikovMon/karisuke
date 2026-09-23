@@ -9,7 +9,7 @@ public sealed class UpdateRuleRequest
     private string? _ruleName;
     private string? _description;
     private List<AlgorithmName>? _algorithmNames;
-    private Dictionary<string, List<RegistrationQuality>>? _sensors;
+    private List<SensorConfig>? _sensors;
     private bool? _isActive;
     private List<TenantInfo>? _tenantsInfo;
     private double? _minimumResolution;
@@ -56,7 +56,7 @@ public sealed class UpdateRuleRequest
     }
 
     [JsonPropertyName("sensors")]
-    public Dictionary<string, List<RegistrationQuality>>? Sensors
+    public List<SensorConfig>? Sensors
     {
         get => _sensors;
         set

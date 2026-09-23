@@ -97,20 +97,34 @@ public static class RuleValidation
             errors.Add("sensorName cannot be empty.");
         }
 
-        if (request.Values is null || request.Values.Count == 0)
+        var hasQualities = request.RegistrationQualities is { Count: > 0 };
+        var hasGridTypes = request.GridTypes is { Count: > 0 };
+
+        if (!hasQualities && !hasGridTypes)
         {
-            errors.Add("sensor values cannot be empty.");
+            errors.Add("At least one of registrationQualities or gridTypes must be provided with values.");
         }
 
-        if (request.Values is not null && request.Values.Any(value => !Enum.IsDefined(value)))
+        if (request.RegistrationQualities is not null && request.RegistrationQualities.Any(value => !Enum.IsDefined(value)))
         {
-            errors.Add("sensor values must be valid registration qualities.");
+            errors.Add("registrationQualities values must be valid registration qualities.");
         }
 
-        if (request.Values is not null &&
-            request.Values.Count != request.Values.Distinct().Count())
+        if (request.RegistrationQualities is not null &&
+            request.RegistrationQualities.Count != request.RegistrationQualities.Distinct().Count())
         {
-            errors.Add("sensor values must be unique.");
+            errors.Add("registrationQualities values must be unique.");
+        }
+
+        if (request.GridTypes is not null && request.GridTypes.Any(string.IsNullOrWhiteSpace))
+        {
+            errors.Add("gridTypes values must be non-empty strings.");
+        }
+
+        if (request.GridTypes is not null &&
+            request.GridTypes.Count != request.GridTypes.Distinct(StringComparer.Ordinal).Count())
+        {
+            errors.Add("gridTypes values must be unique.");
         }
 
         return errors;
@@ -132,7 +146,7 @@ public static class RuleValidation
     }
 
     private static void AddSensorCollectionErrors(
-        IReadOnlyDictionary<string, List<RegistrationQuality>>? sensors,
+        List<SensorConfig>? sensors,
         ICollection<string> errors)
     {
         if (sensors is null)
@@ -141,19 +155,9 @@ public static class RuleValidation
             return;
         }
 
-        if (sensors.Any(sensor => sensor.Value is null))
+        foreach (var error in SensorConfig.ValidateCollection(sensors))
         {
-            errors.Add("sensor value lists cannot be null.");
-        }
-
-        if (sensors.Any(sensor => sensor.Value is not null && sensor.Value.Count == 0))
-        {
-            errors.Add("sensor value lists cannot be empty.");
-        }
-
-        if (sensors.Any(sensor => sensor.Value is not null && sensor.Value.Any(value => !Enum.IsDefined(value))))
-        {
-            errors.Add("sensor values must be valid registration qualities.");
+            errors.Add(error);
         }
     }
 }

@@ -70,24 +70,22 @@ public sealed class RegistrationQualityContractTests
         var body = Encoding.UTF8.GetBytes(
             """
             {
-              "overlay": {
-                "id": "image-1",
-                "sensorName": "camera",
-                "sensorType": "EO",
-                "registrationQuality": "accurate",
-                "bestResolution": 1,
-                "areaOfInterest": "region-alpha",
-                "imageUrl": "/images/image-1.tiff",
-                "width": 100,
-                "height": 100,
-                "photoTime": "2026-07-27T10:00:00Z",
-                "roiFootprint": {
-                  "type": "Polygon",
-                  "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
-                },
-                "gridType": "EO",
-                "gridURI": "grid://default"
-              }
+              "id": "image-1",
+              "sensorName": "camera",
+              "sensorType": "EO",
+              "registrationQuality": "accurate",
+              "bestResolution": 1,
+              "areaOfInterest": "region-alpha",
+              "imageUrl": "/images/image-1.tiff",
+              "width": 100,
+              "height": 100,
+              "photoTime": "2026-07-27T10:00:00Z",
+              "roiFootprint": {
+                "type": "Polygon",
+                "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+              },
+              "gridType": "EO",
+              "gridURI": "grid://default"
             }
             """);
 

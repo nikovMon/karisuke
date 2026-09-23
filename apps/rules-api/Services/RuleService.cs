@@ -327,7 +327,7 @@ public sealed class RuleService : IRuleService
         _logger.RuleSensorOperationStarting(
             operation,
             ids.Count,
-            request.Values?.Count ?? 0);
+            (request.RegistrationQualities?.Count ?? 0) + (request.GridTypes?.Count ?? 0));
 
         var errors = RuleValidation.ValidateIds(ids)
             .Concat(RuleValidation.ValidateSensorRequest(request))
@@ -494,7 +494,7 @@ public sealed class RuleService : IRuleService
             ["ruleName"] = () => rule.RuleName = request.RuleName ?? string.Empty,
             ["description"] = () => rule.Description = request.Description,
             ["algorithmName"] = () => rule.AlgorithmNames = request.AlgorithmNames!.ToList(),
-            ["sensors"] = () => rule.Sensors = request.Sensors ?? new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal),
+            ["sensors"] = () => rule.Sensors = request.Sensors ?? [],
             ["isActive"] = () => rule.IsActive = request.IsActive.GetValueOrDefault(),
             ["tenantsInfo"] = () => rule.TenantsInfo = request.TenantsInfo ?? [],
             ["minimumResolution"] = () => rule.MinimumResolution = request.MinimumResolution.GetValueOrDefault(),
@@ -518,32 +518,65 @@ public sealed class RuleService : IRuleService
 
     private static void AddSensorValues(RuleDto rule, RuleSensorUpdateRequest request)
     {
-        if (!rule.Sensors.TryGetValue(request.SensorName, out var values))
+        var sensor = rule.Sensors.FirstOrDefault(s =>
+            string.Equals(s.Name, request.SensorName, StringComparison.Ordinal));
+
+        if (sensor is null)
         {
-            rule.Sensors[request.SensorName] = request.Values.Distinct().ToList();
-            return;
+            sensor = new SensorConfig { Name = request.SensorName };
+            rule.Sensors.Add(sensor);
         }
 
-        foreach (var value in request.Values)
+        if (request.RegistrationQualities is not null)
         {
-            if (!values.Contains(value))
+            foreach (var value in request.RegistrationQualities)
             {
-                values.Add(value);
+                if (!sensor.RegistrationQualities.Contains(value))
+                {
+                    sensor.RegistrationQualities.Add(value);
+                }
+            }
+        }
+
+        if (request.GridTypes is not null)
+        {
+            foreach (var value in request.GridTypes)
+            {
+                if (!sensor.GridTypes.Contains(value, StringComparer.Ordinal))
+                {
+                    sensor.GridTypes.Add(value);
+                }
             }
         }
     }
 
     private static void RemoveSensorValues(RuleDto rule, RuleSensorUpdateRequest request)
     {
-        if (!rule.Sensors.TryGetValue(request.SensorName, out var values))
+        var sensor = rule.Sensors.FirstOrDefault(s =>
+            string.Equals(s.Name, request.SensorName, StringComparison.Ordinal));
+
+        if (sensor is null)
         {
             return;
         }
 
-        values.RemoveAll(value => request.Values.Contains(value));
-        if (values.Count == 0)
+        if (request.RegistrationQualities is not null)
         {
-            rule.Sensors.Remove(request.SensorName);
+            sensor.RegistrationQualities.RemoveAll(value => request.RegistrationQualities.Contains(value));
+        }
+
+        if (request.GridTypes is not null)
+        {
+            sensor.GridTypes.RemoveAll(value =>
+                request.GridTypes.Contains(value, StringComparer.Ordinal));
+        }
+
+        // Remove the sensor entry entirely when both criteria lists are empty.
+        // An empty entry would mean "match all" for this sensor, which is unlikely
+        // to be the intent after explicitly removing all filter values.
+        if (sensor.RegistrationQualities.Count == 0 && sensor.GridTypes.Count == 0)
+        {
+            rule.Sensors.Remove(sensor);
         }
     }
 
@@ -552,15 +585,19 @@ public sealed class RuleService : IRuleService
         rule.AlgorithmNames = (rule.AlgorithmNames ?? [])
             .OrderBy(value => value)
             .ToList();
-        rule.Sensors = new Dictionary<string, List<RegistrationQuality>>(
-            (rule.Sensors ?? new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal))
-                .Where(item => !string.IsNullOrWhiteSpace(item.Key))
-                .Select(item => new KeyValuePair<string, List<RegistrationQuality>>(
-                    item.Key,
-                    (item.Value ?? [])
-                        .Distinct()
-                        .ToList())),
-            StringComparer.Ordinal);
+        rule.Sensors = (rule.Sensors ?? [])
+            .Where(sensor => sensor is not null && !string.IsNullOrWhiteSpace(sensor.Name))
+            .Select(sensor => new SensorConfig
+            {
+                Name = sensor.Name,
+                RegistrationQualities = (sensor.RegistrationQualities ?? []).Distinct().ToList(),
+                GridTypes = (sensor.GridTypes ?? [])
+                    .Where(g => !string.IsNullOrWhiteSpace(g))
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList()
+            })
+            .OrderBy(sensor => sensor.Name, StringComparer.Ordinal)
+            .ToList();
         rule.TenantsInfo ??= [];
     }
 

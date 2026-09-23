@@ -5,12 +5,6 @@ namespace ImagingPipeline.Common.Dtos.Gateway.Messages;
 
 public sealed class GatewayInputMessageDto
 {
-    [JsonPropertyName("overlay")]
-    public required GatewayInputOverlayDto Overlay { get; init; }
-}
-
-public sealed class GatewayInputOverlayDto
-{
     [JsonPropertyName("id")]
     public required string Id { get; init; }
 

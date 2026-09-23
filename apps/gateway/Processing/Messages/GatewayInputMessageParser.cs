@@ -35,32 +35,28 @@ public sealed class GatewayInputMessageParser
                 "gateway.invalid_json");
         }
 
-        var overlay = input.Overlay
-            ?? throw new GatewayValidationException(
-                "Input overlay is required.",
-                "gateway.missing_overlay");
-        if (string.IsNullOrWhiteSpace(overlay.Id))
+        if (string.IsNullOrWhiteSpace(input.Id))
         {
             throw new GatewayValidationException(
                 "Input image id is required and must be a non-empty string.",
                 "gateway.missing_image_id");
         }
 
-        if (string.IsNullOrWhiteSpace(overlay.SensorName))
+        if (string.IsNullOrWhiteSpace(input.SensorName))
         {
             throw new GatewayValidationException(
                 "Input sensor name is required and must be a non-empty string.",
                 "gateway.missing_sensor_name");
         }
 
-        if (string.IsNullOrWhiteSpace(overlay.SensorType))
+        if (string.IsNullOrWhiteSpace(input.SensorType))
         {
             throw new GatewayValidationException(
                 "Input sensor type is required and must be a non-empty string.",
                 "gateway.missing_sensor_type");
         }
 
-        if (string.IsNullOrWhiteSpace(overlay.RegistrationQuality))
+        if (string.IsNullOrWhiteSpace(input.RegistrationQuality))
         {
             throw new GatewayValidationException(
                 "Input registration quality is required and must be a non-empty string.",
@@ -68,7 +64,7 @@ public sealed class GatewayInputMessageParser
         }
 
         if (!RegistrationQualityExtensions.TryParseJsonValue(
-                overlay.RegistrationQuality,
+                input.RegistrationQuality,
                 out var registrationQuality))
         {
             throw new GatewayValidationException(
@@ -77,72 +73,72 @@ public sealed class GatewayInputMessageParser
         }
 
         ValidatePositiveFinite(
-            overlay.BestResolution,
+            input.BestResolution,
             "Input best resolution is required and must be a positive finite number.",
             "gateway.invalid_best_resolution");
 
-        if (string.IsNullOrWhiteSpace(overlay.ImageUrl))
+        if (string.IsNullOrWhiteSpace(input.ImageUrl))
         {
             throw new GatewayValidationException(
                 "Input image URL is required and must be a non-empty string.",
                 "gateway.missing_image_url");
         }
 
-        if (overlay.ImageWidth <= 0)
+        if (input.ImageWidth <= 0)
         {
             throw new GatewayValidationException(
                 "Input image width is required and must be greater than zero.",
                 "gateway.invalid_image_width");
         }
 
-        if (overlay.ImageHeight <= 0)
+        if (input.ImageHeight <= 0)
         {
             throw new GatewayValidationException(
                 "Input image height is required and must be greater than zero.",
                 "gateway.invalid_image_height");
         }
 
-        if (overlay.RoiFootprint.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        if (input.RoiFootprint.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
         {
             throw new GatewayValidationException(
                 "Input roiFootprint is required.",
                 "gateway.missing_geometry");
         }
 
-        var geometry = _geometry.ReadGeoJson(overlay.RoiFootprint, "input roiFootprint");
+        var geometry = _geometry.ReadGeoJson(input.RoiFootprint, "input roiFootprint");
 
-        if (string.IsNullOrWhiteSpace(overlay.GridType))
+        if (string.IsNullOrWhiteSpace(input.GridType))
         {
             throw new GatewayValidationException(
                 "Input grid type is required and must be a non-empty string.",
                 "gateway.missing_grid_type");
         }
 
-        if (string.IsNullOrWhiteSpace(overlay.GridUri))
+        if (string.IsNullOrWhiteSpace(input.GridUri))
         {
             throw new GatewayValidationException(
                 "Input grid URI is required and must be a non-empty string.",
                 "gateway.missing_grid_uri");
         }
 
-        var areaOfInterest = string.IsNullOrWhiteSpace(overlay.AreaOfInterest)
+        var areaOfInterest = string.IsNullOrWhiteSpace(input.AreaOfInterest)
             ? null
-            : overlay.AreaOfInterest.Trim();
+            : input.AreaOfInterest.Trim();
 
         return new GatewayInputMessage(
-            overlay.Id,
-            overlay.SensorName,
-            overlay.SensorType,
+            input.Id,
+            input.SensorName,
+            input.SensorType,
             registrationQuality,
-            overlay.BestResolution,
+            input.BestResolution,
             areaOfInterest,
-            overlay.ImageUrl,
-            overlay.ImageWidth,
-            overlay.ImageHeight,
-            overlay.PhotoTime.ToUniversalTime(),
+            input.ImageUrl,
+            input.ImageWidth,
+            input.ImageHeight,
+            input.PhotoTime.ToUniversalTime(),
             geometry,
-            overlay.GridType,
-            overlay.GridUri);
+            input.GridType,
+            input.GridUri);
     }
 
     private static void ValidatePositiveFinite(

@@ -35,8 +35,9 @@ public sealed class GatewayWorkerTests
 
         var inputEnvelope = InputMessage() with
         {
-            Headers = new Dictionary<string, object?>
+            Headers = new Dictionary<string, object?>(StringComparer.Ordinal)
             {
+                [GatewayWorker.UpdatedFieldsHeader] = new List<object> { Encoding.UTF8.GetBytes("gridType") },
                 ["findair-started-at-unix-ms"] =
                     DateTimeOffset.UtcNow.AddSeconds(-1).ToUnixTimeMilliseconds(),
                 ["business-header"] = "preserved"
@@ -243,8 +244,7 @@ public sealed class GatewayWorkerTests
     public async Task HandleAsyncAcknowledgesWithoutPublishingWhenNoRulesMatch()
     {
         var rule = MatchingRule();
-        rule.Sensors.Clear();
-        rule.Sensors["other-camera"] = [RegistrationQuality.Accurate];
+        rule.Sensors = [new SensorConfig { Name = "other-camera", RegistrationQualities = [RegistrationQuality.Accurate] }];
         await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
 
         var result = await harness.GatewayWorker.HandleAsync(InputMessage());
@@ -662,20 +662,11 @@ public sealed class GatewayWorkerTests
         }
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ActiveRuleCacheRejectsInvalidSensorCollections(bool nullSensors)
+    [Fact]
+    public async Task ActiveRuleCacheRejectsNullSensors()
     {
         var invalidRule = MatchingRule();
-        if (nullSensors)
-        {
-            invalidRule.Sensors = null!;
-        }
-        else
-        {
-            invalidRule.Sensors["cam-001"] = [];
-        }
+        invalidRule.Sensors = null!;
 
         var health = new GatewayHealthState();
         var cache = new ActiveRuleCache(
@@ -723,7 +714,7 @@ public sealed class GatewayWorkerTests
     public async Task HandleAsyncRequiresMatchingRegistrationQualityForSensorName()
     {
         var rule = MatchingRule();
-        rule.Sensors["cam-001"] = [RegistrationQuality.Sensor];
+        rule.Sensors = [new SensorConfig { Name = "cam-001", RegistrationQualities = [RegistrationQuality.Sensor] }];
         await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
 
         var result = await harness.GatewayWorker.HandleAsync(InputMessage(registrationQuality: "Accurate"));
@@ -748,10 +739,104 @@ public sealed class GatewayWorkerTests
     }
 
     [Fact]
+    public async Task HandleAsyncMatchesWhenGridTypeIsInAllowedList()
+    {
+        var rule = MatchingRule();
+        rule.Sensors = [new SensorConfig
+        {
+            Name = "cam-001",
+            RegistrationQualities = [RegistrationQuality.Accurate],
+            GridTypes = ["EO", "IR"]
+        }];
+        await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
+
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage());
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(OutputMessages(result));
+    }
+
+    [Fact]
+    public async Task HandleAsyncRejectsWhenGridTypeNotInAllowedList()
+    {
+        var rule = MatchingRule();
+        rule.Sensors = [new SensorConfig
+        {
+            Name = "cam-001",
+            RegistrationQualities = [RegistrationQuality.Accurate],
+            GridTypes = ["IR"]
+        }];
+        await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
+
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage());
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(OutputMessages(result));
+    }
+
+    [Fact]
+    public async Task HandleAsyncMatchesAnyGridTypeWhenGridTypesListIsEmpty()
+    {
+        var rule = MatchingRule();
+        rule.Sensors = [new SensorConfig
+        {
+            Name = "cam-001",
+            RegistrationQualities = [RegistrationQuality.Accurate],
+            GridTypes = []
+        }];
+        await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
+
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage());
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(OutputMessages(result));
+    }
+
+    [Fact]
+    public async Task HandleAsyncMatchesAnyRegistrationQualityWhenListIsEmpty()
+    {
+        var rule = MatchingRule();
+        rule.Sensors = [new SensorConfig
+        {
+            Name = "cam-001",
+            RegistrationQualities = [],
+            GridTypes = ["EO"]
+        }];
+        await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
+
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage());
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(OutputMessages(result));
+    }
+
+    [Fact]
+    public async Task HandleAsyncRequiresBothCriteriaWhenBothSpecified()
+    {
+        var rule = MatchingRule();
+        rule.Sensors = [new SensorConfig
+        {
+            Name = "cam-001",
+            RegistrationQualities = [RegistrationQuality.Sensor],
+            GridTypes = ["EO"]
+        }];
+        await using var harness = await GatewayWorkerHarness.CreateAsync([rule]);
+
+        // Input has registrationQuality=Accurate but rule requires Sensor
+        var result = await harness.GatewayWorker.HandleAsync(InputMessage(registrationQuality: "Accurate"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(OutputMessages(result));
+    }
+
+    [Fact]
     public async Task HandleAsyncReturnsFailureForInvalidInputSoBrokerCanDeadLetter()
     {
         await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
-        var invalid = RabbitMqMessageEnvelope.FromUtf8("""{"sensorName":"cam-001"}""", "message-1");
+        var invalid = new RabbitMqMessageEnvelope(
+            "message-1",
+            Encoding.UTF8.GetBytes("""{"sensorName":"cam-001"}"""),
+            Headers: UpdatedFieldsHeaders("gridType"));
 
         var result = await harness.GatewayWorker.HandleAsync(invalid);
 
@@ -772,7 +857,10 @@ public sealed class GatewayWorkerTests
             .Replace("\"areaOfInterest\": \"region-alpha\",", string.Empty, StringComparison.Ordinal);
 
         var result = await harness.GatewayWorker.HandleAsync(
-            RabbitMqMessageEnvelope.FromUtf8(json, "message-without-area"));
+            new RabbitMqMessageEnvelope(
+                "message-without-area",
+                Encoding.UTF8.GetBytes(json),
+                Headers: UpdatedFieldsHeaders("gridType")));
 
         Assert.True(result.IsSuccess);
         var output = Assert.Single(OutputMessages(result));
@@ -783,32 +871,58 @@ public sealed class GatewayWorkerTests
         Assert.Equal("image-1", warning.Properties["ImageId"]);
     }
     [Fact]
+    public async Task HandleAsyncSkipsMessageWhenUpdatedFieldsHeaderMissing()
+    {
+        await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
+        var message = RabbitMqMessageEnvelope.FromUtf8("{}", "message-1");
+
+        var result = await harness.GatewayWorker.HandleAsync(message);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.OutputMessages);
+    }
+
+    [Fact]
+    public async Task HandleAsyncSkipsMessageWhenGridTypeNotInUpdatedFields()
+    {
+        await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
+        var message = new RabbitMqMessageEnvelope(
+            "message-1",
+            Encoding.UTF8.GetBytes("{}"),
+            Headers: UpdatedFieldsHeaders("sensorName", "imageUrl"));
+
+        var result = await harness.GatewayWorker.HandleAsync(message);
+
+        Assert.True(result.IsSuccess);
+        Assert.Null(result.OutputMessages);
+    }
+
+    [Fact]
     public async Task HandleAsyncReturnsFailureWhenRegistrationQualityIsMissing()
     {
         await using var harness = await GatewayWorkerHarness.CreateAsync([MatchingRule()]);
-        var invalid = RabbitMqMessageEnvelope.FromUtf8(
-            """
+        var invalid = new RabbitMqMessageEnvelope(
+            "message-1",
+            Encoding.UTF8.GetBytes("""
             {
-              "overlay": {
-                "id": "image-1",
-                "sensorName": "cam-001",
-                "sensorType": "EO",
-                "bestResolution": 25.9,
-                "areaOfInterest": "region-alpha",
-                "imageUrl": "/images/image-1.tiff",
-                "width": 4096,
-                "height": 3072,
-                "photoTime": "2026-06-30T06:54:07Z",
-                "roiFootprint": {
-                  "type": "Polygon",
-                  "coordinates": [[[34.7800, 32.0800], [34.7900, 32.0800], [34.7900, 32.0900], [34.7800, 32.0900], [34.7800, 32.0800]]]
-                },
-                "gridType": "EO",
-                "gridURI": "grid://default"
-              }
+              "id": "image-1",
+              "sensorName": "cam-001",
+              "sensorType": "EO",
+              "bestResolution": 25.9,
+              "areaOfInterest": "region-alpha",
+              "imageUrl": "/images/image-1.tiff",
+              "width": 4096,
+              "height": 3072,
+              "photoTime": "2026-06-30T06:54:07Z",
+              "roiFootprint": {
+                "type": "Polygon",
+                "coordinates": [[[34.7800, 32.0800], [34.7900, 32.0800], [34.7900, 32.0900], [34.7800, 32.0900], [34.7800, 32.0800]]]
+              },
+              "gridType": "EO",
+              "gridURI": "grid://default"
             }
-            """,
-            "message-1");
+            """),
+            Headers: UpdatedFieldsHeaders("gridType"));
 
         var result = await harness.GatewayWorker.HandleAsync(invalid);
 
@@ -831,35 +945,40 @@ public sealed class GatewayWorkerTests
         Assert.Empty(OutputMessages(result));
     }
 
+    private static IReadOnlyDictionary<string, object?> UpdatedFieldsHeaders(params string[] fields) =>
+        new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [GatewayWorker.UpdatedFieldsHeader] = fields.Select(f => (object)Encoding.UTF8.GetBytes(f)).ToList()
+        };
+
     private static RabbitMqMessageEnvelope InputMessage(
         string sensorName = "cam-001",
         string registrationQuality = "Accurate",
         string messageId = "message-1",
         string imageId = "image-1") =>
-        RabbitMqMessageEnvelope.FromUtf8(
-            $$"""
+        new(
+            messageId,
+            Encoding.UTF8.GetBytes($$"""
             {
-              "overlay": {
-                "id": "{{imageId}}",
-                "sensorName": "{{sensorName}}",
-                "sensorType": "EO",
-                "registrationQuality": "{{registrationQuality}}",
-                "bestResolution": 25.9,
-                "areaOfInterest": "region-alpha",
-                "imageUrl": "/images/image-1.tiff",
-                "width": 4096,
-                "height": 3072,
-                "photoTime": "2026-06-30T06:54:07Z",
-                "roiFootprint": {
-                  "type": "Polygon",
-                  "coordinates": [[[34.7800, 32.0800], [34.7900, 32.0800], [34.7900, 32.0900], [34.7800, 32.0900], [34.7800, 32.0800]]]
-                },
-                "gridType": "EO",
-                "gridURI": "grid://default"
-              }
+              "id": "{{imageId}}",
+              "sensorName": "{{sensorName}}",
+              "sensorType": "EO",
+              "registrationQuality": "{{registrationQuality}}",
+              "bestResolution": 25.9,
+              "areaOfInterest": "region-alpha",
+              "imageUrl": "/images/image-1.tiff",
+              "width": 4096,
+              "height": 3072,
+              "photoTime": "2026-06-30T06:54:07Z",
+              "roiFootprint": {
+                "type": "Polygon",
+                "coordinates": [[[34.7800, 32.0800], [34.7900, 32.0800], [34.7900, 32.0900], [34.7800, 32.0900], [34.7800, 32.0800]]]
+              },
+              "gridType": "EO",
+              "gridURI": "grid://default"
             }
-            """,
-            messageId);
+            """),
+            Headers: UpdatedFieldsHeaders("gridType"));
 
     private static RuleDto MatchingRule() =>
         new()
@@ -868,10 +987,7 @@ public sealed class GatewayWorkerTests
             RuleName = "FindSuspiciousAreaRule",
             Description = "Rule that detects suspicious activity in a configured geographic area",
             AlgorithmNames = [AlgorithmName.FindAir, AlgorithmName.Rpn],
-            Sensors = new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal)
-            {
-                ["cam-001"] = [RegistrationQuality.Accurate]
-            },
+            Sensors = [new SensorConfig { Name = "cam-001", RegistrationQualities = [RegistrationQuality.Accurate] }],
             IsActive = true,
             TenantsInfo = [Tenant("der", Tiling(5, 5))],
             MinimumResolution = 0.5,

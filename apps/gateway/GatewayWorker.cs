@@ -145,6 +145,14 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
 
         try
         {
+            if (!HasUpdatedField(message.Headers, "gridType"))
+            {
+                _logger.MessageSkippedNoGridTypeUpdate();
+                outcome = TelemetryOutcome.Success;
+                error = TelemetryErrorCategory.None;
+                return Task.FromResult(RabbitMqMessageProcessingResult.Success());
+            }
+
             var rules = _ruleCache.Current;
             rulesEvaluated = rules.Count;
             PipelineTelemetry.RecordBatchSize(PipelineStage.Gateway, PipelineItem.Rule, rulesEvaluated);
@@ -374,4 +382,50 @@ public sealed class GatewayWorker : BackgroundService, IRabbitMqMessageHandler
         string imageId,
         GatewayOutputMessage output) =>
         $"{imageId}:gateway-output:{output.RuleId}:{output.TenantId}";
+
+    internal const string UpdatedFieldsHeader = "x-updated-fields";
+
+    private static bool HasUpdatedField(
+        IReadOnlyDictionary<string, object?>? headers,
+        string fieldName)
+    {
+        if (headers is null)
+        {
+            return false;
+        }
+
+        if (!headers.TryGetValue(UpdatedFieldsHeader, out var raw))
+        {
+            foreach (var pair in headers)
+            {
+                if (string.Equals(pair.Key, UpdatedFieldsHeader, StringComparison.OrdinalIgnoreCase))
+                {
+                    raw = pair.Value;
+                    break;
+                }
+            }
+        }
+
+        if (raw is not IList<object> list)
+        {
+            return false;
+        }
+
+        foreach (var item in list)
+        {
+            var value = item switch
+            {
+                string s => s,
+                byte[] bytes => System.Text.Encoding.UTF8.GetString(bytes),
+                _ => null
+            };
+
+            if (string.Equals(value, fieldName, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

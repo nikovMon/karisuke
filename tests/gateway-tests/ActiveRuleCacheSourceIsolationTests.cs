@@ -66,10 +66,7 @@ public sealed class ActiveRuleCacheSourceIsolationTests
             Id = "valid-rule",
             RuleName = "valid-rule",
             AlgorithmNames = [AlgorithmName.FindAir, AlgorithmName.Rpn],
-            Sensors = new Dictionary<string, List<RegistrationQuality>>(StringComparer.Ordinal)
-            {
-                ["camera"] = [RegistrationQuality.Accurate]
-            },
+            Sensors = [new SensorConfig { Name = "camera", RegistrationQualities = [RegistrationQuality.Accurate] }],
             TenantsInfo =
             [
                 new TenantInfo

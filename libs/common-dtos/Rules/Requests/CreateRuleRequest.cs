@@ -18,7 +18,7 @@ public sealed class CreateRuleRequest : IValidatableObject
     public required List<AlgorithmName> AlgorithmNames { get; set; }
 
     [JsonPropertyName("sensors")]
-    public Dictionary<string, List<RegistrationQuality>> Sensors { get; set; } = new(StringComparer.Ordinal);
+    public List<SensorConfig> Sensors { get; set; } = [];
 
     [JsonPropertyName("isActive")]
     public bool IsActive { get; set; } = true;

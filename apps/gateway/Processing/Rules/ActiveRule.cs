@@ -3,10 +3,14 @@ using NetTopologySuite.Geometries;
 
 namespace ImagingPipeline.Gateway.Processing.Rules;
 
+public readonly record struct SensorMatchCriteria(
+    int RegistrationQualityMask,
+    IReadOnlySet<string>? AllowedGridTypes);
+
 public sealed record ActiveRule(
     string Id,
     IReadOnlyList<AlgorithmName> AlgorithmNames,
-    IReadOnlyDictionary<string, int> Sensors,
+    IReadOnlyDictionary<string, SensorMatchCriteria> Sensors,
     IReadOnlyList<TenantInfo> TenantsInfo,
     double MinimumResolution,
     double MaximumResolution,
