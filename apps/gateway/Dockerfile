@@ -8,6 +8,7 @@ COPY libs/elasticsearch-client/ElasticsearchClient.csproj libs/elasticsearch-cli
 COPY libs/geometry-utils/GeometryUtils.csproj libs/geometry-utils/
 COPY libs/observability/ImagingPipeline.Observability.csproj libs/observability/
 COPY libs/rabbitmq-client/RabbitMqClient.csproj libs/rabbitmq-client/
+COPY libs/rabbitmq-configuration/ImagingPipeline.RabbitMqConfiguration.csproj libs/rabbitmq-configuration/
 RUN dotnet restore apps/gateway/ImagingPipeline.Gateway.csproj
 
 COPY . .

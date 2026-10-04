@@ -12,6 +12,7 @@ public static class TelemetrySourceNames
     public const string Pipeline = "FindAir.Workload";
     public const string RulesApi = "FindAir.RulesApi";
     public const string Gateway = "FindAir.Gateway";
+    public const string UnifiedGateway = "ImagingPipeline.UnifiedGateway";
     public const string TbPublisher = "FindAir.TbPublisher";
     public const string TileBuilder = "FindAir.TileBuilder";
     public const string TbConsumer = "FindAir.TbConsumer";
@@ -27,6 +28,7 @@ public static class TelemetrySourceNames
         Pipeline,
         RulesApi,
         Gateway,
+        UnifiedGateway,
         TbPublisher,
         TileBuilder,
         TbConsumer,

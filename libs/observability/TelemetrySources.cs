@@ -19,6 +19,7 @@ public static class TelemetrySources
     public static readonly ActivitySource Pipeline = CreateActivitySource(TelemetrySourceNames.Pipeline);
     public static readonly ActivitySource RulesApi = CreateActivitySource(TelemetrySourceNames.RulesApi);
     public static readonly ActivitySource Gateway = CreateActivitySource(TelemetrySourceNames.Gateway);
+    public static readonly ActivitySource UnifiedGateway = CreateActivitySource(TelemetrySourceNames.UnifiedGateway);
     public static readonly ActivitySource TbPublisher = CreateActivitySource(TelemetrySourceNames.TbPublisher);
     public static readonly ActivitySource TileBuilder = CreateActivitySource(TelemetrySourceNames.TileBuilder);
     public static readonly ActivitySource TbConsumer = CreateActivitySource(TelemetrySourceNames.TbConsumer);
@@ -51,5 +52,6 @@ public static class TelemetryMeters
     public static readonly Meter Dependencies = new(TelemetrySourceNames.Dependencies, InstrumentationVersion);
     public static readonly Meter Pipeline = new(TelemetrySourceNames.Pipeline, InstrumentationVersion);
     public static readonly Meter Gateway = new(TelemetrySourceNames.Gateway, InstrumentationVersion);
+    public static readonly Meter UnifiedGateway = new(TelemetrySourceNames.UnifiedGateway, InstrumentationVersion);
     public static readonly Meter RulesApi = new(TelemetrySourceNames.RulesApi, InstrumentationVersion);
 }

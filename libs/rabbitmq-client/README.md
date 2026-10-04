@@ -5,6 +5,8 @@
 consumption, manual acknowledgements, DLX/DLQ failure routing, durable
 queue/exchange declaration, and automatic connection/topology recovery.
 
+Queue, exchange and binding arguments use the shared [argument normalizer](../rabbitmq-configuration/README.md). Known string arguments such as dead-letter routing keys remain strings even when they look numeric. Other strings retain the client's Int32/Boolean conversion behavior, now using invariant culture; large-integer and decimal strings are not newly converted. Existing typed values pass through, and empty argument dictionaries are sent as `null`.
+
 ## Register and configure
 
 Use publisher-only registration for apps that only publish:

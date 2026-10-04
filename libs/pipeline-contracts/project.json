@@ -1,0 +1,7 @@
+{
+  "name": "pipeline-contracts",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "libs/pipeline-contracts",
+  "tags": ["type:lib", "scope:gateway"]
+}

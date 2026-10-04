@@ -12,6 +12,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\rabbitmq-configuration\ImagingPipeline.RabbitMqConfiguration.csproj" />
     <ProjectReference Include="..\observability\ImagingPipeline.Observability.csproj" />
   </ItemGroup>
 </Project>

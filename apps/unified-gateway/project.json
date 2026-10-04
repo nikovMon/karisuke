@@ -1,0 +1,19 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "unified-gateway",
+  "projectType": "application",
+  "sourceRoot": "apps/unified-gateway",
+  "tags": ["type:app", "scope:gateway"],
+  "targets": {
+    "publish": {
+      "dependsOn": ["build:release"]
+    },
+    "docker-build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "docker build -f apps/unified-gateway/Dockerfile -t karisuke/unified-gateway:local .",
+        "cwd": "{workspaceRoot}"
+      }
+    }
+  }
+}

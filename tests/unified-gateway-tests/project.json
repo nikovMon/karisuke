@@ -1,0 +1,7 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "unified-gateway-tests",
+  "projectType": "library",
+  "sourceRoot": "tests/unified-gateway-tests",
+  "tags": ["type:test", "scope:gateway"]
+}

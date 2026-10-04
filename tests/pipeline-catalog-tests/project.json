@@ -1,0 +1,14 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "pipeline-catalog-tests",
+  "projectType": "library",
+  "sourceRoot": "tests/pipeline-catalog-tests",
+  "targets": {
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "dotnet test tests/pipeline-catalog-tests/ImagingPipeline.PipelineCatalog.Tests.csproj"
+      }
+    }
+  }
+}
