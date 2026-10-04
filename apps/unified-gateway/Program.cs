@@ -17,6 +17,7 @@ public sealed partial class Program
         builder.ConfigureImagingPipelinePrometheusListener();
 
         builder.Services.AddSingleton<IPipelineContract, AsdPipelineContract>();
+        builder.Services.AddSingleton<IPipelineContract, AlgoPipelineContract>();
         builder.Services.AddSingleton<IPipelineContractRegistry, PipelineContractRegistry>();
         builder.Services.AddPipelineCatalog(builder.Configuration);
         builder.Services.AddSingleton<PipelineWorkPreparer>();
@@ -30,23 +31,6 @@ public sealed partial class Program
             capabilities = new[] { "catalog", "contracts" },
             dispatchActive = false
         }));
-        app.MapGet("/pipelines", (IPipelineCatalog pipelines) => Results.Ok(
-            pipelines.GetAll().Select(pipeline => new
-            {
-                pipeline.PipelineId,
-                pipeline.Enabled,
-                pipeline.ContractId
-            })));
-        app.MapGet("/pipelines/{pipelineId}", (string pipelineId, IPipelineCatalog pipelines) =>
-        {
-            var pipeline = pipelines.GetAll().FirstOrDefault(candidate => candidate.PipelineId == pipelineId);
-            return pipeline is null ? Results.NotFound() : Results.Ok(new
-            {
-                pipeline.PipelineId,
-                pipeline.Enabled,
-                pipeline.ContractId
-            });
-        });
         app.MapImagingPipelinePrometheusScrapingEndpoint();
 
         app.Logger.LogInformation(

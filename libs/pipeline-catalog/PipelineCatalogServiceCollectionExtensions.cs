@@ -16,7 +16,7 @@ public static class PipelineCatalogServiceCollectionExtensions
         services.AddOptions<PipelineCatalogOptions>()
             // .NET's binder includes a failed scalar value in conversion exceptions. Validate
             // arbitrary body data first so malformed values never reach that error path.
-            .Configure(_ => ValidateExtraDataConfiguration(configuration))
+            .Configure(_ => ValidatePipelineConfiguration(configuration))
             .Bind(
                 configuration.GetSection(PipelineCatalogOptions.SectionName),
                 binder => binder.ErrorOnUnknownConfiguration = true)
@@ -30,14 +30,29 @@ public static class PipelineCatalogServiceCollectionExtensions
         return services;
     }
 
-    private static void ValidateExtraDataConfiguration(IConfiguration configuration)
+    private static void ValidatePipelineConfiguration(IConfiguration configuration)
     {
-        // Use configuration child paths: collection binding compacts sparse numeric indexes,
-        // so a bound list position is not necessarily the source section's index.
+        var pipelineIds = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pipelineId in EnumeratePipelineIds(configuration))
+        {
+            if (pipelineIds.TryGetValue(pipelineId, out var existing) &&
+                !string.Equals(existing, pipelineId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Configuration '{PipelineCatalogOptions.SectionName}:Pipelines' contains pipeline IDs differing only in case. Use the same ID spelling in every configuration source.");
+            }
+            pipelineIds[pipelineId] = pipelineId;
+        }
+
+        // Inspect each pipeline's raw configuration before binding can discard malformed values.
         var pipelines = configuration.GetSection(PipelineCatalogOptions.SectionName)
             .GetSection(nameof(PipelineCatalogOptions.Pipelines));
+        if (pipelines.Value is not null)
+            throw new InvalidOperationException($"Configuration '{pipelines.Path}' must be an object keyed by pipeline ID.");
         foreach (var pipeline in pipelines.GetChildren())
         {
+            if (pipeline.Value is not null)
+                throw new InvalidOperationException($"Configuration '{pipeline.Path}' must be an object.");
             var extraData = pipeline.GetChildren().FirstOrDefault(section =>
                 section.Key.Equals(nameof(PipelineDefinition.ExtraData), StringComparison.OrdinalIgnoreCase));
             if (extraData is null) continue;
@@ -63,6 +78,27 @@ public static class PipelineCatalogServiceCollectionExtensions
                 throw new InvalidOperationException(
                     $"Configuration '{extraData.Path}' must contain a valid JSON object.");
             }
+        }
+    }
+
+    private static IEnumerable<string> EnumeratePipelineIds(IConfiguration configuration)
+    {
+        const string path = $"{PipelineCatalogOptions.SectionName}:{nameof(PipelineCatalogOptions.Pipelines)}";
+        if (configuration is IConfigurationRoot root)
+        {
+            foreach (var provider in root.Providers)
+            {
+                var ids = provider is ChainedConfigurationProvider chained
+                    ? EnumeratePipelineIds(chained.Configuration)
+                    : provider.GetChildKeys([], path);
+                foreach (var id in ids)
+                    yield return id;
+            }
+        }
+        else
+        {
+            foreach (var pipeline in configuration.GetSection(path).GetChildren())
+                yield return pipeline.Key;
         }
     }
 }

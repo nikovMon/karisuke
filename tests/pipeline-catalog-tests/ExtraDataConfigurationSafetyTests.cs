@@ -7,7 +7,7 @@ namespace ImagingPipeline.PipelineCatalog.Tests;
 
 public sealed class ExtraDataConfigurationSafetyTests
 {
-    private const string ExtraDataKey = "PipelineCatalog:Pipelines:0:ExtraData";
+    private const string ExtraDataKey = "PipelineCatalog:Pipelines:asd:ExtraData";
 
     [Theory]
     [InlineData("[\"private-marker\"]")]
@@ -60,12 +60,11 @@ public sealed class ExtraDataConfigurationSafetyTests
     }
 
     [Fact]
-    public async Task SparsePipelineIndexCannotHideHierarchicalExtraDataOverride()
+    public async Task NamedPipelineCannotHideHierarchicalExtraDataOverride()
     {
-        const string pipeline = "PipelineCatalog:Pipelines:5";
+        const string pipeline = "PipelineCatalog:Pipelines:second";
         using var configuration = Configuration(new Dictionary<string, string?>
         {
-            [$"{pipeline}:PipelineId"] = "second",
             [$"{pipeline}:ContractId"] = "asd",
             [$"{pipeline}:Enabled"] = "true",
             [$"{pipeline}:RulesIndex"] = "second-integ-pipeline-index",
@@ -114,12 +113,11 @@ public sealed class ExtraDataConfigurationSafetyTests
 
     private static Dictionary<string, string?> BaseConfiguration() => new()
     {
-        ["PipelineCatalog:Pipelines:0:PipelineId"] = "asd",
-        ["PipelineCatalog:Pipelines:0:ContractId"] = "asd",
-        ["PipelineCatalog:Pipelines:0:Enabled"] = "true",
-        ["PipelineCatalog:Pipelines:0:RulesIndex"] = "asd-integ-pipeline-index",
-        ["PipelineCatalog:Pipelines:0:Transport:Kind"] = "http",
-        ["PipelineCatalog:Pipelines:0:Transport:Http:Endpoint"] = "https://service.example/process",
+        ["PipelineCatalog:Pipelines:asd:ContractId"] = "asd",
+        ["PipelineCatalog:Pipelines:asd:Enabled"] = "true",
+        ["PipelineCatalog:Pipelines:asd:RulesIndex"] = "asd-integ-pipeline-index",
+        ["PipelineCatalog:Pipelines:asd:Transport:Kind"] = "http",
+        ["PipelineCatalog:Pipelines:asd:Transport:Http:Endpoint"] = "https://service.example/process",
         [ExtraDataKey] = "{}"
     };
 

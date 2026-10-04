@@ -4,7 +4,12 @@
     <RootNamespace>ImagingPipeline.PipelineCatalog</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <None Update="configuration\pipelinecatalog.json" TargetPath="pipelinecatalog.json"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />
     <ProjectReference Include="..\pipeline-contracts\ImagingPipeline.PipelineContracts.csproj" />
+    <ProjectReference Include="..\rabbitmq-configuration\ImagingPipeline.RabbitMqConfiguration.csproj" />
   </ItemGroup>
 </Project>

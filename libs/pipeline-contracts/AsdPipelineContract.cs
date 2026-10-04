@@ -31,6 +31,33 @@ public sealed class AsdPipelineContract : IPipelineContract
         return errors.AsReadOnly();
     }
 
+    public IReadOnlyList<ContractValidationError> ValidateContext(PipelineDispatchContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var errors = new List<ContractValidationError>();
+        Required(context.TaskId, "taskId");
+        Required(context.RuleId, "ruleId");
+        Required(context.ImageId, "imageId");
+        Required(context.ImageUrl, "imageUrl");
+        Required(context.SensorName, "sensorName");
+        Required(context.SensorType, "sensorType");
+        Required(context.GridType, "gridType");
+        Required(context.GridUri, "gridURI");
+        if (context.ImageWidth <= 0) errors.Add(new("input.width", "Must be positive."));
+        if (context.ImageHeight <= 0) errors.Add(new("input.height", "Must be positive."));
+        if (!double.IsFinite(context.BestResolution) || context.BestResolution <= 0)
+            errors.Add(new("input.bestResolution", "Must be finite and positive."));
+        if (context.PhotoTime == default) errors.Add(new("input.photoTime", "Must be supplied."));
+        if (context.RoiFootprint.ValueKind != JsonValueKind.Object)
+            errors.Add(new("input.roiFootprint", "Must be a GeoJSON object."));
+        return errors.AsReadOnly();
+
+        void Required(string value, string field)
+        {
+            if (string.IsNullOrWhiteSpace(value)) errors.Add(new($"input.{field}", "Must be a nonempty string."));
+        }
+    }
+
     public PipelinePayload BuildPayload(PipelineDispatchContext context, JsonElement runParams, JsonElement extraData = default)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -47,9 +74,11 @@ public sealed class AsdPipelineContract : IPipelineContract
                 nameof(runParams));
         }
 
-        if (context.RoiFootprint.ValueKind != JsonValueKind.Object)
+        var contextErrors = ValidateContext(context);
+        if (contextErrors.Count != 0)
         {
-            throw new ArgumentException("roiFootprint must be a GeoJSON object.", nameof(context));
+            throw new ArgumentException(
+                string.Join("; ", contextErrors.Select(error => $"{error.Field}: {error.Message}")), nameof(context));
         }
 
         var buffer = new ArrayBufferWriter<byte>();

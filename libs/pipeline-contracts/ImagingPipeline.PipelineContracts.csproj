@@ -6,5 +6,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\common-dtos\ImagingPipeline.Common.Dtos.csproj" />
+    <ProjectReference Include="..\geometry-utils\GeometryUtils.csproj" />
   </ItemGroup>
 </Project>

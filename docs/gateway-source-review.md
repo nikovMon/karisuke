@@ -13,10 +13,10 @@ Source: `C:/Users/itaym/Downloads/SPEC-001-gateway-technical-design (1).md`, Dra
 | STRtree/spatial-index implementation and performance claims | No spatial index. Matching design belongs to the later Rule Engine ticket. |
 | Per-pipeline indexes | Retain explicit `RulesIndex` per pipeline. Separate integration/production deployments have distinct per-pipeline indexes. |
 | HTTP and RabbitMQ delivery | Retain passive destination descriptors now; sending, consumption and reliability belong to Transport & Dispatch. |
-| Catalog/contract integration into Rules API | The user excluded Rules API changes. Keep metadata routes on the unified gateway. |
+| Catalog/contract integration into Rules API | The user excluded Rules API changes and later requested removal of all pipeline metadata routes from the unified gateway. Health and metrics remain. |
 | Disabled configuration validation differs between sections | Validate disabled entries fully; suppress their work preparation. |
 | Mixed `outputs` and `runParams` terminology | Contract input uses `runParams`. |
-| One shared execution shape | Preserve pipeline-owned contracts. Only ASD is currently implemented; Algo needs actual wire fixtures. |
+| One shared execution shape | Preserve pipeline-owned contracts. ASD and Algo have separate payload builders; September 23 screenshots supply the Algo mapping. |
 | Versioned pipeline/contract selectors | Use unversioned IDs; preserve ASD's existing downstream wire marker separately. |
 | Dedupe/retry promises and mechanical migration claims | No such runtime or migration guarantee is supplied by the foundation. Preserve the per-failed-unit retry decision as future design. |
 
@@ -52,7 +52,25 @@ All filenames below refer to `C:/Users/itaym/Downloads/`. Cropped diagrams and c
 | 22 | `WhatsApp Image 2026-09-17 at 18.39.26 (1).jpeg` | Repeated Gateway Rule Engine ticket; explicitly excluded from the foundation. |
 | 23 | `WhatsApp Image 2026-09-17 at 18.39.26.jpeg` | Repeated Transport & Dispatch ticket; explicitly excluded from the final foundation scope. |
 
-Overlapping photographs were reviewed as repeated evidence. The three partial rule screenshots do not form a reliable complete polygon or rule export. No attachment supplies a full Algo input/output contract.
+Overlapping photographs were reviewed as repeated evidence. The three partial September 17 rule screenshots do not form a reliable complete polygon or rule export. The later September 23 screenshots below establish the Algo payload fields and mapping.
+
+## September 23 Algo source details
+
+| Filename | Evidence |
+|---|---|
+| `WhatsApp Image 2026-09-23 at 12.54.17 (2).jpeg` | One HTTP PUT per rule, JSON request body, legacy status handling. Sending/status handling remains outside this ticket. |
+| `WhatsApp Image 2026-09-23 at 12.54.17 (1).jpeg` | Body mapping from customer/profile/algorithm/flags, rule username with configured fallback, and original rule geometry. |
+| `WhatsApp Image 2026-09-23 at 12.54.17.jpeg` | One task per image; neighboring IDs and photoTime assigned conditionally; runtime origin/queueType/saveDetections mapping. |
+| `WhatsApp Image 2026-09-23 at 13.02.02.jpeg` | Complete RequestData DTO; singular string algorithmName, integer priority, booleans and task array. |
+| `WhatsApp Image 2026-09-23 at 13.02.12.jpeg` | TaskData DTO; nullable leg/previous/next IDs and nullable DateTime photoTime. |
+| `WhatsApp Image 2026-09-23 at 13.02.32.jpeg` | Mission date format is dd/MM/yyyy; WKT writer is used for payload geometry conversion. |
+| `WhatsApp Image 2026-09-23 at 13.02.52.jpeg` | Legacy snake_case rule fields, nullable profile/Hebrew-name/username, sensor fields and geometry. A mapping attribute does not establish runtime business validation. |
+| `WhatsApp Image 2026-09-23 at 13.03.24.jpeg` | Normalized OverlayData fields; DateTime photoTime and nullable neighboring-image IDs. |
+| `WhatsApp Image 2026-09-23 at 13.19.37.jpeg` | Rabbit UI shows a flat overlay body and x-updated-fields header. Visible footprint is not evidence that roiFootprint is absent or interchangeable. |
+| `WhatsApp Image 2026-09-23 at 13.16.52.jpeg` | Overlay mapper parses photoTime using DateTime.Parse with invariant culture, copies IDs and derives sensor/color metadata. |
+| `WhatsApp Image 2026-09-23 at 13.16.37.jpeg` | Flat input DTO has id, photoTime string, roiFootprint, optional relationship IDs and sensor/grid fields. |
+
+The user excluded Roberto and warmup and clarified that `ExtraData` is the per-pipeline contract configuration. Algo maps its named settings into known body fields rather than appending an extraData object. Placeholder settings and endpoint values are intentional. The builder does not invent priority bounds, an algorithm enum or mandatory nullable relationship IDs. WKT conversion adds no spatial index. Tests derive expected payloads from the pictured mapping; a live Algo Manager compatibility check remains separate integration work.
 
 ## Repository cross-check
 
@@ -68,7 +86,7 @@ These observations refer to the existing gateway baseline; they are not features
 | Existing `/rules` API and persistence | `apps/rules-api/Controllers/RulesController.cs`, `apps/rules-api/Services/RuleService.cs` |
 | Existing publication, acknowledgement and retry routing | `libs/rabbitmq-client/RabbitMqPublisher.cs`, `libs/rabbitmq-client/RabbitMqOutcomeRouter.cs` |
 
-The new foundation adds `libs/pipeline-catalog`, `libs/pipeline-contracts` and the separate `apps/unified-gateway` host. It includes registered-contract selection, disabled-pipeline handling, passive output descriptors, named broker descriptors, literal rule-source resolution, JSON-preserving `ExtraData`, ASD body/attribute preparation and metadata GET routes. It has shared observability and unit/host tests. It does not add live HTTP/RabbitMQ transport components, queues, channel pools, dispatch coordination, retry workers, a rule cache or Rules API changes.
+The new foundation adds `libs/pipeline-catalog`, `libs/pipeline-contracts` and the separate `apps/unified-gateway` host. It includes registered-contract selection, disabled-pipeline handling, passive output descriptors, named broker descriptors, literal rule-source resolution, JSON-preserving `ExtraData` and ASD/Algo payload preparation. The approved review changes use standard host startup, a catalog object keyed by pipeline ID and shared argument conversion in `libs/rabbitmq-configuration`. Pipeline metadata routes are removed; health/metrics and in-process catalog access remain. The foundation has shared observability and unit/host tests. It does not add live HTTP/RabbitMQ transport components, queues, channel pools, dispatch coordination, retry workers, a rule cache or Rules API changes.
 
 ## Inputs needed for later work
 

@@ -4,8 +4,10 @@ WORKDIR /src
 COPY global.json Directory.Build.props Directory.Packages.props ./
 COPY apps/unified-gateway/ImagingPipeline.UnifiedGateway.csproj apps/unified-gateway/
 COPY libs/pipeline-catalog/ImagingPipeline.PipelineCatalog.csproj libs/pipeline-catalog/
+COPY libs/rabbitmq-configuration/ImagingPipeline.RabbitMqConfiguration.csproj libs/rabbitmq-configuration/
 COPY libs/pipeline-contracts/ImagingPipeline.PipelineContracts.csproj libs/pipeline-contracts/
 COPY libs/common-dtos/ImagingPipeline.Common.Dtos.csproj libs/common-dtos/
+COPY libs/geometry-utils/GeometryUtils.csproj libs/geometry-utils/
 COPY libs/observability/ImagingPipeline.Observability.csproj libs/observability/
 RUN dotnet restore apps/unified-gateway/ImagingPipeline.UnifiedGateway.csproj
 

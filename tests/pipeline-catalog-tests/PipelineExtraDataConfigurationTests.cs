@@ -11,7 +11,7 @@ namespace ImagingPipeline.PipelineCatalog.Tests;
 
 public sealed class PipelineExtraDataConfigurationTests
 {
-    private const string ExtraDataKey = "PipelineCatalog:Pipelines:0:ExtraData";
+    private const string ExtraDataKey = "PipelineCatalog:Pipelines:asd:ExtraData";
 
     [Fact]
     public async Task JsonStreamPreservesArbitraryExtraDataTypesThroughCatalogStartup()
@@ -283,8 +283,7 @@ public sealed class PipelineExtraDataConfigurationTests
     private static string Configuration(string? extraData = "{}", string extraProperty = "") => $$"""
         {
           "PipelineCatalog": {
-            "Pipelines": [{
-              "PipelineId": "asd",
+            "Pipelines": { "asd": {
               "ContractId": "asd",
               "Enabled": true,
               "RulesIndex": "rules-integ",
@@ -294,7 +293,7 @@ public sealed class PipelineExtraDataConfigurationTests
               }
               {{(extraData is null ? string.Empty : $", \"ExtraData\": {extraData}")}}
               {{extraProperty}}
-            }]
+            } }
           }
         }
         """;

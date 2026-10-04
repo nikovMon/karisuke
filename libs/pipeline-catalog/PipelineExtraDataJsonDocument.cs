@@ -35,6 +35,23 @@ internal static class PipelineExtraDataJsonDocument
 
     private static void Write(JsonElement value, Utf8JsonWriter writer, string path)
     {
+        if (path.Equals($"{PipelineCatalogOptions.SectionName}:Pipelines", StringComparison.OrdinalIgnoreCase))
+        {
+            if (value.ValueKind != JsonValueKind.Object)
+                throw new FormatException($"Configuration '{path}' must be an object keyed by pipeline ID; arrays are not supported.");
+
+            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pipeline in value.EnumerateObject())
+            {
+                if (!PipelineCatalogOptionsValidator.IsPipelineId(pipeline.Name))
+                    throw new FormatException($"Configuration '{path}' has an invalid pipeline ID key. {PipelineCatalogOptionsValidator.PipelineIdRequirements}");
+                if (!ids.Add(pipeline.Name))
+                    throw new FormatException($"Configuration '{path}' contains duplicate pipeline IDs ignoring case.");
+                if (pipeline.Value.ValueKind != JsonValueKind.Object)
+                    throw new FormatException($"Configuration '{path}:{pipeline.Name}' must be an object.");
+            }
+        }
+
         if (IsExtraData(path))
         {
             if (value.ValueKind != JsonValueKind.Object)

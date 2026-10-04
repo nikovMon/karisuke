@@ -5,17 +5,21 @@ public sealed class PipelineCatalogOptions
     public const string SectionName = "PipelineCatalog";
 
     public Dictionary<string, RabbitMqConnectionOptions> RabbitMqConnections { get; set; } = new(StringComparer.Ordinal);
-    public List<PipelineDefinition> Pipelines { get; set; } = [];
+    public Dictionary<string, PipelineSettings> Pipelines { get; set; } = new(StringComparer.Ordinal);
 }
 
-public sealed record PipelineDefinition
+public record PipelineSettings
 {
-    public string PipelineId { get; init; } = string.Empty;
     public bool Enabled { get; init; }
     public string ContractId { get; init; } = string.Empty;
     public string RulesIndex { get; init; } = string.Empty;
     public PipelineExtraData ExtraData { get; init; } = PipelineExtraData.Empty;
     public PipelineTransportOptions Transport { get; init; } = new();
+}
+
+public sealed record PipelineDefinition : PipelineSettings
+{
+    public string PipelineId { get; init; } = string.Empty;
 }
 
 public sealed record PipelineTransportOptions

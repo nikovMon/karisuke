@@ -154,21 +154,63 @@ public sealed class TransportConfigurationTests
         }
     }
 
-    [Fact]
-    public void CatalogDefensivelyCopiesQueueArgumentsHeadersAndConnectionDictionary()
+    [Theory]
+    [InlineData("required")]
+    [InlineData("all")]
+    [InlineData("enabled")]
+    public void CatalogDefensivelyCopiesQueueArgumentsHeadersAndConnectionDictionary(string selection)
     {
-        var rabbit = Rabbit("asd", "output");
-        rabbit.Transport.RabbitMq!.Output.Arguments["x-message-ttl"] = "1000";
+        var queue = new RabbitMqQueueOptions
+        {
+            QueueName = "work",
+            Arguments = new() { ["x-message-ttl"] = "1000", ["x-dead-letter-routing-key"] = "123" },
+            ExchangeSettings = new()
+            {
+                ShouldBindToExchange = true, ExchangeName = "work-x", ExchangeType = "headers",
+                Arguments = new() { ["alternate-exchange"] = "backup" },
+                BindingArguments = new() { ["x-match"] = "all", ["priority"] = "7" }
+            }
+        };
+        var rabbit = Rabbit("asd", "output") with
+        {
+            Transport = new()
+            {
+                Kind = "rabbitmq", RabbitMq = new() { ConnectionRef = "output", Output = queue }
+            }
+        };
         var http = Http(new() { ["X-Mode"] = "original" });
         var options = OptionsFor(rabbit, http);
         var catalog = Catalog(options);
-        rabbit.Transport.RabbitMq!.Output.Arguments["x-message-ttl"] = "2000";
+        queue.Arguments.Clear();
+        queue.ExchangeSettings.Arguments.Clear();
+        queue.ExchangeSettings.BindingArguments.Clear();
         http.Transport.Http!.Headers["X-Mode"] = "changed";
         options.RabbitMqConnections.Clear();
-        catalog.GetRequired("asd").Transport.RabbitMq!.Output.Arguments.Clear();
-        catalog.GetAll().Single(pipeline => pipeline.PipelineId == "http").Transport.Http!.Headers.Clear();
 
-        Assert.Equal(1000, catalog.GetRequired("asd").Transport.RabbitMq!.Output.Arguments["x-message-ttl"]);
+        IReadOnlyList<PipelineDefinition> returned = selection switch
+        {
+            "required" => new[] { catalog.GetRequired("asd"), catalog.GetRequired("http") },
+            "all" => catalog.GetAll(),
+            "enabled" => catalog.GetEnabled(),
+            _ => throw new InvalidOperationException()
+        };
+        var returnedQueue = returned.Single(pipeline => pipeline.PipelineId == "asd").Transport.RabbitMq!.Output;
+        Assert.Equal(1000, returnedQueue.Arguments["x-message-ttl"]);
+        Assert.Equal("123", returnedQueue.Arguments["x-dead-letter-routing-key"]);
+        Assert.Equal("backup", returnedQueue.ExchangeSettings.Arguments["alternate-exchange"]);
+        Assert.Equal("all", returnedQueue.ExchangeSettings.BindingArguments["x-match"]);
+        Assert.Equal(7, returnedQueue.ExchangeSettings.BindingArguments["priority"]);
+        returnedQueue.Arguments.Clear();
+        returnedQueue.ExchangeSettings.Arguments.Clear();
+        returnedQueue.ExchangeSettings.BindingArguments.Clear();
+        returned.Single(pipeline => pipeline.PipelineId == "http").Transport.Http!.Headers.Clear();
+
+        var retainedQueue = catalog.GetRequired("asd").Transport.RabbitMq!.Output;
+        Assert.Equal(1000, retainedQueue.Arguments["x-message-ttl"]);
+        Assert.Equal("123", retainedQueue.Arguments["x-dead-letter-routing-key"]);
+        Assert.Equal("backup", retainedQueue.ExchangeSettings.Arguments["alternate-exchange"]);
+        Assert.Equal("all", retainedQueue.ExchangeSettings.BindingArguments["x-match"]);
+        Assert.Equal(7, retainedQueue.ExchangeSettings.BindingArguments["priority"]);
         Assert.Equal("original", catalog.GetRequired("http").Transport.Http!.Headers["X-Mode"]);
         Assert.Equal("egress.example.test", ((IRabbitMqConnectionResolver)catalog).GetRequired("output").Hostname);
     }
@@ -176,7 +218,7 @@ public sealed class TransportConfigurationTests
     [Fact]
     public void HttpPreservesQueryAndHeadersAndNeedsNoBrokerConnections()
     {
-        var options = new PipelineCatalogOptions { Pipelines = [Http(new() { ["Authorization"] = "Bearer token" })] };
+        var options = new PipelineCatalogOptions { Pipelines = new() { ["http"] = Http(new() { ["Authorization"] = "Bearer token" }) } };
         var http = Catalog(options).GetRequired("http").Transport.Http!;
         Assert.Equal("https://example.test/path?mode=one&return=%2Ffoo", http.Endpoint);
         Assert.Equal("Bearer token", http.Headers["Authorization"]);
@@ -233,7 +275,7 @@ public sealed class TransportConfigurationTests
     public async Task NestedArgumentConfigurationCannotBeSilentlyLostByBinding(string section)
     {
         var settings = ValidConfiguration();
-        var output = "PipelineCatalog:Pipelines:0:Transport:RabbitMq:Output";
+        var output = "PipelineCatalog:Pipelines:asd:Transport:RabbitMq:Output";
         settings[$"{output}:ExchangeSettings:ShouldBindToExchange"] = "true";
         settings[$"{output}:ExchangeSettings:ExchangeName"] = "work-x";
         settings[$"{output}:{section}:nested:child"] = "value";
@@ -243,11 +285,38 @@ public sealed class TransportConfigurationTests
         Assert.Contains("child", exception.ToString(), StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task HostBindsOutputTopologyNormalizesArgumentsAndResolvesConnection()
+    [Theory]
+    [InlineData("Arguments")]
+    [InlineData("ExchangeSettings:Arguments")]
+    [InlineData("ExchangeSettings:BindingArguments")]
+    public async Task NamedPipelineCannotHideScalarArgumentDictionaryOverride(string section)
     {
-        var settings = ValidConfiguration();
-        var prefix = "PipelineCatalog:Pipelines:0:Transport:RabbitMq:Output";
+        var settings = ValidConfiguration().ToDictionary(
+            setting => setting.Key.Replace("Pipelines:asd:", "Pipelines:second:", StringComparison.Ordinal),
+            setting => setting.Value);
+        const string output = "PipelineCatalog:Pipelines:second:Transport:RabbitMq:Output";
+        settings[$"{output}:ExchangeSettings:ShouldBindToExchange"] = "true";
+        settings[$"{output}:ExchangeSettings:ExchangeName"] = "work-x";
+        settings[$"{output}:{section}:custom"] = "value";
+        settings[$"{output}:{section}"] = "invalid-dictionary-override";
+        using var host = BuildHost(settings);
+
+        var exception = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
+
+        Assert.Contains($"{output}:{section}", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("dictionary of scalar argument values", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("invalid-dictionary-override", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("asd")]
+    [InlineData("second")]
+    public async Task HostBindsOutputTopologyNormalizesArgumentsAndResolvesConnection(string pipelineId)
+    {
+        var settings = ValidConfiguration().ToDictionary(
+            setting => setting.Key.Replace("Pipelines:asd:", $"Pipelines:{pipelineId}:", StringComparison.Ordinal),
+            setting => setting.Value);
+        var prefix = $"PipelineCatalog:Pipelines:{pipelineId}:Transport:RabbitMq:Output";
         settings[$"{prefix}:Arguments:x-message-ttl"] = "1000";
         settings[$"{prefix}:Arguments:x-dead-letter-routing-key"] = "123";
         settings[$"{prefix}:ExchangeSettings:ShouldBindToExchange"] = "true";
@@ -260,7 +329,7 @@ public sealed class TransportConfigurationTests
         var connections = host.Services.GetRequiredService<IRabbitMqConnectionResolver>();
         Assert.Same(catalog, connections);
         Assert.Equal("localhost", connections.GetRequired("source").Hostname);
-        var queue = catalog.GetRequired("asd").Transport.RabbitMq!.Output;
+        var queue = catalog.GetRequired(pipelineId).Transport.RabbitMq!.Output;
         Assert.Equal(1000, queue.Arguments["x-message-ttl"]);
         Assert.Equal("123", queue.Arguments["x-dead-letter-routing-key"]);
         Assert.Equal("all", queue.ExchangeSettings.BindingArguments["x-match"]);
@@ -295,7 +364,7 @@ public sealed class TransportConfigurationTests
 
     private static PipelineCatalogOptions OptionsFor(params PipelineDefinition[] pipelines) => new()
     {
-        Pipelines = pipelines.ToList(),
+        Pipelines = pipelines.ToDictionary(pipeline => pipeline.PipelineId, pipeline => (PipelineSettings)pipeline, StringComparer.Ordinal),
         RabbitMqConnections = new()
         {
             ["source"] = new() { Hostname = "ingress.example.test", Username = "guest", Password = "guest" },
@@ -306,6 +375,7 @@ public sealed class TransportConfigurationTests
     private static IPipelineContractRegistry Registry()
     {
         var contract = new Mock<IPipelineContract>();
+        contract.Setup(value => value.ValidateExtraData(It.IsAny<System.Text.Json.JsonElement>())).Returns([]);
         contract.SetupGet(value => value.ContractId).Returns("asd");
         return new PipelineContractRegistry([contract.Object]);
     }
@@ -318,13 +388,12 @@ public sealed class TransportConfigurationTests
         ["PipelineCatalog:RabbitMqConnections:source:Hostname"] = "localhost",
         ["PipelineCatalog:RabbitMqConnections:source:Username"] = "guest",
         ["PipelineCatalog:RabbitMqConnections:source:Password"] = "guest",
-        ["PipelineCatalog:Pipelines:0:PipelineId"] = "asd",
-        ["PipelineCatalog:Pipelines:0:ContractId"] = "asd",
-        ["PipelineCatalog:Pipelines:0:Enabled"] = "true",
-        ["PipelineCatalog:Pipelines:0:RulesIndex"] = "rules",
-        ["PipelineCatalog:Pipelines:0:Transport:Kind"] = "rabbitmq",
-        ["PipelineCatalog:Pipelines:0:Transport:RabbitMq:ConnectionRef"] = "source",
-        ["PipelineCatalog:Pipelines:0:Transport:RabbitMq:Output:QueueName"] = "work"
+        ["PipelineCatalog:Pipelines:asd:ContractId"] = "asd",
+        ["PipelineCatalog:Pipelines:asd:Enabled"] = "true",
+        ["PipelineCatalog:Pipelines:asd:RulesIndex"] = "rules",
+        ["PipelineCatalog:Pipelines:asd:Transport:Kind"] = "rabbitmq",
+        ["PipelineCatalog:Pipelines:asd:Transport:RabbitMq:ConnectionRef"] = "source",
+        ["PipelineCatalog:Pipelines:asd:Transport:RabbitMq:Output:QueueName"] = "work"
     };
 
     private static IHost BuildHost(Dictionary<string, string?> settings)

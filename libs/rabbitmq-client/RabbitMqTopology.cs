@@ -1,3 +1,4 @@
+using ImagingPipeline.RabbitMqConfiguration;
 using RabbitMQ.Client;
 
 namespace ImagingPipeline.RabbitMqClient;
@@ -151,28 +152,7 @@ internal static class RabbitMqTopology
             return null;
         }
 
-        return arguments.ToDictionary(
-            item => item.Key,
-            item => NormalizeArgumentValue(item.Value),
-            StringComparer.Ordinal);
-    }
-
-    private static object? NormalizeArgumentValue(object? value)
-    {
-        if (value is string text)
-        {
-            if (int.TryParse(text, out var number))
-            {
-                return number;
-            }
-
-            if (bool.TryParse(text, out var boolean))
-            {
-                return boolean;
-            }
-        }
-
-        return value;
+        return RabbitMqArgumentNormalizer.Normalize(arguments, RabbitMqArgumentConversionPolicy.Legacy);
     }
 
     private static Task BindQueueAsync(

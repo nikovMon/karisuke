@@ -32,28 +32,20 @@ public sealed class UnifiedGatewayHostTests
     }
 
     [Fact]
-    public async Task PipelineMetadataDoesNotExposePhysicalDestinationsOrIndexes()
+    public void CatalogRemainsAvailableInternallyWithPrivateSettings()
     {
         using var factory = CreateFactory(new Dictionary<string, string?>
         {
-            ["PipelineCatalog:Pipelines:0:ExtraData"] = "{\"internalValue\":\"private\"}"
+            ["PipelineCatalog:Pipelines:asd:ExtraData"] = "{\"internalValue\":\"private\"}"
         });
         using var client = factory.CreateClient();
 
-        var response = await client.GetAsync("/pipelines");
-        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var pipeline = Assert.Single(body.RootElement.EnumerateArray());
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("asd", pipeline.GetProperty("pipelineId").GetString());
-        Assert.Equal("asd", pipeline.GetProperty("contractId").GetString());
-        Assert.Equal(3, pipeline.EnumerateObject().Count());
-        Assert.False(pipeline.TryGetProperty("displayName", out _));
-        Assert.False(pipeline.TryGetProperty("transport", out _));
-        Assert.False(pipeline.TryGetProperty("rulesIndex", out _));
-        Assert.False(pipeline.TryGetProperty("extraData", out _));
-        Assert.Equal("private", factory.Services.GetRequiredService<IPipelineCatalog>().GetRequired("asd")
-            .ExtraData.Value.GetProperty("internalValue").GetString());
+        var catalog = factory.Services.GetRequiredService<IPipelineCatalog>();
+        Assert.Equal(2, catalog.GetAll().Count);
+        var pipeline = catalog.GetRequired("asd");
+        Assert.Equal("asd", pipeline.PipelineId);
+        Assert.Equal("asd", pipeline.ContractId);
+        Assert.Equal("private", pipeline.ExtraData.Value.GetProperty("internalValue").GetString());
     }
 
     [Fact]
@@ -61,49 +53,63 @@ public sealed class UnifiedGatewayHostTests
     {
         using var factory = CreateFactory(new Dictionary<string, string?>
         {
-            ["PipelineCatalog:Pipelines:0:ContractId"] = "missing"
+            ["PipelineCatalog:Pipelines:asd:ContractId"] = "missing"
         });
 
         Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
     }
 
     [Fact]
-    public async Task ValidDisabledPipelineStaysVisibleAndIsNotEnabled()
+    public void ValidDisabledPipelineRemainsInCatalogAndIsNotEnabled()
     {
         using var factory = CreateFactory(new Dictionary<string, string?>
         {
-            ["PipelineCatalog:Pipelines:0:Enabled"] = "false"
+            ["PipelineCatalog:Pipelines:asd:Enabled"] = "false"
         });
         using var client = factory.CreateClient();
 
-        var response = await client.GetAsync("/pipelines");
-        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-
-        Assert.False(body.RootElement[0].GetProperty("enabled").GetBoolean());
-        Assert.Empty(factory.Services.GetRequiredService<IPipelineCatalog>().GetEnabled());
+        Assert.False(factory.Services.GetRequiredService<IPipelineCatalog>().GetRequired("asd").Enabled);
+        Assert.DoesNotContain(factory.Services.GetRequiredService<IPipelineCatalog>().GetEnabled(), pipeline => pipeline.PipelineId == "asd");
     }
 
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task IndividualPipelineMetadataRemainsOnGatewayIncludingDisabledPipelines(bool enabled)
+    public async Task PipelineMetadataRoutesAreAbsentRegardlessOfEnabledState(bool enabled)
     {
         using var factory = CreateFactory(new Dictionary<string, string?>
         {
-            ["PipelineCatalog:Pipelines:0:Enabled"] = enabled.ToString()
+            ["PipelineCatalog:Pipelines:asd:Enabled"] = enabled.ToString()
         });
         using var client = factory.CreateClient();
 
-        var response = await client.GetAsync("/pipelines/asd");
-        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        foreach (var path in new[] { "/pipelines", "/pipelines/asd", "/pipelines/algo", "/pipelines/missing" })
+        {
+            using var response = await client.GetAsync(path);
+            Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        }
+    }
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("asd", body.RootElement.GetProperty("pipelineId").GetString());
-        Assert.Equal("asd", body.RootElement.GetProperty("contractId").GetString());
-        Assert.Equal(enabled, body.RootElement.GetProperty("enabled").GetBoolean());
-        Assert.Equal(3, body.RootElement.EnumerateObject().Count());
-        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/pipelines/missing")).StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/pipelines/ASD")).StatusCode);
+    [Fact]
+    public void SharedCatalogIncludesAlgoWithPrivateSettingsAndPassiveHttpDescriptor()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+        var pipeline = factory.Services.GetRequiredService<IPipelineCatalog>().GetRequired("algo");
+        Assert.Equal("algo", pipeline.ContractId);
+        Assert.Equal("algo-integ-pipeline-index", pipeline.RulesIndex);
+        Assert.Equal("PUT", pipeline.Transport.Http!.Method);
+        Assert.True(pipeline.ExtraData.Value.GetProperty("SaveDetections").GetBoolean());
+    }
+
+    [Fact]
+    public void AlgoSettingsMustPassContractValidationBeforeHostServesTraffic()
+    {
+        using var factory = CreateFactory(new Dictionary<string, string?>
+        {
+            ["PipelineCatalog:Pipelines:algo:ExtraData"] = "{}"
+        });
+        Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
     }
 
     private static WebApplicationFactory<Program> CreateFactory(Dictionary<string, string?>? settings = null) =>

@@ -20,25 +20,23 @@ public sealed class PipelineCatalogOptionsValidator(IPipelineContractRegistry co
             return ValidateOptionsResult.Fail(errors);
         }
 
-        var pipelineIds = new HashSet<string>(StringComparer.Ordinal);
-        for (var index = 0; index < options.Pipelines.Count; index++)
+        var pipelineIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in options.Pipelines)
         {
-            var pipeline = options.Pipelines[index];
-            var prefix = $"PipelineCatalog:Pipelines:{index}";
+            var pipeline = entry.Value;
+            var prefix = $"PipelineCatalog:Pipelines:{entry.Key}";
+            if (!IsPipelineId(entry.Key))
+            {
+                errors.Add($"{prefix} has an invalid pipeline ID key. {PipelineIdRequirements}");
+            }
+            else if (!pipelineIds.Add(entry.Key))
+            {
+                errors.Add($"{prefix} duplicates another pipeline ID ignoring case.");
+            }
             if (pipeline is null)
             {
                 errors.Add($"{prefix} must not be null.");
                 continue;
-            }
-
-            if (!IsPipelineId(pipeline.PipelineId))
-            {
-                errors.Add($"{prefix}:PipelineId must contain only ASCII letters, digits, '-', '.', '_', or '~' " +
-                    "so it can be used as one URL path segment. It must not be empty, '.' or '..'.");
-            }
-            else if (!pipelineIds.Add(pipeline.PipelineId))
-            {
-                errors.Add($"{prefix}:PipelineId duplicates '{pipeline.PipelineId}'.");
             }
 
             if (!IsIdentifier(pipeline.ContractId))
@@ -53,6 +51,11 @@ public sealed class PipelineCatalogOptionsValidator(IPipelineContractRegistry co
             ValidateIndex(pipeline.RulesIndex, $"{prefix}:RulesIndex", errors);
             if (pipeline.ExtraData is null)
                 errors.Add($"{prefix}:ExtraData must be a JSON object; omit it to use an empty object.");
+            else if (contracts.TryGet(pipeline.ContractId, out var contract))
+            {
+                foreach (var error in contract.ValidateExtraData(pipeline.ExtraData.Value))
+                    errors.Add($"{prefix}:ExtraData:{error.Field}: {error.Message}");
+            }
             ValidateTransport(pipeline.Transport, $"{prefix}:Transport", errors);
             if (pipeline.Transport?.RabbitMq is { } rabbit &&
                 IsIdentifier(rabbit.ConnectionRef) &&
@@ -60,13 +63,18 @@ public sealed class PipelineCatalogOptionsValidator(IPipelineContractRegistry co
             {
                 errors.Add($"{prefix}:Transport:RabbitMq:ConnectionRef does not reference a configured RabbitMQ connection.");
             }
+        }
 
-            if (configuration is not null)
+        if (configuration is not null)
+        {
+            // Inspect original sections so malformed dictionary values cannot disappear during binding.
+            var pipelines = configuration.GetSection($"{PipelineCatalogOptions.SectionName}:Pipelines");
+            foreach (var pipeline in pipelines.GetChildren())
             {
-                if (configuration.GetSection($"{prefix}:ExtraData").GetChildren().Any())
-                    errors.Add($"{prefix}:ExtraData must be configured as one JSON object. Use the catalog JSON provider for files/streams, or replace the complete value with a JSON string in configuration overrides.");
+                if (pipeline.GetSection("ExtraData").GetChildren().Any())
+                    errors.Add($"{pipeline.Path}:ExtraData must be configured as one JSON object. Use the catalog JSON provider for files/streams, or replace the complete value with a JSON string in configuration overrides.");
                 RabbitMqOptionsValidation.ValidateScalarArgumentConfiguration(
-                    configuration.GetSection($"{prefix}:Transport:RabbitMq:Output"), errors);
+                    pipeline.GetSection("Transport:RabbitMq:Output"), errors);
             }
         }
 
@@ -114,8 +122,13 @@ public sealed class PipelineCatalogOptionsValidator(IPipelineContractRegistry co
         !string.IsNullOrWhiteSpace(value) && !value.Any(char.IsControl) &&
         string.Equals(value, value.Trim(), StringComparison.Ordinal);
 
-    private static bool IsPipelineId([NotNullWhen(true)] string? value) =>
+    internal const string PipelineIdRequirements =
+        "Pipeline IDs must contain only ASCII letters, digits, '-', '.', '_', or '~' so they can be used as one URL path segment. " +
+        "They must not be empty, '.' or '..', contain '__', or end with '_' (reserved by environment-variable paths).";
+
+    internal static bool IsPipelineId([NotNullWhen(true)] string? value) =>
         !string.IsNullOrEmpty(value) && value is not ("." or "..") &&
+        !value.Contains("__", StringComparison.Ordinal) && !value.EndsWith('_') &&
         value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '.' or '_' or '~');
 
     private static void ValidateIndex(string? value, string field, List<string> errors)

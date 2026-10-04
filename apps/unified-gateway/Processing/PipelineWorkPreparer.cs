@@ -44,14 +44,16 @@ public sealed class PipelineWorkPreparer(
             }
 
             var contract = contracts.GetRequired(pipeline.ContractId);
-            var errors = contract.ValidateRunParams(runParams);
-            if (errors.Count > 0)
+            var errors = contract.ValidateRunParams(runParams)
+                .Concat(contract.ValidateExtraData(pipeline.ExtraData.Value))
+                .Concat(contract.ValidateContext(context)).ToArray();
+            if (errors.Length > 0)
             {
                 outcome = "invalid";
-                activity?.SetStatus(ActivityStatusCode.Error, "Invalid pipeline run parameters.");
+                activity?.SetStatus(ActivityStatusCode.Error, "Invalid pipeline contract input.");
                 logger.LogWarning(
-                    "Run parameters rejected for pipeline {PipelineId}, contract {ContractId}: {ErrorCount} validation errors.",
-                    pipeline.PipelineId, pipeline.ContractId, errors.Count);
+                    "Contract input rejected for pipeline {PipelineId}, contract {ContractId}: {ErrorCount} validation errors.",
+                    pipeline.PipelineId, pipeline.ContractId, errors.Length);
                 return new(PipelinePreparationStatus.Invalid, null, errors);
             }
 
@@ -59,10 +61,11 @@ public sealed class PipelineWorkPreparer(
             outcome = "prepared";
             return new(PipelinePreparationStatus.Prepared, new(pipeline, payload), []);
         }
-        catch
+        catch (Exception ex)
         {
             activity?.SetStatus(ActivityStatusCode.Error, "Pipeline work preparation failed.");
             logger.LogError(
+                ex,
                 "Work preparation failed for pipeline {PipelineId}, contract {ContractId}.",
                 pipeline.PipelineId, pipeline.ContractId);
             throw;

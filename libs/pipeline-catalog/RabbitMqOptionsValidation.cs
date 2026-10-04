@@ -1,16 +1,11 @@
-using System.Globalization;
 using System.Text;
+using ImagingPipeline.RabbitMqConfiguration;
 using Microsoft.Extensions.Configuration;
 
 namespace ImagingPipeline.PipelineCatalog;
 
 public static class RabbitMqOptionsValidation
 {
-    private static readonly HashSet<string> StringArguments = new(StringComparer.Ordinal)
-    {
-        "x-dead-letter-exchange", "x-dead-letter-routing-key", "x-queue-type", "x-overflow", "x-match"
-    };
-
     public static void ValidateQueue(RabbitMqQueueOptions? queue, string path, ICollection<string> errors)
     {
         ArgumentNullException.ThrowIfNull(errors);
@@ -100,10 +95,7 @@ public static class RabbitMqOptionsValidation
             throw new ArgumentException(string.Join(" ", errors), nameof(arguments));
         }
 
-        return arguments.ToDictionary(
-            argument => argument.Key,
-            argument => StringArguments.Contains(argument.Key) ? argument.Value : NormalizeScalar(argument.Value!),
-            StringComparer.Ordinal);
+        return RabbitMqArgumentNormalizer.Normalize(arguments, RabbitMqArgumentConversionPolicy.ExtendedNumeric);
     }
 
     public static RabbitMqQueueOptions NormalizeQueue(RabbitMqQueueOptions queue)
@@ -148,24 +140,11 @@ public static class RabbitMqOptionsValidation
             {
                 errors.Add($"{field} must contain a string, Boolean, Int32, Int64, or finite Double scalar.");
             }
-            else if (StringArguments.Contains(argument.Key) && argument.Value is not string)
+            else if (RabbitMqArgumentNormalizer.IsStringArgument(argument.Key) && argument.Value is not string)
             {
                 errors.Add($"{field} requires a string value for this RabbitMQ argument.");
             }
         }
-    }
-
-    private static object NormalizeScalar(object value)
-    {
-        if (value is not string text)
-        {
-            return value;
-        }
-        if (int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integer)) return integer;
-        if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var longInteger)) return longInteger;
-        if (bool.TryParse(text, out var boolean)) return boolean;
-        if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) && double.IsFinite(number)) return number;
-        return text;
     }
 
     private static bool IsAmqpName(string? value, bool allowEmpty) =>

@@ -4,6 +4,7 @@ WORKDIR /src
 COPY global.json Directory.Build.props Directory.Packages.props ./
 COPY apps/tb-publisher/ImagingPipeline.TbPublisher.csproj apps/tb-publisher/
 COPY libs/rabbitmq-client/RabbitMqClient.csproj libs/rabbitmq-client/
+COPY libs/rabbitmq-configuration/ImagingPipeline.RabbitMqConfiguration.csproj libs/rabbitmq-configuration/
 COPY libs/projection-mapper-client/ProjectionMapperClient.csproj libs/projection-mapper-client/
 COPY libs/common-dtos/ImagingPipeline.Common.Dtos.csproj libs/common-dtos/
 COPY libs/geometry-utils/GeometryUtils.csproj libs/geometry-utils/

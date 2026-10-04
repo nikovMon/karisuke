@@ -28,7 +28,7 @@ public sealed class PipelineCatalog : IPipelineCatalog, IRuleSourceResolver, IRa
                 Options.DefaultName, typeof(PipelineCatalogOptions), validation.Failures);
         }
 
-        _all = Array.AsReadOnly(configured.Pipelines.Select(Clone).ToArray());
+        _all = Array.AsReadOnly(configured.Pipelines.Select(CreateSnapshot).ToArray());
         _enabled = Array.AsReadOnly(_all.Where(pipeline => pipeline.Enabled).ToArray());
         _byId = _all.ToFrozenDictionary(pipeline => pipeline.PipelineId, StringComparer.Ordinal);
         _connections = configured.RabbitMqConnections.ToFrozenDictionary(
@@ -63,16 +63,45 @@ public sealed class PipelineCatalog : IPipelineCatalog, IRuleSourceResolver, IRa
             : throw new KeyNotFoundException("The RabbitMQ connection reference is not configured.");
     }
 
-    private static PipelineDefinition Clone(PipelineDefinition pipeline) => pipeline with
+    private static PipelineDefinition CreateSnapshot(KeyValuePair<string, PipelineSettings> entry) =>
+        Clone(new PipelineDefinition
+        {
+            PipelineId = entry.Key,
+            Enabled = entry.Value.Enabled,
+            ContractId = entry.Value.ContractId,
+            RulesIndex = entry.Value.RulesIndex,
+            ExtraData = entry.Value.ExtraData,
+            Transport = entry.Value.Transport
+        }, normalizeArguments: true);
+
+    private static PipelineDefinition Clone(PipelineDefinition pipeline) =>
+        Clone(pipeline, normalizeArguments: false);
+
+    private static PipelineDefinition Clone(PipelineDefinition pipeline, bool normalizeArguments) => pipeline with
     {
         Transport = pipeline.Transport with
         {
             RabbitMq = pipeline.Transport.RabbitMq is { } rabbit
-                ? rabbit with { Output = RabbitMqOptionsValidation.NormalizeQueue(rabbit.Output) }
+                ? rabbit with
+                {
+                    Output = normalizeArguments
+                        ? RabbitMqOptionsValidation.NormalizeQueue(rabbit.Output)
+                        : CloneQueue(rabbit.Output)
+                }
                 : null,
             Http = pipeline.Transport.Http is { } http
                 ? http with { Headers = new Dictionary<string, string>(http.Headers, StringComparer.OrdinalIgnoreCase) }
                 : null
+        }
+    };
+
+    private static RabbitMqQueueOptions CloneQueue(RabbitMqQueueOptions queue) => queue with
+    {
+        Arguments = new Dictionary<string, object?>(queue.Arguments, StringComparer.Ordinal),
+        ExchangeSettings = queue.ExchangeSettings with
+        {
+            Arguments = new Dictionary<string, object?>(queue.ExchangeSettings.Arguments, StringComparer.Ordinal),
+            BindingArguments = new Dictionary<string, object?>(queue.ExchangeSettings.BindingArguments, StringComparer.Ordinal)
         }
     };
 }

@@ -4,6 +4,7 @@ using ImagingPipeline.Observability;
 using ImagingPipeline.PipelineCatalog;
 using ImagingPipeline.PipelineContracts;
 using ImagingPipeline.UnifiedGateway.Processing;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Catalog = ImagingPipeline.PipelineCatalog.PipelineCatalog;
@@ -191,7 +192,34 @@ public sealed class PipelineWorkPreparerTests
         Assert.Contains(TelemetrySourceNames.UnifiedGateway, TelemetrySourceNames.All);
     }
 
-    private static PipelineWorkPreparer CreatePreparer(PipelineDefinition[] definitions, params IPipelineContract[] contracts)
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ContractFailureLogsOriginalExceptionWithPipelineContextAndRethrows(bool failDuringValidation)
+    {
+        var contract = new FailingContract(failDuringValidation);
+        var logger = new FailureLogger();
+        var preparer = CreatePreparer([Definition("failing", contract.ContractId, true)], logger, contract);
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => preparer.Prepare("failing", Context(), AsdRunParams()));
+
+        Assert.Same(contract.Failure, exception);
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Error, entry.Level);
+        Assert.Same(exception, entry.Exception);
+        Assert.Contains(nameof(FailingContract), exception.StackTrace!);
+        Assert.Equal("failing", entry.Fields["PipelineId"]);
+        Assert.Equal(contract.ContractId, entry.Fields["ContractId"]);
+    }
+
+    private static PipelineWorkPreparer CreatePreparer(PipelineDefinition[] definitions, params IPipelineContract[] contracts) =>
+        CreatePreparer(definitions, NullLogger<PipelineWorkPreparer>.Instance, contracts);
+
+    private static PipelineWorkPreparer CreatePreparer(
+        PipelineDefinition[] definitions,
+        ILogger<PipelineWorkPreparer> logger,
+        params IPipelineContract[] contracts)
     {
         var registry = new PipelineContractRegistry(contracts);
         var catalog = new Catalog(
@@ -204,11 +232,11 @@ public sealed class PipelineWorkPreparerTests
                         Hostname = "localhost", Username = "test", Password = "test", VirtualHost = "/"
                     }
                 },
-                Pipelines = [.. definitions]
+                Pipelines = definitions.ToDictionary(pipeline => pipeline.PipelineId, pipeline => (PipelineSettings)pipeline, StringComparer.Ordinal)
             }),
             registry,
             NullLogger<Catalog>.Instance);
-        return new(catalog, registry, NullLogger<PipelineWorkPreparer>.Instance);
+        return new(catalog, registry, logger);
     }
 
     private static PipelineDefinition Definition(string id, string contractId, bool enabled) => new()
@@ -241,6 +269,31 @@ public sealed class PipelineWorkPreparerTests
         algorithmNames = new[] { "FindAir" },
         tilingConfigs = new[] { new { tileSizeWidth = 500, tileSizeHeight = 500, tileOverlapWidth = 10, tileOverlapHeight = 10 } }
     });
+
+    private sealed class FailingContract(bool failDuringValidation) : IPipelineContract
+    {
+        public string ContractId => "failing-contract";
+        public InvalidOperationException Failure { get; } = new("Contract preparation failed.");
+
+        public IReadOnlyList<ContractValidationError> ValidateRunParams(JsonElement runParams) =>
+            failDuringValidation ? throw Failure : [];
+
+        public PipelinePayload BuildPayload(PipelineDispatchContext context, JsonElement runParams, JsonElement extraData = default) =>
+            throw Failure;
+    }
+
+    private sealed class FailureLogger : ILogger<PipelineWorkPreparer>
+    {
+        public List<(LogLevel Level, Exception? Exception, Dictionary<string, object?> Fields)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, exception,
+                ((IEnumerable<KeyValuePair<string, object?>>)state!).ToDictionary(item => item.Key, item => item.Value)));
+    }
 
     private sealed class RecordingContract : IPipelineContract
     {

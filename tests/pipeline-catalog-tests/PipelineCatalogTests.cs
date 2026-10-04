@@ -16,7 +16,7 @@ public sealed class PipelineCatalogTests
         var catalog = CreateCatalog(new PipelineCatalogOptions
         {
             RabbitMqConnections = Connections(),
-            Pipelines = [ValidPipeline(), ValidPipeline("future") with { Enabled = false }]
+            Pipelines = Entries(ValidPipeline(), ValidPipeline("future") with { Enabled = false })
         });
 
         Assert.Equal(2, catalog.GetAll().Count);
@@ -31,7 +31,7 @@ public sealed class PipelineCatalogTests
         var catalog = CreateCatalog(new PipelineCatalogOptions
         {
             RabbitMqConnections = Connections(),
-            Pipelines = [ValidPipeline(), ValidPipeline("second")]
+            Pipelines = Entries(ValidPipeline(), ValidPipeline("second"))
         });
 
         Assert.Equal(new RuleSource("asd-rules", "asd"), catalog.Resolve("asd"));
@@ -50,7 +50,7 @@ public sealed class PipelineCatalogTests
         var catalog = CreateCatalog(new PipelineCatalogOptions
         {
             RabbitMqConnections = Connections(),
-            Pipelines = [rabbitPipeline, httpPipeline]
+            Pipelines = Entries(rabbitPipeline, httpPipeline)
         });
 
         Assert.Equal(new RuleSource("rules-integ", "asd"), catalog.Resolve("asd"));
@@ -69,7 +69,7 @@ public sealed class PipelineCatalogTests
         var catalog = CreateCatalog(new PipelineCatalogOptions
         {
             RabbitMqConnections = Connections(),
-            Pipelines = [ValidPipeline("integ") with { RulesIndex = "explicitly-configured-rules" }]
+            Pipelines = Entries(ValidPipeline("integ") with { RulesIndex = "explicitly-configured-rules" })
         });
 
         Assert.Equal(new RuleSource("explicitly-configured-rules", "integ"), catalog.Resolve("integ"));
@@ -80,10 +80,10 @@ public sealed class PipelineCatalogTests
     public void CatalogSnapshotCannotBeChangedThroughOptionsOrReturnedCollections()
     {
         var original = ValidPipeline();
-        var options = new PipelineCatalogOptions { RabbitMqConnections = Connections(), Pipelines = [original] };
+        var options = new PipelineCatalogOptions { RabbitMqConnections = Connections(), Pipelines = Entries(original) };
         var catalog = CreateCatalog(options);
 
-        options.Pipelines[0] = original with
+        options.Pipelines["asd"] = original with
         {
             Enabled = false,
             RulesIndex = "changed-index",
@@ -139,7 +139,7 @@ public sealed class PipelineCatalogTests
         };
 
         Assert.Throws<OptionsValidationException>(() =>
-            CreateCatalog(new PipelineCatalogOptions { RabbitMqConnections = Connections(), Pipelines = [invalid] }));
+            CreateCatalog(new PipelineCatalogOptions { RabbitMqConnections = Connections(), Pipelines = Entries(invalid) }));
     }
 
     [Theory]
@@ -147,11 +147,11 @@ public sealed class PipelineCatalogTests
     [InlineData("index-expression")]
     public void DuplicatePipelineIdentityOrInvalidIndexExpressionIsRejected(string scenario)
     {
-        var options = new PipelineCatalogOptions { RabbitMqConnections = Connections(), Pipelines = [ValidPipeline()] };
+        var options = new PipelineCatalogOptions { RabbitMqConnections = Connections(), Pipelines = Entries(ValidPipeline()) };
         switch (scenario)
         {
-            case "duplicate-pipeline": options.Pipelines.Add(ValidPipeline()); break;
-            case "index-expression": options.Pipelines[0] = ValidPipeline() with { RulesIndex = "rules-*" }; break;
+            case "duplicate-pipeline": options.Pipelines.Add("ASD", ValidPipeline()); break;
+            case "index-expression": options.Pipelines["asd"] = ValidPipeline() with { RulesIndex = "rules-*" }; break;
         }
 
         Assert.Throws<OptionsValidationException>(() => CreateCatalog(options));
@@ -166,7 +166,7 @@ public sealed class PipelineCatalogTests
             Method = "POST",
             TimeoutSeconds = 30
         });
-        var catalog = CreateCatalog(new PipelineCatalogOptions { RabbitMqConnections = Connections(), Pipelines = [definition] });
+        var catalog = CreateCatalog(new PipelineCatalogOptions { RabbitMqConnections = Connections(), Pipelines = Entries(definition) });
 
         Assert.Equal("http", catalog.GetRequired("asd").Transport.Kind);
     }
@@ -198,7 +198,7 @@ public sealed class PipelineCatalogTests
         var options = new PipelineCatalogOptions
         {
             RabbitMqConnections = Connections(),
-            Pipelines = [ValidPipeline() with { RulesIndex = indexName }]
+            Pipelines = Entries(ValidPipeline() with { RulesIndex = indexName })
         };
 
         Assert.Throws<OptionsValidationException>(() => CreateCatalog(options));
@@ -214,7 +214,7 @@ public sealed class PipelineCatalogTests
     {
         var catalog = CreateCatalog(new PipelineCatalogOptions
         {
-            RabbitMqConnections = Connections(), Pipelines = [ValidPipeline() with { RulesIndex = indexName }]
+            RabbitMqConnections = Connections(), Pipelines = Entries(ValidPipeline() with { RulesIndex = indexName })
         });
         Assert.Equal(new RuleSource(indexName, "asd"), catalog.Resolve("asd"));
     }
@@ -224,20 +224,20 @@ public sealed class PipelineCatalogTests
     {
         var options = new PipelineCatalogOptions
         {
-            RabbitMqConnections = Connections(), Pipelines = [ValidPipeline() with { PipelineId = "as\u0001d" }]
+            RabbitMqConnections = Connections(), Pipelines = Entries(ValidPipeline() with { PipelineId = "as\u0001d" })
         };
         var pipelineError = Assert.Throws<OptionsValidationException>(() => CreateCatalog(options));
-        Assert.Contains("PipelineId", pipelineError.Message, StringComparison.Ordinal);
+        Assert.Contains("pipeline ID", pipelineError.Message, StringComparison.Ordinal);
 
         var invalidReference = "asd\u0001broker";
         options.RabbitMqConnections = new()
         {
             [invalidReference] = new() { Hostname = "localhost", Username = "guest", Password = "guest" }
         };
-        options.Pipelines = [WithRabbit(ValidPipeline(), new()
+        options.Pipelines = Entries(WithRabbit(ValidPipeline(), new()
         {
             ConnectionRef = invalidReference, Output = new() { QueueName = "publisher" }
-        })];
+        }));
         var connectionError = Assert.Throws<OptionsValidationException>(() => CreateCatalog(options));
         Assert.Contains("control characters", connectionError.Message, StringComparison.Ordinal);
     }
@@ -251,15 +251,17 @@ public sealed class PipelineCatalogTests
     [InlineData("a?b")]
     [InlineData("a#b")]
     [InlineData("a%b")]
+    [InlineData("a__b")]
+    [InlineData("asd_")]
     [InlineData(".")]
     [InlineData("..")]
     public void PipelineIdsMustBeUnambiguousSingleUrlPathSegments(string pipelineId)
     {
         var error = Assert.Throws<OptionsValidationException>(() => CreateCatalog(new PipelineCatalogOptions
         {
-            RabbitMqConnections = Connections(), Pipelines = [ValidPipeline() with { PipelineId = pipelineId }]
+            RabbitMqConnections = Connections(), Pipelines = Entries(ValidPipeline() with { PipelineId = pipelineId })
         }));
-        Assert.Contains("PipelineId", error.Message, StringComparison.Ordinal);
+        Assert.Contains("pipeline ID", error.Message, StringComparison.Ordinal);
         Assert.Contains("URL path segment", error.Message, StringComparison.Ordinal);
     }
 
@@ -272,7 +274,7 @@ public sealed class PipelineCatalogTests
     {
         var catalog = CreateCatalog(new PipelineCatalogOptions
         {
-            RabbitMqConnections = Connections(), Pipelines = [ValidPipeline() with { PipelineId = pipelineId }]
+            RabbitMqConnections = Connections(), Pipelines = Entries(ValidPipeline() with { PipelineId = pipelineId })
         });
         Assert.Equal(pipelineId, catalog.GetRequired(pipelineId).PipelineId);
     }
@@ -283,14 +285,14 @@ public sealed class PipelineCatalogTests
         var options = new PipelineCatalogOptions
         {
             RabbitMqConnections = Connections(),
-            Pipelines = [ValidPipeline() with { RulesIndex = new string('\u05d0', 128) }]
+            Pipelines = Entries(ValidPipeline() with { RulesIndex = new string('\u05d0', 128) })
         };
 
         Assert.Throws<OptionsValidationException>(() => CreateCatalog(options));
-        options.Pipelines[0] = ValidPipeline() with { RulesIndex = new string('a', 255) };
-        Assert.Equal(options.Pipelines[0].RulesIndex, CreateCatalog(options).Resolve("asd").IndexName);
-        options.Pipelines[0] = ValidPipeline() with { RulesIndex = new string('\u05d0', 127) + "a" };
-        Assert.Equal(options.Pipelines[0].RulesIndex, CreateCatalog(options).Resolve("asd").IndexName);
+        options.Pipelines["asd"] = ValidPipeline() with { RulesIndex = new string('a', 255) };
+        Assert.Equal(options.Pipelines["asd"].RulesIndex, CreateCatalog(options).Resolve("asd").IndexName);
+        options.Pipelines["asd"] = ValidPipeline() with { RulesIndex = new string('\u05d0', 127) + "a" };
+        Assert.Equal(options.Pipelines["asd"].RulesIndex, CreateCatalog(options).Resolve("asd").IndexName);
     }
 
     [Theory]
@@ -318,9 +320,9 @@ public sealed class PipelineCatalogTests
     [Theory]
     [InlineData("PipelineCatalog:Environment", "prod", "Environment")]
     [InlineData("PipelineCatalog:IntegrationRulesIndex", "rules-integ", "IntegrationRulesIndex")]
-    [InlineData("PipelineCatalog:Pipelines:0:ProductionRulesIndex", "asd-rules-prod", "ProductionRulesIndex")]
-    [InlineData("PipelineCatalog:Pipelines:0:RuelsIndex", "rules-integ", "RuelsIndex")]
-    [InlineData("PipelineCatalog:Pipelines:0:DisplayName", "ASD", "DisplayName")]
+    [InlineData("PipelineCatalog:Pipelines:asd:ProductionRulesIndex", "asd-rules-prod", "ProductionRulesIndex")]
+    [InlineData("PipelineCatalog:Pipelines:asd:RuelsIndex", "rules-integ", "RuelsIndex")]
+    [InlineData("PipelineCatalog:Pipelines:asd:DisplayName", "ASD", "DisplayName")]
     public async Task RemovedOrMisspelledConfigurationKeysFailHostStartup(
         string key, string value, string invalidProperty)
     {
@@ -357,17 +359,17 @@ public sealed class PipelineCatalogTests
     }
 
     [Theory]
-    [InlineData("PipelineCatalog:Pipelines:0:ContractId", "unknown")]
-    [InlineData("PipelineCatalog:Pipelines:0:Transport:Kind", "unsupported")]
-    [InlineData("PipelineCatalog:Pipelines:0:Transport:RabbitMq:Output:QueueName", "")]
-    [InlineData("PipelineCatalog:Pipelines:0:Transport:RabbitMq:Output:QueueName", "amq.reserved")]
-    [InlineData("PipelineCatalog:Pipelines:0:RulesIndex", "RULES")]
-    [InlineData("PipelineCatalog:Pipelines:0:RulesIndex", "rules-*")]
+    [InlineData("PipelineCatalog:Pipelines:asd:ContractId", "unknown")]
+    [InlineData("PipelineCatalog:Pipelines:asd:Transport:Kind", "unsupported")]
+    [InlineData("PipelineCatalog:Pipelines:asd:Transport:RabbitMq:Output:QueueName", "")]
+    [InlineData("PipelineCatalog:Pipelines:asd:Transport:RabbitMq:Output:QueueName", "amq.reserved")]
+    [InlineData("PipelineCatalog:Pipelines:asd:RulesIndex", "RULES")]
+    [InlineData("PipelineCatalog:Pipelines:asd:RulesIndex", "rules-*")]
     public async Task InvalidDisabledConfigurationFailsHostStartupEvenWhenCatalogIsNotResolved(
         string key, string value)
     {
         var configuration = ValidConfiguration();
-        configuration["PipelineCatalog:Pipelines:0:Enabled"] = "false";
+        configuration["PipelineCatalog:Pipelines:asd:Enabled"] = "false";
         configuration[key] = value;
         var builder = Host.CreateApplicationBuilder();
         builder.Configuration.Sources.Clear();
@@ -379,16 +381,22 @@ public sealed class PipelineCatalogTests
         await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
     }
 
+    private static Dictionary<string, PipelineSettings> Entries(params PipelineDefinition[] pipelines) =>
+        pipelines.ToDictionary(pipeline => pipeline.PipelineId, pipeline => (PipelineSettings)pipeline, StringComparer.Ordinal);
+
     private static PipelineCatalog CreateCatalog(PipelineCatalogOptions options) =>
         new(Options.Create(options), CreateRegistry(), NullLogger<PipelineCatalog>.Instance);
 
     private static IPipelineContractRegistry CreateRegistry()
     {
         var active = new Mock<IPipelineContract>();
+        active.Setup(contract => contract.ValidateExtraData(It.IsAny<System.Text.Json.JsonElement>())).Returns([]);
         active.SetupGet(contract => contract.ContractId).Returns("asd");
         var unused = new Mock<IPipelineContract>();
+        unused.Setup(contract => contract.ValidateExtraData(It.IsAny<System.Text.Json.JsonElement>())).Returns([]);
         unused.SetupGet(contract => contract.ContractId).Returns("unused");
         var http = new Mock<IPipelineContract>();
+        http.Setup(contract => contract.ValidateExtraData(It.IsAny<System.Text.Json.JsonElement>())).Returns([]);
         http.SetupGet(contract => contract.ContractId).Returns("http");
         return new PipelineContractRegistry([active.Object, http.Object, unused.Object]);
     }
@@ -421,14 +429,13 @@ public sealed class PipelineCatalogTests
         ["PipelineCatalog:RabbitMqConnections:asd-broker:Hostname"] = "localhost",
         ["PipelineCatalog:RabbitMqConnections:asd-broker:Username"] = "guest",
         ["PipelineCatalog:RabbitMqConnections:asd-broker:Password"] = "guest",
-        ["PipelineCatalog:Pipelines:0:PipelineId"] = "asd",
-        ["PipelineCatalog:Pipelines:0:Enabled"] = "true",
-        ["PipelineCatalog:Pipelines:0:ContractId"] = "asd",
-        ["PipelineCatalog:Pipelines:0:RulesIndex"] = "rules-integ",
-        ["PipelineCatalog:Pipelines:0:Transport:Kind"] = "rabbitmq",
-        ["PipelineCatalog:Pipelines:0:Transport:RabbitMq:ConnectionRef"] = "asd-broker",
-        ["PipelineCatalog:Pipelines:0:Transport:RabbitMq:Output:ExchangeSettings:ExchangeName"] = "",
-        ["PipelineCatalog:Pipelines:0:Transport:RabbitMq:Output:QueueName"] = "publisher"
+        ["PipelineCatalog:Pipelines:asd:Enabled"] = "true",
+        ["PipelineCatalog:Pipelines:asd:ContractId"] = "asd",
+        ["PipelineCatalog:Pipelines:asd:RulesIndex"] = "rules-integ",
+        ["PipelineCatalog:Pipelines:asd:Transport:Kind"] = "rabbitmq",
+        ["PipelineCatalog:Pipelines:asd:Transport:RabbitMq:ConnectionRef"] = "asd-broker",
+        ["PipelineCatalog:Pipelines:asd:Transport:RabbitMq:Output:ExchangeSettings:ExchangeName"] = "",
+        ["PipelineCatalog:Pipelines:asd:Transport:RabbitMq:Output:QueueName"] = "publisher"
     };
 
     private static Dictionary<string, RabbitMqConnectionOptions> Connections() => new(StringComparer.Ordinal)

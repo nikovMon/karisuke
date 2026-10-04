@@ -17,7 +17,7 @@ public sealed class PipelineExtraDataTests
         var options = OptionsWith(extra);
         var catalog = new Catalog(Options.Create(options), new PipelineContractRegistry([new AsdPipelineContract()]), NullLogger<Catalog>.Instance);
 
-        options.Pipelines[0] = options.Pipelines[0] with { ExtraData = PipelineExtraData.Parse("{\"changed\":true}") };
+        options.Pipelines["asd"] = options.Pipelines["asd"] with { ExtraData = PipelineExtraData.Parse("{\"changed\":true}") };
         var data = catalog.GetRequired("asd").ExtraData.Value;
 
         Assert.Equal(JsonValueKind.String, data.GetProperty("text").ValueKind);
@@ -45,10 +45,10 @@ public sealed class PipelineExtraDataTests
 
     private static PipelineCatalogOptions OptionsWith(PipelineExtraData extra) => new()
     {
-        Pipelines = [new()
+        Pipelines = new() { ["asd"] = new()
         {
-            PipelineId = "asd", ContractId = "asd", Enabled = true, RulesIndex = "asd-integ-pipeline-index",
+            ContractId = "asd", Enabled = true, RulesIndex = "asd-integ-pipeline-index",
             ExtraData = extra, Transport = new() { Kind = "http", Http = new() { Endpoint = "https://example.invalid/" } }
-        }]
+        } }
     };
 }
