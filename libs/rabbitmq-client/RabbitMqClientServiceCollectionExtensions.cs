@@ -55,6 +55,25 @@ public static class RabbitMqClientServiceCollectionExtensions
         return services;
     }
 
+    /// <summary>
+    /// Registers <see cref="IRabbitMqDestinationPublisher"/>. It does not require the <c>RabbitMq</c>
+    /// section: connections and destinations are supplied per publish.
+    /// </summary>
+    public static IServiceCollection AddRabbitMqDestinationPublisher(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        RabbitMqNativeTracing.Configure();
+
+        services.AddOptions<RabbitMqDestinationPublisherOptions>()
+            .Bind(configuration.GetSection(RabbitMqDestinationPublisherOptions.SectionName))
+            .Validate(options => options.IsValid(out _), "RabbitMq DestinationPublisher configuration is invalid.")
+            .ValidateOnStart();
+
+        services.TryAddSingleton<IRabbitMqDestinationPublisher, RabbitMqDestinationPublisher>();
+        return services;
+    }
+
     private static bool HasInputCluster(IConfiguration configuration) =>
         configuration
             .GetSection(RabbitMqClientOptions.SectionName)
