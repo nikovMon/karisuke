@@ -7,5 +7,6 @@
     <ProjectReference Include="..\..\libs\pipeline-catalog\ImagingPipeline.PipelineCatalog.csproj" />
     <ProjectReference Include="..\..\libs\pipeline-contracts\ImagingPipeline.PipelineContracts.csproj" />
     <ProjectReference Include="..\..\libs\observability\ImagingPipeline.Observability.csproj" />
+    <ProjectReference Include="..\..\libs\rabbitmq-client\RabbitMqClient.csproj" />
   </ItemGroup>
 </Project>

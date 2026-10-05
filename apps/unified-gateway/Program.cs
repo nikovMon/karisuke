@@ -1,7 +1,9 @@
 using ImagingPipeline.Observability;
 using ImagingPipeline.PipelineCatalog;
 using ImagingPipeline.PipelineContracts;
+using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.UnifiedGateway.Configuration;
+using ImagingPipeline.UnifiedGateway.Dispatch;
 using ImagingPipeline.UnifiedGateway.Processing;
 
 namespace ImagingPipeline.UnifiedGateway;
@@ -21,6 +23,9 @@ public sealed partial class Program
         builder.Services.AddSingleton<IPipelineContractRegistry, PipelineContractRegistry>();
         builder.Services.AddPipelineCatalog(builder.Configuration);
         builder.Services.AddSingleton<PipelineWorkPreparer>();
+        builder.Services.AddRabbitMqDestinationPublisher(builder.Configuration);
+        builder.Services.AddSingleton<IDispatchTransport, RabbitMqDispatchTransport>();
+        builder.Services.AddSingleton<PipelineDispatcher>();
 
         var app = builder.Build();
         var catalog = app.Services.GetRequiredService<IPipelineCatalog>();
