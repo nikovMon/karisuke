@@ -2,7 +2,7 @@
 
 This Nx application implements the **Catalog & Contracts Foundation** ticket. It hosts a validated pipeline catalog and prepares contract payloads for an already matched pipeline. The existing gateway and Rules API retain their current behavior.
 
-**Transport & Dispatch is in progress.** The dispatch core and the RabbitMQ transport exist (see [Dispatch](#dispatch)), but nothing calls them yet: there is no source consumer and no HTTP transport, so starting the application does not open broker connections or contact downstream endpoints.
+**Transport & Dispatch is in progress.** The dispatch core and the RabbitMQ and HTTP transports exist (see [Dispatch](#dispatch)), but nothing calls them yet: there is no source consumer, so starting the application does not open broker connections or contact downstream endpoints.
 
 ## Retained features
 
@@ -190,6 +190,20 @@ A `DispatchUnit` is prepared work plus:
 
 Transports implement `IDispatchTransport` and are selected by the catalog's `Transport.Kind`. `RabbitMqDispatchTransport` resolves each enabled `rabbitmq` pipeline's output and named connection once, at startup, and publishes through `IRabbitMqDestinationPublisher` from `libs/rabbitmq-client`. The broker connection comes from the catalog only; the application needs no `RabbitMq` output settings. Published headers are the contract's string attributes, then its typed RabbitMQ attributes (which win on a name clash), plus the source's `findair-started-at-unix-ms`. Trace context is injected from the current span; no other source headers are forwarded.
 
+`HttpDispatchTransport` sends each unit as one request to its enabled `http` pipeline's catalog `Endpoint`, with the catalog `Method`, from inside the message handler:
+
+- **Body:** the payload bytes, with the contract's content type.
+- **Headers:** the catalog `Headers`, then the contract's string attributes, then `Idempotency-Key: {DispatchId}`. Later entries win on a name clash. The receiving endpoint should deduplicate on `Idempotency-Key`, because a retried source message sends the same unit again.
+- **Timeout:** `TimeoutSeconds` bounds the whole request, including connection setup. The shared `HttpClient` has no timeout of its own, and redirects are not followed.
+
+| Result | Outcome |
+|---|---|
+| 2xx | `Delivered` |
+| 408, 429, 5xx, timeout, connection failure | `Retryable` |
+| Any other status, including 3xx | `Rejected` |
+
+`Retry-After` is not honoured: a retryable unit makes the whole source message use the existing retry queues and their fixed delays. A slow endpoint holds a consumer slot for up to its timeout, so keep `TimeoutSeconds` short.
+
 `IDispatchDeliveryListener` registrations are notified after each confirmed delivery, for example to record a unit as already processed. A listener failure is logged and does not change the outcome.
 
 Metrics: `unified_gateway.dispatch.units` and `unified_gateway.dispatch.duration`, tagged with pipeline ID, transport kind and outcome. Each unit has a `unified_gateway.dispatch` span.
@@ -204,6 +218,6 @@ The host uses the same observability bootstrap as the regular gateway, with a di
 
 ## Later tickets
 
-The Rule Engine ticket owns Elasticsearch rule loading, validation of rule documents, matching and refreshable snapshots, with no spatial index. The rest of the Transport & Dispatch ticket covers the HTTP transport, input consumption, and acknowledgement, retry and dead-letter handling of source messages.
+The Rule Engine ticket owns Elasticsearch rule loading, validation of rule documents, matching and refreshable snapshots, with no spatial index. The rest of the Transport & Dispatch ticket covers input consumption, and acknowledgement, retry and dead-letter handling of source messages.
 
 Retry reuses the existing per-message mechanism of `libs/rabbitmq-client`: if any unit is retryable, the whole source message is retried and matched again, so units that were already delivered are sent again with the same dispatch ID. A per-pipeline record of delivered units, plugged in through `IDispatchDeliveryListener`, can later skip them.

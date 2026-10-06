@@ -51,7 +51,7 @@ internal static class DispatchTestData
         }
     };
 
-    public static PipelineDefinition HttpPipeline(string id) => new()
+    public static PipelineDefinition HttpPipeline(string id, HttpTransportOptions? http = null) => new()
     {
         PipelineId = id,
         ContractId = "asd",
@@ -60,7 +60,7 @@ internal static class DispatchTestData
         Transport = new PipelineTransportOptions
         {
             Kind = "http",
-            Http = new HttpTransportOptions { Endpoint = "https://example.invalid/work" }
+            Http = http ?? new HttpTransportOptions { Endpoint = "https://example.invalid/work" }
         }
     };
 

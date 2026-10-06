@@ -25,6 +25,11 @@ public sealed partial class Program
         builder.Services.AddSingleton<PipelineWorkPreparer>();
         builder.Services.AddRabbitMqDestinationPublisher(builder.Configuration);
         builder.Services.AddSingleton<IDispatchTransport, RabbitMqDispatchTransport>();
+        // Redirects are not followed and the catalog timeout is applied per request by the transport.
+        builder.Services.AddHttpClient(HttpDispatchTransport.HttpClientName)
+            .ConfigureHttpClient(client => client.Timeout = Timeout.InfiniteTimeSpan)
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
+        builder.Services.AddSingleton<IDispatchTransport, HttpDispatchTransport>();
         builder.Services.AddSingleton<PipelineDispatcher>();
 
         var app = builder.Build();
