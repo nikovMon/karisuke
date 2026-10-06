@@ -72,8 +72,9 @@ internal sealed class DispatchTelemetry : IDisposable
         _span.Failed(outcome.Error, outcome.Exception, recordException: false);
         using (_logger.BeginScope(new KeyValuePair<string, object?>[]
                {
-                   new(TelemetryAttributeNames.PipelineOutcome, Value(telemetryOutcome)),
-                   new("error.type", Value(outcome.Error)),
+                   new(TelemetryAttributeNames.PipelineOutcome, telemetryOutcome.Value()),
+                   // findair.error.category, not error.type: in logs error.type holds the exception class.
+                   new(TelemetryAttributeNames.ErrorCategory, outcome.Error.Value()),
                    // Mapped to http.response.status_code in ECS logs.
                    new("StatusCode", outcome.StatusCode)
                }))
@@ -102,26 +103,14 @@ internal sealed class DispatchTelemetry : IDisposable
         {
             { TelemetryAttributeNames.PipelineId, _unit.PipelineId },
             { TelemetryAttributeNames.PipelineTransport, _unit.TransportKind },
-            { TelemetryAttributeNames.PipelineOutcome, Value(outcome) }
+            { TelemetryAttributeNames.PipelineOutcome, outcome.Value() }
         };
         if (error != TelemetryErrorCategory.None)
         {
-            tags.Add("error.type", Value(error));
+            tags.Add("error.type", error.Value());
         }
 
         Units.Add(1, tags);
         Duration.Record(Stopwatch.GetElapsedTime(_started).TotalSeconds, tags);
     }
-
-    // The library's own value mapping is internal; these produce the same strings that
-    // SetTelemetryOutcome and Failed put on the span.
-    private static string Value(TelemetryOutcome outcome) => outcome switch
-    {
-        TelemetryOutcome.Success => "success",
-        TelemetryOutcome.Retry => "retry",
-        TelemetryOutcome.Rejected => "rejected",
-        _ => "cancelled"
-    };
-
-    private static string Value(TelemetryErrorCategory error) => error.ToString().ToLowerInvariant();
 }

@@ -71,7 +71,7 @@ public sealed class DispatchTelemetryTests
         Assert.Equal("Pipeline dispatch failed.", log.Message);
         Assert.Same(failure, log.Exception);
         Assert.Equal("rejected", log.Fields[TelemetryAttributeNames.PipelineOutcome]);
-        Assert.Equal("validation", log.Fields["error.type"]);
+        Assert.Equal("validation", log.Fields[TelemetryAttributeNames.ErrorCategory]);
         Assert.Equal(422, log.Fields["StatusCode"]);
         Assert.Equal("algo", log.Fields[TelemetryAttributeNames.PipelineId]);
         Assert.Equal(unit.DispatchId, log.Fields["messaging.message.id"]);

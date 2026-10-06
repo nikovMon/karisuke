@@ -104,7 +104,7 @@ public sealed class EcsHttpLoggingTests
     }
 
     [Fact]
-    public async Task Serializer_MapsPipelineDispatchFieldsToTheSameNamesAsSpansAndMetrics()
+    public async Task Serializer_MapsPipelineDispatchFieldsWithoutReplacingTheExceptionType()
     {
         var options = CreateOptions();
         var buffer = new EcsLogBuffer(options);
@@ -117,10 +117,10 @@ public sealed class EcsHttpLoggingTests
             [TelemetryAttributeNames.PipelineId] = "algo",
             [TelemetryAttributeNames.PipelineTransport] = "http",
             [TelemetryAttributeNames.PipelineOutcome] = "rejected",
-            ["error.type"] = "validation",
+            [TelemetryAttributeNames.ErrorCategory] = "validation",
             ["StatusCode"] = 422
         });
-        logger.LogWarning("Pipeline dispatch failed.");
+        logger.LogWarning(new InvalidOperationException("endpoint said no"), "Pipeline dispatch failed.");
 
         var logEvent = await buffer.ReadAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
         Assert.NotNull(logEvent);
@@ -133,7 +133,11 @@ public sealed class EcsHttpLoggingTests
         Assert.Equal("algo", document.GetProperty("pipeline").GetProperty("id").GetString());
         Assert.Equal("http", document.GetProperty("pipeline").GetProperty("transport").GetString());
         Assert.Equal("rejected", document.GetProperty("findair").GetProperty("outcome").GetString());
-        Assert.Equal("validation", document.GetProperty("error").GetProperty("type").GetString());
+        Assert.Equal("validation", document.GetProperty("findair").GetProperty("error").GetProperty("category").GetString());
+        // The exception class stays in error.type; a category field must not replace it.
+        Assert.Equal(
+            typeof(InvalidOperationException).FullName,
+            document.GetProperty("error").GetProperty("type").GetString());
         Assert.Equal(422, document.GetProperty("http").GetProperty("response").GetProperty("status_code").GetInt32());
         Assert.False(document.TryGetProperty("labels", out _));
     }

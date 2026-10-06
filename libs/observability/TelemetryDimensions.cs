@@ -128,7 +128,7 @@ public enum RulesOperation
     Health
 }
 
-internal static class TelemetryDimensionValues
+public static class TelemetryDimensionValues
 {
     public static string Value(this TelemetryOutcome value) => value switch
     {

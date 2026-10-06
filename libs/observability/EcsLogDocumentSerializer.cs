@@ -54,7 +54,8 @@ internal static class EcsLogDocumentSerializer
             [TelemetryAttributeNames.PipelineId] = TelemetryAttributeNames.PipelineId,
             [TelemetryAttributeNames.PipelineTransport] = TelemetryAttributeNames.PipelineTransport,
             [TelemetryAttributeNames.PipelineOutcome] = TelemetryAttributeNames.PipelineOutcome,
-            ["error.type"] = "error.type"
+            // Not error.type: the exporter writes the exception class there.
+            [TelemetryAttributeNames.ErrorCategory] = TelemetryAttributeNames.ErrorCategory
         };
 
     public static byte[] SerializeBatch(
