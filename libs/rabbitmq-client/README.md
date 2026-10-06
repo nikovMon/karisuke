@@ -256,9 +256,10 @@ confirmations, and awaits the confirmation before returning.
 ## Publish to destinations on other brokers
 
 `IRabbitMqDestinationPublisher` publishes to a destination supplied with each call,
-on that destination's own broker connection. It is independent of the `RabbitMq`
-section, so an app can consume from one configuration and publish to brokers and
-queues described elsewhere (for example, a per-pipeline catalog).
+on that destination's own broker connection. Brokers and queues come from the caller
+(for example, a per-pipeline catalog), not from the `RabbitMq` section. From that
+section it reads only `PublisherChannelPoolSize` and `ReconnectDelaySeconds`; the
+section may be absent, in which case the defaults apply.
 
 ```csharp
 builder.Services.AddRabbitMqDestinationPublisher(builder.Configuration);
@@ -275,17 +276,6 @@ var destination = new RabbitMqDestination
 };
 
 await publisher.PublishAsync(destination, message, cancellationToken);
-```
-
-```json
-{
-  "RabbitMq": {
-    "DestinationPublisher": {
-      "PublisherChannelPoolSize": 4,
-      "ReconnectDelaySeconds": 5
-    }
-  }
-}
 ```
 
 - One connection and one confirmed-channel pool are created lazily per distinct

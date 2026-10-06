@@ -206,12 +206,12 @@ public sealed class RabbitMqDestinationPublisherTests
     }
 
     [Fact]
-    public async Task AddRabbitMqDestinationPublisherRegistersPublisherWithoutRabbitMqSection()
+    public async Task AddRabbitMqDestinationPublisherRegistersPublisherAndReadsPoolSizeFromRabbitMqSection()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["RabbitMq:DestinationPublisher:PublisherChannelPoolSize"] = "8"
+                ["RabbitMq:PublisherChannelPoolSize"] = "8"
             })
             .Build();
         var services = new ServiceCollection().AddLogging();
@@ -220,17 +220,17 @@ public sealed class RabbitMqDestinationPublisherTests
         await using var provider = services.BuildServiceProvider();
 
         Assert.IsType<RabbitMqDestinationPublisher>(provider.GetRequiredService<IRabbitMqDestinationPublisher>());
-        Assert.Equal(8, provider.GetRequiredService<IOptions<RabbitMqDestinationPublisherOptions>>().Value.PublisherChannelPoolSize);
+        Assert.Equal(8, provider.GetRequiredService<IOptions<RabbitMqClientOptions>>().Value.PublisherChannelPoolSize);
         Assert.Null(provider.GetService<IRabbitMqPublisher>());
     }
 
     [Fact]
-    public async Task InvalidDestinationPublisherOptionsFailWhenOptionsAreResolved()
+    public async Task InvalidPublisherChannelPoolSizeFailsWhenOptionsAreResolved()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["RabbitMq:DestinationPublisher:PublisherChannelPoolSize"] = "0"
+                ["RabbitMq:PublisherChannelPoolSize"] = "0"
             })
             .Build();
         var services = new ServiceCollection().AddLogging();
@@ -238,11 +238,11 @@ public sealed class RabbitMqDestinationPublisherTests
         await using var provider = services.BuildServiceProvider();
 
         Assert.Throws<OptionsValidationException>(
-            () => provider.GetRequiredService<IOptions<RabbitMqDestinationPublisherOptions>>().Value);
+            () => provider.GetRequiredService<IOptions<RabbitMqClientOptions>>().Value);
     }
 
     private static RabbitMqDestinationPublisher CreatePublisher(FakeConnections connections) =>
-        new(Options.Create(new RabbitMqDestinationPublisherOptions()), connections.Create);
+        new(Options.Create(new RabbitMqClientOptions()), connections.Create);
 
     private static RabbitMqDestination Queue(string queueName) =>
         new() { Connection = AsdBroker, QueueName = queueName };

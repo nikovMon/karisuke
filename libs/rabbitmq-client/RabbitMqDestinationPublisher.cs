@@ -9,7 +9,7 @@ namespace ImagingPipeline.RabbitMqClient;
 
 internal sealed class RabbitMqDestinationPublisher : IRabbitMqDestinationPublisher, IAsyncDisposable
 {
-    private readonly RabbitMqDestinationPublisherOptions _options;
+    private readonly RabbitMqClientOptions _options;
     private readonly Func<RabbitMqDestinationConnection, IRabbitMqConnectionManager> _connectionManagerFactory;
     private readonly ConcurrentDictionary<RabbitMqDestinationConnection, Lazy<Route>> _routes = new();
     // A leased channel is used by one publish at a time, so each per-channel set needs no locking.
@@ -17,7 +17,7 @@ internal sealed class RabbitMqDestinationPublisher : IRabbitMqDestinationPublish
     private int _disposed;
 
     public RabbitMqDestinationPublisher(
-        IOptions<RabbitMqDestinationPublisherOptions> options,
+        IOptions<RabbitMqClientOptions> options,
         ILogger<RabbitMqConnectionManager> connectionLogger)
         : this(
             options,
@@ -29,7 +29,7 @@ internal sealed class RabbitMqDestinationPublisher : IRabbitMqDestinationPublish
     }
 
     internal RabbitMqDestinationPublisher(
-        IOptions<RabbitMqDestinationPublisherOptions> options,
+        IOptions<RabbitMqClientOptions> options,
         Func<RabbitMqDestinationConnection, IRabbitMqConnectionManager> connectionManagerFactory)
     {
         _options = options.Value;
