@@ -191,6 +191,54 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
     }
 
     [RabbitMqBrokerFact]
+    public async Task RetriedMessageReturnsToInputWithItsOriginalHeaders()
+    {
+        var topology = CreateTopology();
+        var configuration = BuildConfiguration(topology, new Dictionary<string, string?>
+        {
+            ["RabbitMq:RetryDelayMilliseconds"] = "100"
+        });
+        await using var provider = BuildProvider(configuration);
+        var consumer = provider.GetRequiredService<IRabbitMqConsumer>();
+        var handler = new RetryTwiceThenSucceedHandler();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        // Leasing a publisher channel declares the topology before the direct publish below.
+        await using (await provider.GetRequiredService<IRabbitMqPublisherChannelPool>().LeaseAsync(cts.Token))
+        {
+        }
+
+        var consumerTask = consumer.ConsumeAsync(handler, cts.Token);
+        // Upstream producers publish straight to the input queue with headers this library
+        // does not know about; the gateway gates on x-updated-fields.
+        await PublishDirectlyToQueueAsync(
+            topology.InputQueue,
+            "retry-me",
+            new Dictionary<string, object?>
+            {
+                ["x-updated-fields"] = new List<object> { "gridType" },
+                ["business-header"] = "kept-for-retry"
+            },
+            cts.Token);
+
+        var deliveries = await handler.WaitForThirdDeliveryAsync(cts.Token);
+        await StopConsumerAsync(consumerTask, cts);
+
+        Assert.All(deliveries, headers =>
+        {
+            var updatedFields = Assert.IsAssignableFrom<IList<object>>(headers["x-updated-fields"]);
+            Assert.Equal("gridType", Encoding.UTF8.GetString(Assert.IsType<byte[]>(Assert.Single(updatedFields))));
+            Assert.Equal("kept-for-retry", Encoding.UTF8.GetString(Assert.IsType<byte[]>(headers["business-header"])));
+        });
+        Assert.Equal([0, 1, 2], deliveries.Select(headers =>
+        {
+            Assert.True(RabbitMqRetryMessageBuilder.TryReadRetryCount(headers, "x-retry-count", out var retryCount));
+            return retryCount;
+        }));
+        Assert.Null(await BasicGetAsync(topology.DeadLetterQueue, CancellationToken.None));
+    }
+
+    [RabbitMqBrokerFact]
     public async Task HandlerExceptionWithInvalidRetryCountHeaderIsDeadLetteredByBroker()
     {
         var topology = CreateTopology();
@@ -585,6 +633,23 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
             cancellationToken: cancellationToken);
     }
 
+    private static async Task PublishDirectlyToQueueAsync(
+        string queue,
+        string body,
+        IDictionary<string, object?> headers,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = await CreateConnectionAsync(cancellationToken);
+        await using var channel = await connection.CreateChannelAsync(cancellationToken: cancellationToken);
+        await channel.BasicPublishAsync(
+            exchange: string.Empty,
+            routingKey: queue,
+            mandatory: true,
+            basicProperties: new BasicProperties { Headers = headers },
+            body: Encoding.UTF8.GetBytes(body),
+            cancellationToken: cancellationToken);
+    }
+
     private static async Task<string?> BasicGetAsync(string queue, CancellationToken cancellationToken)
     {
         var result = await BasicGetEnvelopeAsync(queue, cancellationToken);
@@ -755,6 +820,40 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
             _concurrencyReached.Task.WaitAsync(cancellationToken);
 
         public void Release() => _release.TrySetResult();
+    }
+
+    private sealed class RetryTwiceThenSucceedHandler : IRabbitMqMessageHandler
+    {
+        private readonly List<IReadOnlyDictionary<string, object?>> _deliveries = [];
+        private readonly TaskCompletionSource _thirdDelivery =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<RabbitMqMessageProcessingResult> HandleAsync(
+            RabbitMqMessageEnvelope message,
+            CancellationToken cancellationToken = default)
+        {
+            lock (_deliveries)
+            {
+                _deliveries.Add(message.Headers ?? new Dictionary<string, object?>());
+                if (_deliveries.Count < 3)
+                {
+                    return Task.FromResult(RabbitMqMessageProcessingResult.RetryableFailure("transient"));
+                }
+            }
+
+            _thirdDelivery.TrySetResult();
+            return Task.FromResult(RabbitMqMessageProcessingResult.Success());
+        }
+
+        public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> WaitForThirdDeliveryAsync(
+            CancellationToken cancellationToken)
+        {
+            await _thirdDelivery.Task.WaitAsync(cancellationToken);
+            lock (_deliveries)
+            {
+                return [.. _deliveries];
+            }
+        }
     }
 
     private sealed class ThrowingHandler : IRabbitMqMessageHandler

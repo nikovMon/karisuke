@@ -27,6 +27,7 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
             _options.EffectiveInputRoutingKey,
             message,
             resetRetryCount: false,
+            preserveHeaders: false,
             cancellationToken);
 
     public Task PublishToOutputAsync(RabbitMqMessageEnvelope message, CancellationToken cancellationToken = default) =>
@@ -36,6 +37,7 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
             _options.EffectiveOutputRoutingKey,
             message,
             resetRetryCount: true,
+            preserveHeaders: false,
             cancellationToken);
 
     public Task PublishAsync(
@@ -49,13 +51,17 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
             routingKey,
             message,
             resetRetryCount: false,
+            preserveHeaders: TargetsRetry(exchange, routingKey),
             cancellationToken);
 
     private bool TargetsInputCluster(string exchange, string routingKey) =>
         (string.Equals(exchange, _options.InputExchange, StringComparison.Ordinal) &&
             string.Equals(routingKey, _options.EffectiveInputRoutingKey, StringComparison.Ordinal)) ||
-        (string.Equals(exchange, _options.RetryExchange, StringComparison.Ordinal) &&
-            string.Equals(routingKey, _options.EffectiveRetryRoutingKey, StringComparison.Ordinal));
+        TargetsRetry(exchange, routingKey);
+
+    private bool TargetsRetry(string exchange, string routingKey) =>
+        string.Equals(exchange, _options.RetryExchange, StringComparison.Ordinal) &&
+        string.Equals(routingKey, _options.EffectiveRetryRoutingKey, StringComparison.Ordinal);
 
     private async Task PublishCoreAsync(
         IRabbitMqPublisherChannelPool channels,
@@ -63,6 +69,7 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
         string routingKey,
         RabbitMqMessageEnvelope message,
         bool resetRetryCount,
+        bool preserveHeaders,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(message);
@@ -78,7 +85,12 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
 
         try
         {
-            var headers = FilterOutboundHeaders(message.Headers, _options.RetryCountHeader);
+            // A retry copy is the same message returning to the same service after the retry
+            // delay, so it keeps every inbound header the handler may depend on (for example the
+            // gateway's x-updated-fields). Everything else leaves through the outbound whitelist.
+            var headers = preserveHeaders
+                ? RabbitMqHeaders.Clone(message.Headers)
+                : FilterOutboundHeaders(message.Headers, _options.RetryCountHeader);
             if (resetRetryCount)
             {
                 ResetRetryCount(headers, _options.RetryCountHeader);
