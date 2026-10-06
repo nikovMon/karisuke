@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Net;
 using System.Net.Http.Headers;
+using ImagingPipeline.Observability;
 using ImagingPipeline.PipelineCatalog;
 
 namespace ImagingPipeline.UnifiedGateway.Dispatch;
@@ -33,7 +34,8 @@ public sealed class HttpDispatchTransport : IDispatchTransport
         ArgumentNullException.ThrowIfNull(unit);
         if (!_endpoints.TryGetValue(unit.PipelineId, out var endpoint))
         {
-            return DispatchOutcome.Rejected(unit, "No HTTP endpoint is configured for an enabled pipeline with this ID.");
+            // Only an enabled pipeline whose catalog transport is http has an endpoint.
+            return DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Handler);
         }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -51,11 +53,11 @@ public sealed class HttpDispatchTransport : IDispatchTransport
         }
         catch (OperationCanceledException ex)
         {
-            return DispatchOutcome.Retryable(unit, $"HTTP request timed out after {endpoint.TimeoutSeconds}s.", ex);
+            return DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Timeout, ex);
         }
         catch (HttpRequestException ex)
         {
-            return DispatchOutcome.Retryable(unit, $"HTTP request failed: {ex.HttpRequestError}.", ex);
+            return DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Connection, ex);
         }
     }
 
@@ -88,10 +90,13 @@ public sealed class HttpDispatchTransport : IDispatchTransport
         var code = (int)statusCode;
         return code switch
         {
-            >= 200 and < 300 => DispatchOutcome.Delivered(unit),
-            408 or 429 or >= 500 => DispatchOutcome.Retryable(unit, $"HTTP {code} from endpoint."),
-            // Redirects are not followed, so a 3xx means the configured endpoint is wrong.
-            _ => DispatchOutcome.Rejected(unit, $"HTTP {code} from endpoint.")
+            >= 200 and < 300 => DispatchOutcome.Delivered(unit, code),
+            408 => DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Timeout, statusCode: code),
+            429 or 503 => DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Unavailable, statusCode: code),
+            >= 500 => DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Dependency, statusCode: code),
+            // The endpoint refused the request as sent. Redirects are not followed, so a 3xx means
+            // the configured endpoint is wrong.
+            _ => DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Validation, statusCode: code)
         };
     }
 }

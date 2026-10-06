@@ -1,3 +1,4 @@
+using ImagingPipeline.Observability;
 using ImagingPipeline.UnifiedGateway.Dispatch;
 using Microsoft.Extensions.Logging.Abstractions;
 using static ImagingPipeline.UnifiedGateway.Tests.DispatchTestData;
@@ -40,7 +41,7 @@ public sealed class PipelineDispatcherTests
         var outcome = Assert.Single(await dispatcher.DispatchAsync([Unit(HttpPipeline("algo"))], CancellationToken.None));
 
         Assert.Equal(DispatchStatus.Rejected, outcome.Status);
-        Assert.Contains("'http'", outcome.Reason);
+        Assert.Equal(TelemetryErrorCategory.Handler, outcome.Error);
     }
 
     [Fact]
@@ -62,13 +63,14 @@ public sealed class PipelineDispatcherTests
     public async Task TransportOutcomesArePassedThrough()
     {
         var dispatcher = CreateDispatcher([
-            new FakeTransport("rabbitmq") { Result = unit => DispatchOutcome.Rejected(unit, "refused") }
+            new FakeTransport("rabbitmq") { Result = unit => DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Validation, statusCode: 400) }
         ]);
 
         var outcome = Assert.Single(await dispatcher.DispatchAsync([Unit(RabbitMqPipeline("asd"))], CancellationToken.None));
 
         Assert.Equal(DispatchStatus.Rejected, outcome.Status);
-        Assert.Equal("refused", outcome.Reason);
+        Assert.Equal(TelemetryErrorCategory.Validation, outcome.Error);
+        Assert.Equal(400, outcome.StatusCode);
     }
 
     [Fact]
@@ -78,7 +80,7 @@ public sealed class PipelineDispatcherTests
         var dispatcher = CreateDispatcher(
             [
                 new FakeTransport("rabbitmq"),
-                new FakeTransport("http") { Result = unit => DispatchOutcome.Retryable(unit, "timeout") }
+                new FakeTransport("http") { Result = unit => DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Timeout) }
             ],
             [listener]);
 
@@ -133,7 +135,7 @@ public sealed class PipelineDispatcherTests
         public string Kind => kind;
         public TimeSpan Delay { get; init; }
         public Exception? Throw { get; init; }
-        public Func<DispatchUnit, DispatchOutcome> Result { get; init; } = DispatchOutcome.Delivered;
+        public Func<DispatchUnit, DispatchOutcome> Result { get; init; } = unit => DispatchOutcome.Delivered(unit);
         public List<string> Sent { get; } = [];
 
         public async Task<DispatchOutcome> SendAsync(DispatchUnit unit, CancellationToken cancellationToken)

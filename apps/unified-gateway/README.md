@@ -181,7 +181,7 @@ The old pipeline array format and nested `PipelineId` fields are rejected. Migra
 | `Retryable` | Transient failure, such as a broker or connection error. Sending again may succeed. |
 | `Rejected` | Sending again will not help, for example no transport or destination is configured for the unit. |
 
-The dispatcher never throws for a failed unit; only cancellation propagates. Deciding what an outcome means for the source message belongs to the caller. Every non-delivered unit is logged with its dispatch ID, source message ID, pipeline and reason, so a dead-lettered source message can be traced to the pipeline that failed.
+The dispatcher never throws for a failed unit; only cancellation propagates. Deciding what an outcome means for the source message belongs to the caller. A failed outcome carries a bounded error category (`TelemetryErrorCategory`, such as `timeout`, `connection`, `unavailable`, `dependency`, `validation` or `publish`), the HTTP status code when an endpoint answered, and the exception if there was one.
 
 A `DispatchUnit` is prepared work plus:
 
@@ -206,7 +206,11 @@ Transports implement `IDispatchTransport` and are selected by the catalog's `Tra
 
 `IDispatchDeliveryListener` registrations are notified after each confirmed delivery, for example to record a unit as already processed. A listener failure is logged and does not change the outcome.
 
-Metrics: `unified_gateway.dispatch.units` and `unified_gateway.dispatch.duration`, tagged with pipeline ID, transport kind and outcome. Each unit has a `unified_gateway.dispatch` span.
+Telemetry for each unit is owned by `DispatchTelemetry`:
+
+- **Span** `unified_gateway.dispatch` (stage `unified_gateway`): `Ok` when delivered; otherwise `Error` with `error.type` and `findair.error.category`. Tagged with `pipeline.id`, `pipeline.transport`, `findair.outcome` and `http.response.status_code` when present.
+- **Metrics** `unified_gateway.dispatch.units` and `unified_gateway.dispatch.duration`, tagged with `pipeline.id`, `pipeline.transport`, `findair.outcome` and, on failure, `error.type`.
+- **Logs** with static messages, so they group by message: 6001 delivered (debug), 6002 failed (warning, with the exception), 6003 delivery listener failed. The dispatch ID (`messaging.message.id`), source message ID (`messaging.message.conversation_id`), pipeline, transport, outcome, error type and status code are structured fields, so a dead-lettered source message can be traced to the pipeline that failed by filtering, not by parsing text.
 
 ## Validation and observability
 

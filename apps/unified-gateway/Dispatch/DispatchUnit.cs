@@ -1,3 +1,4 @@
+using ImagingPipeline.Observability;
 using ImagingPipeline.UnifiedGateway.Processing;
 
 namespace ImagingPipeline.UnifiedGateway.Dispatch;
@@ -25,17 +26,31 @@ public enum DispatchStatus
     Rejected
 }
 
+/// <summary>
+/// The result of sending one unit. <see cref="Error"/> is a bounded failure category for logs,
+/// spans and metrics; <see cref="StatusCode"/> is set when an HTTP endpoint answered.
+/// </summary>
 public sealed record DispatchOutcome(
     DispatchUnit Unit,
     DispatchStatus Status,
-    string? Reason = null,
+    TelemetryErrorCategory Error = TelemetryErrorCategory.None,
+    int? StatusCode = null,
     Exception? Exception = null)
 {
-    public static DispatchOutcome Delivered(DispatchUnit unit) => new(unit, DispatchStatus.Delivered);
+    public static DispatchOutcome Delivered(DispatchUnit unit, int? statusCode = null) =>
+        new(unit, DispatchStatus.Delivered, StatusCode: statusCode);
 
-    public static DispatchOutcome Retryable(DispatchUnit unit, string reason, Exception? exception = null) =>
-        new(unit, DispatchStatus.Retryable, reason, exception);
+    public static DispatchOutcome Retryable(
+        DispatchUnit unit,
+        TelemetryErrorCategory error,
+        Exception? exception = null,
+        int? statusCode = null) =>
+        new(unit, DispatchStatus.Retryable, error, statusCode, exception);
 
-    public static DispatchOutcome Rejected(DispatchUnit unit, string reason, Exception? exception = null) =>
-        new(unit, DispatchStatus.Rejected, reason, exception);
+    public static DispatchOutcome Rejected(
+        DispatchUnit unit,
+        TelemetryErrorCategory error,
+        Exception? exception = null,
+        int? statusCode = null) =>
+        new(unit, DispatchStatus.Rejected, error, statusCode, exception);
 }

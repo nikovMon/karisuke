@@ -58,7 +58,8 @@ public enum PipelineStage
     TbPublisher,
     TileBuilder,
     TbConsumer,
-    Embedder
+    Embedder,
+    UnifiedGateway
 }
 
 public enum PipelineDirection
@@ -201,6 +202,7 @@ internal static class TelemetryDimensionValues
         PipelineStage.TileBuilder => "tile_builder",
         PipelineStage.TbConsumer => "tb_consumer",
         PipelineStage.Embedder => "embedder",
+        PipelineStage.UnifiedGateway => "unified_gateway",
         _ => "unknown"
     };
 

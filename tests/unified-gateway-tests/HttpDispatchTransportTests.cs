@@ -1,3 +1,4 @@
+using ImagingPipeline.Observability;
 using System.Net;
 using System.Net.Sockets;
 using ImagingPipeline.PipelineCatalog;
@@ -41,21 +42,24 @@ public sealed class HttpDispatchTransportTests
     }
 
     [Theory]
-    [InlineData(HttpStatusCode.OK, DispatchStatus.Delivered)]
-    [InlineData(HttpStatusCode.Created, DispatchStatus.Delivered)]
-    [InlineData(HttpStatusCode.NoContent, DispatchStatus.Delivered)]
-    [InlineData(HttpStatusCode.RequestTimeout, DispatchStatus.Retryable)]
-    [InlineData(HttpStatusCode.TooManyRequests, DispatchStatus.Retryable)]
-    [InlineData(HttpStatusCode.InternalServerError, DispatchStatus.Retryable)]
-    [InlineData(HttpStatusCode.BadGateway, DispatchStatus.Retryable)]
-    [InlineData(HttpStatusCode.ServiceUnavailable, DispatchStatus.Retryable)]
-    [InlineData(HttpStatusCode.BadRequest, DispatchStatus.Rejected)]
-    [InlineData(HttpStatusCode.Unauthorized, DispatchStatus.Rejected)]
-    [InlineData(HttpStatusCode.NotFound, DispatchStatus.Rejected)]
-    [InlineData(HttpStatusCode.Conflict, DispatchStatus.Rejected)]
-    [InlineData(HttpStatusCode.UnprocessableEntity, DispatchStatus.Rejected)]
-    [InlineData(HttpStatusCode.Found, DispatchStatus.Rejected)]
-    public async Task StatusCodeMapsToOutcome(HttpStatusCode statusCode, DispatchStatus expected)
+    [InlineData(HttpStatusCode.OK, DispatchStatus.Delivered, TelemetryErrorCategory.None)]
+    [InlineData(HttpStatusCode.Created, DispatchStatus.Delivered, TelemetryErrorCategory.None)]
+    [InlineData(HttpStatusCode.NoContent, DispatchStatus.Delivered, TelemetryErrorCategory.None)]
+    [InlineData(HttpStatusCode.RequestTimeout, DispatchStatus.Retryable, TelemetryErrorCategory.Timeout)]
+    [InlineData(HttpStatusCode.TooManyRequests, DispatchStatus.Retryable, TelemetryErrorCategory.Unavailable)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, DispatchStatus.Retryable, TelemetryErrorCategory.Unavailable)]
+    [InlineData(HttpStatusCode.InternalServerError, DispatchStatus.Retryable, TelemetryErrorCategory.Dependency)]
+    [InlineData(HttpStatusCode.BadGateway, DispatchStatus.Retryable, TelemetryErrorCategory.Dependency)]
+    [InlineData(HttpStatusCode.BadRequest, DispatchStatus.Rejected, TelemetryErrorCategory.Validation)]
+    [InlineData(HttpStatusCode.Unauthorized, DispatchStatus.Rejected, TelemetryErrorCategory.Validation)]
+    [InlineData(HttpStatusCode.NotFound, DispatchStatus.Rejected, TelemetryErrorCategory.Validation)]
+    [InlineData(HttpStatusCode.Conflict, DispatchStatus.Rejected, TelemetryErrorCategory.Validation)]
+    [InlineData(HttpStatusCode.UnprocessableEntity, DispatchStatus.Rejected, TelemetryErrorCategory.Validation)]
+    [InlineData(HttpStatusCode.Found, DispatchStatus.Rejected, TelemetryErrorCategory.Validation)]
+    public async Task StatusCodeMapsToOutcomeAndCategory(
+        HttpStatusCode statusCode,
+        DispatchStatus expected,
+        TelemetryErrorCategory expectedError)
     {
         var pipeline = HttpPipeline("algo");
 
@@ -63,10 +67,8 @@ public sealed class HttpDispatchTransportTests
             .SendAsync(Unit(pipeline), CancellationToken.None);
 
         Assert.Equal(expected, outcome.Status);
-        if (expected != DispatchStatus.Delivered)
-        {
-            Assert.Contains(((int)statusCode).ToString(), outcome.Reason);
-        }
+        Assert.Equal(expectedError, outcome.Error);
+        Assert.Equal((int)statusCode, outcome.StatusCode);
     }
 
     [Fact]
@@ -81,7 +83,8 @@ public sealed class HttpDispatchTransportTests
         var outcome = await CreateTransport(handler, pipeline).SendAsync(Unit(pipeline), CancellationToken.None);
 
         Assert.Equal(DispatchStatus.Retryable, outcome.Status);
-        Assert.Contains("ConnectionError", outcome.Reason);
+        Assert.Equal(TelemetryErrorCategory.Connection, outcome.Error);
+        Assert.Null(outcome.StatusCode);
         Assert.IsType<HttpRequestException>(outcome.Exception);
     }
 
@@ -98,7 +101,7 @@ public sealed class HttpDispatchTransportTests
         var outcome = await CreateTransport(handler, pipeline).SendAsync(Unit(pipeline), CancellationToken.None);
 
         Assert.Equal(DispatchStatus.Retryable, outcome.Status);
-        Assert.Contains("timed out after 1s", outcome.Reason);
+        Assert.Equal(TelemetryErrorCategory.Timeout, outcome.Error);
     }
 
     [Fact]

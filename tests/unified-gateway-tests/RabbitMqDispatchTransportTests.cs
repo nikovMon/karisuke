@@ -120,7 +120,7 @@ public sealed class RabbitMqDispatchTransportTests
 
         Assert.Equal(DispatchStatus.Retryable, outcome.Status);
         Assert.Same(failure, outcome.Exception);
-        Assert.Contains(nameof(InvalidOperationException), outcome.Reason);
+        Assert.Equal(TelemetryErrorCategory.Publish, outcome.Error);
     }
 
     [Fact]

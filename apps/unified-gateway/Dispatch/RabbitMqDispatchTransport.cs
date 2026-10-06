@@ -37,7 +37,8 @@ public sealed class RabbitMqDispatchTransport : IDispatchTransport
         ArgumentNullException.ThrowIfNull(unit);
         if (!_destinations.TryGetValue(unit.PipelineId, out var destination))
         {
-            return DispatchOutcome.Rejected(unit, "No RabbitMQ destination is configured for an enabled pipeline with this ID.");
+            // Only an enabled pipeline whose catalog transport is rabbitmq has a destination.
+            return DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Handler);
         }
 
         try
@@ -53,7 +54,7 @@ public sealed class RabbitMqDispatchTransport : IDispatchTransport
         {
             // Broker and connection failures are transient from the gateway's point of view;
             // the source message retry policy bounds how often they are attempted.
-            return DispatchOutcome.Retryable(unit, $"RabbitMQ publish failed: {ex.GetType().Name}.", ex);
+            return DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Publish, ex);
         }
     }
 

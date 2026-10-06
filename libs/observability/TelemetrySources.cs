@@ -34,6 +34,7 @@ public static class TelemetrySources
         PipelineStage.TileBuilder => TileBuilder,
         PipelineStage.TbConsumer => TbConsumer,
         PipelineStage.Embedder => Embedder,
+        PipelineStage.UnifiedGateway => UnifiedGateway,
         _ => Pipeline
     };
 

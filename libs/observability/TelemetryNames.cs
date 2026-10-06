@@ -79,6 +79,9 @@ public static class TelemetryMetricNames
     public const string Tiles = "findair.tiles";
     public const string TilePublishAttempts = "findair.tile.publish.attempts";
 
+    public const string UnifiedGatewayDispatchUnits = "unified_gateway.dispatch.units";
+    public const string UnifiedGatewayDispatchDuration = "unified_gateway.dispatch.duration";
+
     public const string GatewayRuleCacheEntries = "findair.gateway.rule_cache.entries";
     public const string GatewayRuleCacheSkippedRules = "findair.gateway.rule_cache.skipped_rules";
     public const string GatewayRuleCacheAge = "findair.gateway.rule_cache.age";
