@@ -210,7 +210,7 @@ Telemetry for each unit is owned by `DispatchTelemetry`:
 
 - **Span** `unified_gateway.dispatch` (stage `unified_gateway`): `Ok` when delivered; otherwise `Error` with `error.type` and `findair.error.category`. Tagged with `pipeline.id`, `pipeline.transport`, `findair.outcome` and `http.response.status_code` when present.
 - **Metrics** `unified_gateway.dispatch.units` and `unified_gateway.dispatch.duration`, tagged with `pipeline.id`, `pipeline.transport`, `findair.outcome` and, on failure, `error.type`.
-- **Logs** with static messages, so they group by message: 6001 delivered (debug), 6002 failed (warning, with the exception), 6003 delivery listener failed. The dispatch ID (`messaging.message.id`), source message ID (`messaging.message.conversation_id`), pipeline, transport, outcome, error type and status code are structured fields, so a dead-lettered source message can be traced to the pipeline that failed by filtering, not by parsing text.
+- **Logs** with static messages, so they group by message: 6001 delivered (debug), 6002 failed (warning, with the exception), 6003 delivery listener failed. One log scope per unit carries the dispatch ID (`messaging.message.id`), source message ID (`messaging.message.conversation_id`), `pipeline.id` and `pipeline.transport`; the failure log adds `findair.outcome`, `error.type` and `http.response.status_code`. These are the same field names as on the span and metrics, so a dead-lettered source message can be traced to the pipeline that failed by filtering, not by parsing text.
 
 ## Validation and observability
 

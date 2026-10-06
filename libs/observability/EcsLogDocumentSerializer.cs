@@ -50,7 +50,11 @@ internal static class EcsLogDocumentSerializer
             [TelemetryAttributeNames.SensorName] = TelemetryAttributeNames.SensorName,
             [TelemetryAttributeNames.TileId] = TelemetryAttributeNames.TileId,
             [TelemetryAttributeNames.TileIndex] = TelemetryAttributeNames.TileIndex,
-            [TelemetryAttributeNames.TileCount] = TelemetryAttributeNames.TileCount
+            [TelemetryAttributeNames.TileCount] = TelemetryAttributeNames.TileCount,
+            [TelemetryAttributeNames.PipelineId] = TelemetryAttributeNames.PipelineId,
+            [TelemetryAttributeNames.PipelineTransport] = TelemetryAttributeNames.PipelineTransport,
+            [TelemetryAttributeNames.PipelineOutcome] = TelemetryAttributeNames.PipelineOutcome,
+            ["error.type"] = "error.type"
         };
 
     public static byte[] SerializeBatch(

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using ImagingPipeline.Observability;
 
 namespace ImagingPipeline.UnifiedGateway.Dispatch;
@@ -11,11 +12,15 @@ namespace ImagingPipeline.UnifiedGateway.Dispatch;
 /// </summary>
 internal sealed class DispatchTelemetry : IDisposable
 {
+    private static readonly Counter<long> Units = TelemetryMeters.UnifiedGateway.CreateCounter<long>(
+        "unified_gateway.dispatch.units", "{unit}", "Dispatch outcomes by pipeline and transport.");
+    private static readonly Histogram<double> Duration = TelemetryMeters.UnifiedGateway.CreateHistogram<double>(
+        "unified_gateway.dispatch.duration", "s", "Time spent sending one unit over its transport.");
+
     private readonly DispatchUnit _unit;
     private readonly ILogger _logger;
     private readonly long _started = Stopwatch.GetTimestamp();
-    private readonly IDisposable _messageScope;
-    private readonly IDisposable? _pipelineScope;
+    private readonly IDisposable? _logScope;
     private readonly PipelineSpanScope _span;
     private bool _completed;
 
@@ -25,16 +30,16 @@ internal sealed class DispatchTelemetry : IDisposable
         _logger = logger;
         // The dispatch ID is the outgoing message ID; the source message ID joins it to the
         // consumed message, for example when that message is dead-lettered.
-        _messageScope = logger.BeginTelemetryScope(
-            new TelemetryLogContext(MessageId: unit.DispatchId, CorrelationId: unit.SourceMessageId));
-        _pipelineScope = logger.BeginScope(new KeyValuePair<string, object?>[]
+        _logScope = logger.BeginScope(new KeyValuePair<string, object?>[]
         {
-            new("PipelineId", unit.PipelineId),
-            new("Transport", unit.TransportKind)
+            new("messaging.message.id", unit.DispatchId),
+            new("messaging.message.conversation_id", unit.SourceMessageId),
+            new(TelemetryAttributeNames.PipelineId, unit.PipelineId),
+            new(TelemetryAttributeNames.PipelineTransport, unit.TransportKind)
         });
         _span = PipelineSpanScope.StartStage(PipelineStage.UnifiedGateway, "dispatch", default);
-        _span.SetTag("pipeline.id", unit.PipelineId);
-        _span.SetTag("pipeline.transport", unit.TransportKind);
+        _span.SetTag(TelemetryAttributeNames.PipelineId, unit.PipelineId);
+        _span.SetTag(TelemetryAttributeNames.PipelineTransport, unit.TransportKind);
         _span.SetTag("messaging.message.id", unit.DispatchId);
     }
 
@@ -56,9 +61,7 @@ internal sealed class DispatchTelemetry : IDisposable
             _span.SetTag("http.response.status_code", statusCode);
         }
 
-        UnifiedGatewayTelemetry.RecordDispatch(
-            _unit.PipelineId, _unit.TransportKind, telemetryOutcome, outcome.Error, ElapsedSeconds);
-
+        RecordMetrics(telemetryOutcome, outcome.Error);
         if (outcome.Status == DispatchStatus.Delivered)
         {
             _logger.DispatchDelivered();
@@ -67,7 +70,13 @@ internal sealed class DispatchTelemetry : IDisposable
 
         // This log owns the exception, so the span does not record it again.
         _span.Failed(outcome.Error, outcome.Exception, recordException: false);
-        using (_logger.BeginScope(OutcomeFields(outcome)))
+        using (_logger.BeginScope(new KeyValuePair<string, object?>[]
+               {
+                   new(TelemetryAttributeNames.PipelineOutcome, Value(telemetryOutcome)),
+                   new("error.type", Value(outcome.Error)),
+                   // Mapped to http.response.status_code in ECS logs.
+                   new("StatusCode", outcome.StatusCode)
+               }))
         {
             _logger.DispatchFailed(outcome.Exception);
         }
@@ -79,23 +88,40 @@ internal sealed class DispatchTelemetry : IDisposable
         {
             _span.Activity.SetTelemetryOutcome(TelemetryOutcome.Cancelled);
             _span.Cancelled();
-            UnifiedGatewayTelemetry.RecordDispatch(
-                _unit.PipelineId, _unit.TransportKind, TelemetryOutcome.Cancelled, TelemetryErrorCategory.Cancelled, ElapsedSeconds);
+            RecordMetrics(TelemetryOutcome.Cancelled, TelemetryErrorCategory.Cancelled);
         }
 
         _span.Dispose();
-        _pipelineScope?.Dispose();
-        _messageScope.Dispose();
+        _logScope?.Dispose();
     }
 
-    private double ElapsedSeconds => Stopwatch.GetElapsedTime(_started).TotalSeconds;
+    private void RecordMetrics(TelemetryOutcome outcome, TelemetryErrorCategory error)
+    {
+        // Pipeline ID and transport kind come from the deployment catalog, so they are bounded.
+        var tags = new TagList
+        {
+            { TelemetryAttributeNames.PipelineId, _unit.PipelineId },
+            { TelemetryAttributeNames.PipelineTransport, _unit.TransportKind },
+            { TelemetryAttributeNames.PipelineOutcome, Value(outcome) }
+        };
+        if (error != TelemetryErrorCategory.None)
+        {
+            tags.Add("error.type", Value(error));
+        }
 
-    private static KeyValuePair<string, object?>[] OutcomeFields(DispatchOutcome outcome) =>
-    [
-        new("DispatchOutcome", outcome.Status == DispatchStatus.Retryable ? "retryable" : "rejected"),
-        // Lower-case enum names match the bounded values on spans and metrics.
-        new("ErrorType", outcome.Error.ToString().ToLowerInvariant()),
-        // Mapped to http.response.status_code in ECS logs.
-        new("StatusCode", outcome.StatusCode)
-    ];
+        Units.Add(1, tags);
+        Duration.Record(Stopwatch.GetElapsedTime(_started).TotalSeconds, tags);
+    }
+
+    // The library's own value mapping is internal; these produce the same strings that
+    // SetTelemetryOutcome and Failed put on the span.
+    private static string Value(TelemetryOutcome outcome) => outcome switch
+    {
+        TelemetryOutcome.Success => "success",
+        TelemetryOutcome.Retry => "retry",
+        TelemetryOutcome.Rejected => "rejected",
+        _ => "cancelled"
+    };
+
+    private static string Value(TelemetryErrorCategory error) => error.ToString().ToLowerInvariant();
 }
