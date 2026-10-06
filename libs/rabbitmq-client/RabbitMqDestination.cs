@@ -30,8 +30,9 @@ public sealed record RabbitMqDestinationConnection(
 }
 
 /// <summary>
-/// One output queue, optionally reached through a named exchange. The queue, the exchange and
-/// their binding are declared on first use per publisher channel, like the client's own topology.
+/// Where messages should go in RabbitMQ: which broker (<see cref="Connection"/>), which queue, and
+/// optionally which exchange and routing key to publish through. The queue, the exchange and their
+/// binding are declared on first use per publisher channel, like the client's own topology.
 /// </summary>
 public sealed record RabbitMqDestination
 {

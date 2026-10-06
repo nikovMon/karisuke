@@ -255,8 +255,10 @@ confirmations, and awaits the confirmation before returning.
 
 ## Publish to destinations on other brokers
 
-`IRabbitMqDestinationPublisher` publishes to a destination supplied with each call,
-on that destination's own broker connection. Brokers and queues come from the caller
+A **destination** says where messages should go: which broker (host, port,
+credentials), which queue, and optionally which exchange and routing key to publish
+through. `IRabbitMqDestinationPublisher` publishes to a destination supplied with each
+call, on that destination's own broker connection. Brokers and queues come from the caller
 (for example, a per-pipeline catalog), not from the `RabbitMq` section. From that
 section it reads only `PublisherChannelPoolSize` and `ReconnectDelaySeconds`; the
 section may be absent, in which case the defaults apply.
