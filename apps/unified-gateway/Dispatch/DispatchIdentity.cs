@@ -30,6 +30,8 @@ public static class DispatchIdentity
         return Convert.ToHexStringLower(SHA256.HashData(buffer.WrittenSpan))[..16];
     }
 
+    // Rewrites JSON into one fixed form so equal run params hash equally: object properties are
+    // sorted and whitespace dropped. Array order is kept on purpose, since it can carry meaning.
     private static void WriteCanonical(Utf8JsonWriter writer, JsonElement element)
     {
         switch (element.ValueKind)
