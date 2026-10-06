@@ -61,7 +61,12 @@ public sealed class RabbitMqDispatchTransport : IDispatchTransport
     {
         var payload = unit.Work.Payload;
         var headers = new Dictionary<string, object?>(StringComparer.Ordinal);
-        CopyStartedAt(unit.SourceHeaders, headers);
+        // Preserves the end-to-end pipeline clock. Trace context is injected from the current span.
+        if (PipelineTimingHeaders.TryReadStartUnixMilliseconds(unit.SourceHeaders, out var startedAt))
+        {
+            headers[PipelineTimingHeaders.StartUnixMilliseconds] = startedAt;
+        }
+
         foreach (var attribute in payload.Attributes)
         {
             headers[attribute.Key] = attribute.Value;
@@ -82,26 +87,6 @@ public sealed class RabbitMqDispatchTransport : IDispatchTransport
             payload.ContentType,
             headers,
             unit.SourceMessageId);
-    }
-
-    private static void CopyStartedAt(
-        IReadOnlyDictionary<string, object?>? source,
-        Dictionary<string, object?> headers)
-    {
-        // Preserves the end-to-end pipeline clock. Trace context is injected from the current span.
-        if (source is null)
-        {
-            return;
-        }
-
-        foreach (var header in source)
-        {
-            if (string.Equals(header.Key, FindAirMessageHeaders.StartedAtUnixMilliseconds, StringComparison.OrdinalIgnoreCase))
-            {
-                headers[FindAirMessageHeaders.StartedAtUnixMilliseconds] = header.Value;
-                return;
-            }
-        }
     }
 
     private static RabbitMqDestination CreateDestination(

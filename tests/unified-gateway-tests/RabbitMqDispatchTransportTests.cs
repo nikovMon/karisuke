@@ -94,6 +94,22 @@ public sealed class RabbitMqDispatchTransportTests
     }
 
     [Fact]
+    public async Task MalformedSourceStartTimestampIsNotForwarded()
+    {
+        var pipeline = RabbitMqPipeline("asd");
+        var publisher = new RecordingPublisher();
+        var unit = Unit(pipeline, sourceHeaders: new Dictionary<string, object?>
+        {
+            [FindAirMessageHeaders.StartedAtUnixMilliseconds] = "not-a-timestamp"
+        });
+
+        await CreateTransport(publisher, pipeline).SendAsync(unit, CancellationToken.None);
+
+        Assert.False(Assert.Single(publisher.Published).Message.Headers!
+            .ContainsKey(FindAirMessageHeaders.StartedAtUnixMilliseconds));
+    }
+
+    [Fact]
     public async Task PublishFailureIsRetryableAndCarriesTheException()
     {
         var pipeline = RabbitMqPipeline("asd");
