@@ -2,6 +2,7 @@ using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Common.Dtos.Rules.Requests;
 using ImagingPipeline.Common.Dtos.Rules.Responses;
 using ImagingPipeline.Rules.Api.Configuration;
+using ImagingPipeline.Rules.Api.Observability;
 using ImagingPipeline.Rules.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -10,6 +11,7 @@ namespace ImagingPipeline.Rules.Api.Controllers;
 
 [ApiController]
 [Route("rules")]
+[TypeFilter(typeof(RulesOperationFilter))]
 [Produces("application/json")]
 public sealed class RulesController : ControllerBase
 {

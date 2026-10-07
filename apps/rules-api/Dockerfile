@@ -6,6 +6,10 @@ COPY apps/rules-api/ImagingPipeline.Rules.Api.csproj apps/rules-api/
 COPY libs/elasticsearch-client/ElasticsearchClient.csproj libs/elasticsearch-client/
 COPY libs/common-dtos/ImagingPipeline.Common.Dtos.csproj libs/common-dtos/
 COPY libs/observability/ImagingPipeline.Observability.csproj libs/observability/
+COPY libs/pipeline-catalog/ImagingPipeline.PipelineCatalog.csproj libs/pipeline-catalog/
+COPY libs/rabbitmq-configuration/ImagingPipeline.RabbitMqConfiguration.csproj libs/rabbitmq-configuration/
+COPY libs/pipeline-contracts/ImagingPipeline.PipelineContracts.csproj libs/pipeline-contracts/
+COPY libs/geometry-utils/GeometryUtils.csproj libs/geometry-utils/
 RUN dotnet restore apps/rules-api/ImagingPipeline.Rules.Api.csproj
 
 COPY . .
