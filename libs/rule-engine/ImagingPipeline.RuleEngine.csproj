@@ -17,5 +17,6 @@
     <ProjectReference Include="..\common-dtos\ImagingPipeline.Common.Dtos.csproj" />
     <ProjectReference Include="..\elasticsearch-client\ElasticsearchClient.csproj" />
     <ProjectReference Include="..\geometry-utils\GeometryUtils.csproj" />
+    <ProjectReference Include="..\observability\ImagingPipeline.Observability.csproj" />
   </ItemGroup>
 </Project>

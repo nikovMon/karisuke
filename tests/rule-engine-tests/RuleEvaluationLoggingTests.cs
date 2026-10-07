@@ -1,4 +1,5 @@
 using ImagingPipeline.Common.Dtos.Rules.Models;
+using ImagingPipeline.Observability;
 using ImagingPipeline.RuleEngine.Rules;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
@@ -23,8 +24,10 @@ public sealed class RuleEvaluationLoggingTests
         Assert.Equal(7002, log.EventId);
         Assert.Equal(LogLevel.Information, log.Level);
         Assert.Equal("Image evaluated against pipeline rules.", log.Message);
-        Assert.Equal(["hit"], Assert.IsType<string[]>(log.Fields[RuleEvaluationLogging.MatchedRulesField]));
-        Assert.Equal(["other-sensor: Sensor"], Assert.IsType<string[]>(log.Fields[RuleEvaluationLogging.MissedRulesField]));
+        Assert.Equal(["hit"], Assert.IsType<string[]>(log.Fields[TelemetryAttributeNames.RulesMatchedIds]));
+        Assert.Equal(["other-sensor"], Assert.IsType<string[]>(log.Fields[TelemetryAttributeNames.RulesMissedSensorIds]));
+        Assert.Equal(1, log.Fields[TelemetryAttributeNames.RulesMissedSensorCount]);
+        Assert.Equal(0, log.Fields[TelemetryAttributeNames.RulesMissedGeometryCount]);
     }
 
     private sealed record LogEntry(int EventId, LogLevel Level, string Message, IReadOnlyDictionary<string, object?> Fields);
