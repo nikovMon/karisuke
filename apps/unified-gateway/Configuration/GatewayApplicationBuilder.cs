@@ -16,17 +16,7 @@ public static class GatewayApplicationBuilder
             WebRootPath = options?.WebRootPath
         });
 
-        var configuredFile = builder.Configuration["PipelineCatalogFile"];
-        var catalogFile = configuredFile is null
-            ? Path.Combine(AppContext.BaseDirectory, PipelineCatalogFileConfigurationExtensions.DefaultFileName)
-            : Path.GetFullPath(configuredFile, builder.Environment.ContentRootPath);
-        var catalog = new ConfigurationBuilder().AddPipelineCatalogJsonFile(catalogFile);
-
-        // Load one complete catalog, with native ExtraData JSON preserved. Standard host
-        // configuration remains higher priority, including whole-object environment/CLI overrides.
-        for (var index = 0; index < catalog.Sources.Count; index++)
-            builder.Configuration.Sources.Insert(index, catalog.Sources[index]);
-
+        builder.Configuration.AddPipelineCatalogFileAsBase(builder.Environment.ContentRootPath);
         return builder;
     }
 }

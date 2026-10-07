@@ -14,5 +14,7 @@
     <ProjectReference Include="..\..\libs\elasticsearch-client\ElasticsearchClient.csproj" />
     <ProjectReference Include="..\..\libs\common-dtos\ImagingPipeline.Common.Dtos.csproj" />
     <ProjectReference Include="..\..\libs\observability\ImagingPipeline.Observability.csproj" />
+    <ProjectReference Include="..\..\libs\pipeline-catalog\ImagingPipeline.PipelineCatalog.csproj" />
+    <ProjectReference Include="..\..\libs\pipeline-contracts\ImagingPipeline.PipelineContracts.csproj" />
   </ItemGroup>
 </Project>

@@ -3,6 +3,8 @@ using System.Text.Json.Serialization;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.ElasticsearchClient;
 using ImagingPipeline.Observability;
+using ImagingPipeline.PipelineCatalog;
+using ImagingPipeline.PipelineContracts;
 using ImagingPipeline.Rules.Api.Configuration;
 using ImagingPipeline.Rules.Api.Health;
 using ImagingPipeline.Rules.Api.Observability;
@@ -21,10 +23,11 @@ public sealed partial class Program
         RegistrationQualityContract.EnsureValid();
 
         var builder = WebApplication.CreateBuilder(args);
+        builder.Configuration.AddPipelineCatalogFileAsBase(builder.Environment.ContentRootPath);
         builder.AddImagingPipelineObservability(
             ObservabilityServiceNames.RulesApi,
             instrumentAspNetCore: true);
-        builder.Services.AddControllers(options => options.Filters.Add<RulesOperationFilter>())
+        builder.Services.AddControllers()
             .AddJsonOptions(options =>
             {
                 options.JsonSerializerOptions.Converters.Add(new RegistrationQualityJsonConverter());
@@ -94,6 +97,8 @@ public sealed partial class Program
             .Validate(options => options.IsValid(out _), "Rules Elasticsearch settings are invalid.")
             .ValidateOnStart();
         builder.Services.AddSingleton<RuleService>();
+        builder.Services.AddPipelineContracts();
+        builder.Services.AddPipelineCatalog(builder.Configuration);
         builder.Services.AddSingleton<IElasticsearchHealthProbe, ElasticsearchHealthProbe>();
 
         var app = builder.Build();
