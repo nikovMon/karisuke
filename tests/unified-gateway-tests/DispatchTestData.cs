@@ -42,7 +42,7 @@ internal static class DispatchTestData
         RulesIndex = $"{id}-pipeline-index",
         Transport = new PipelineTransportOptions
         {
-            Kind = "rabbitmq",
+            Kind = PipelineTransportKind.RabbitMq,
             RabbitMq = new RabbitMqTransportOptions
             {
                 ConnectionRef = "asd-output",
@@ -59,7 +59,7 @@ internal static class DispatchTestData
         RulesIndex = $"{id}-pipeline-index",
         Transport = new PipelineTransportOptions
         {
-            Kind = "http",
+            Kind = PipelineTransportKind.Http,
             Http = http ?? new HttpTransportOptions { Endpoint = "https://example.invalid/work" }
         }
     };

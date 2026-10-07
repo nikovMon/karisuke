@@ -12,7 +12,6 @@ namespace ImagingPipeline.UnifiedGateway.Dispatch;
 /// </summary>
 public sealed class HttpDispatchTransport : IDispatchTransport
 {
-    public const string TransportKind = "http";
     public const string HttpClientName = "unified-gateway.dispatch";
     public const string IdempotencyKeyHeader = "Idempotency-Key";
 
@@ -23,11 +22,11 @@ public sealed class HttpDispatchTransport : IDispatchTransport
     {
         _clients = clients;
         _endpoints = catalog.GetEnabled()
-            .Where(pipeline => pipeline.Transport.Kind == TransportKind)
+            .Where(pipeline => pipeline.Transport.Kind == PipelineTransportKind.Http)
             .ToFrozenDictionary(pipeline => pipeline.PipelineId, pipeline => pipeline.Transport.Http!, StringComparer.Ordinal);
     }
 
-    public string Kind => TransportKind;
+    public PipelineTransportKind Kind => PipelineTransportKind.Http;
 
     public async Task<DispatchOutcome> SendAsync(DispatchUnit unit, CancellationToken cancellationToken)
     {

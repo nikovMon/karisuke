@@ -1,3 +1,4 @@
+using ImagingPipeline.PipelineCatalog;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
@@ -105,7 +106,7 @@ public sealed class DispatchTelemetryTests
         var unit = Unit(RabbitMqPipeline("asd"), $"listener-{Guid.NewGuid():N}");
         using var capture = new TelemetryCapture(unit.DispatchId);
         var dispatcher = new PipelineDispatcher(
-            [new DelegateTransport("rabbitmq", unit => DispatchOutcome.Delivered(unit))],
+            [new DelegateTransport(PipelineTransportKind.RabbitMq, unit => DispatchOutcome.Delivered(unit))],
             [new FailingListener()],
             capture.Logger);
 
@@ -121,11 +122,11 @@ public sealed class DispatchTelemetryTests
     private static PipelineDispatcher Dispatcher(
         ILogger<PipelineDispatcher> logger,
         Func<DispatchUnit, DispatchOutcome> result) =>
-        new([new DelegateTransport("rabbitmq", result), new DelegateTransport("http", result)], [], logger);
+        new([new DelegateTransport(PipelineTransportKind.RabbitMq, result), new DelegateTransport(PipelineTransportKind.Http, result)], [], logger);
 
-    private sealed class DelegateTransport(string kind, Func<DispatchUnit, DispatchOutcome> result) : IDispatchTransport
+    private sealed class DelegateTransport(PipelineTransportKind kind, Func<DispatchUnit, DispatchOutcome> result) : IDispatchTransport
     {
-        public string Kind => kind;
+        public PipelineTransportKind Kind => kind;
 
         public Task<DispatchOutcome> SendAsync(DispatchUnit unit, CancellationToken cancellationToken) =>
             Task.FromResult(result(unit));

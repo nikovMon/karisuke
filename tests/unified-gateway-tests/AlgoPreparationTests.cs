@@ -72,7 +72,7 @@ public sealed class AlgoPreparationTests
         {
             XUserName = $"{name}-user", Origin = $"{name}-origin", QueueType = $"{name}-queue", SaveDetections = save
         })),
-        Transport = new() { Kind = "http", Http = new() { Method = "PUT", Endpoint = $"https://{name}.example.invalid/mission/upsert/" } }
+        Transport = new() { Kind = PipelineTransportKind.Http, Http = new() { Method = "PUT", Endpoint = $"https://{name}.example.invalid/mission/upsert/" } }
     };
 
     private static JsonElement RuleParameters() => Json("""

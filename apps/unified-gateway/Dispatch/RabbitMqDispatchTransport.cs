@@ -11,7 +11,6 @@ namespace ImagingPipeline.UnifiedGateway.Dispatch;
 /// </summary>
 public sealed class RabbitMqDispatchTransport : IDispatchTransport
 {
-    public const string TransportKind = "rabbitmq";
 
     private readonly IRabbitMqDestinationPublisher _publisher;
     private readonly FrozenDictionary<string, RabbitMqDestination> _destinations;
@@ -23,14 +22,14 @@ public sealed class RabbitMqDispatchTransport : IDispatchTransport
     {
         _publisher = publisher;
         _destinations = catalog.GetEnabled()
-            .Where(pipeline => pipeline.Transport.Kind == TransportKind)
+            .Where(pipeline => pipeline.Transport.Kind == PipelineTransportKind.RabbitMq)
             .ToFrozenDictionary(
                 pipeline => pipeline.PipelineId,
                 pipeline => CreateDestination(pipeline.Transport.RabbitMq!, connections),
                 StringComparer.Ordinal);
     }
 
-    public string Kind => TransportKind;
+    public PipelineTransportKind Kind => PipelineTransportKind.RabbitMq;
 
     public async Task<DispatchOutcome> SendAsync(DispatchUnit unit, CancellationToken cancellationToken)
     {

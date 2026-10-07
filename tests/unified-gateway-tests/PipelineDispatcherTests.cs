@@ -1,3 +1,4 @@
+using ImagingPipeline.PipelineCatalog;
 using ImagingPipeline.Observability;
 using ImagingPipeline.UnifiedGateway.Dispatch;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -10,8 +11,8 @@ public sealed class PipelineDispatcherTests
     [Fact]
     public async Task UnitsAreSentInParallelOverTheirTransportAndOutcomesKeepInputOrder()
     {
-        var rabbit = new FakeTransport("rabbitmq") { Delay = TimeSpan.FromMilliseconds(100) };
-        var http = new FakeTransport("http");
+        var rabbit = new FakeTransport(PipelineTransportKind.RabbitMq) { Delay = TimeSpan.FromMilliseconds(100) };
+        var http = new FakeTransport(PipelineTransportKind.Http);
         var dispatcher = CreateDispatcher([rabbit, http]);
         var first = Unit(RabbitMqPipeline("asd"), "first");
         var second = Unit(HttpPipeline("algo"), "second");
@@ -36,7 +37,7 @@ public sealed class PipelineDispatcherTests
     [Fact]
     public async Task UnitWithoutARegisteredTransportIsRejected()
     {
-        var dispatcher = CreateDispatcher([new FakeTransport("rabbitmq")]);
+        var dispatcher = CreateDispatcher([new FakeTransport(PipelineTransportKind.RabbitMq)]);
 
         var outcome = Assert.Single(await dispatcher.DispatchAsync([Unit(HttpPipeline("algo"))], CancellationToken.None));
 
@@ -48,7 +49,7 @@ public sealed class PipelineDispatcherTests
     public async Task TransportExceptionBecomesRetryableWithoutLosingOtherOutcomes()
     {
         var failure = new InvalidOperationException("unexpected");
-        var dispatcher = CreateDispatcher([new FakeTransport("rabbitmq") { Throw = failure }, new FakeTransport("http")]);
+        var dispatcher = CreateDispatcher([new FakeTransport(PipelineTransportKind.RabbitMq) { Throw = failure }, new FakeTransport(PipelineTransportKind.Http)]);
 
         var outcomes = await dispatcher.DispatchAsync(
             [Unit(RabbitMqPipeline("asd"), "first"), Unit(HttpPipeline("algo"), "second")],
@@ -63,7 +64,7 @@ public sealed class PipelineDispatcherTests
     public async Task TransportOutcomesArePassedThrough()
     {
         var dispatcher = CreateDispatcher([
-            new FakeTransport("rabbitmq") { Result = unit => DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Validation, statusCode: 400) }
+            new FakeTransport(PipelineTransportKind.RabbitMq) { Result = unit => DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Validation, statusCode: 400) }
         ]);
 
         var outcome = Assert.Single(await dispatcher.DispatchAsync([Unit(RabbitMqPipeline("asd"))], CancellationToken.None));
@@ -79,8 +80,8 @@ public sealed class PipelineDispatcherTests
         var listener = new RecordingListener();
         var dispatcher = CreateDispatcher(
             [
-                new FakeTransport("rabbitmq"),
-                new FakeTransport("http") { Result = unit => DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Timeout) }
+                new FakeTransport(PipelineTransportKind.RabbitMq),
+                new FakeTransport(PipelineTransportKind.Http) { Result = unit => DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Timeout) }
             ],
             [listener]);
 
@@ -96,7 +97,7 @@ public sealed class PipelineDispatcherTests
     {
         var second = new RecordingListener();
         var dispatcher = CreateDispatcher(
-            [new FakeTransport("rabbitmq")],
+            [new FakeTransport(PipelineTransportKind.RabbitMq)],
             [new RecordingListener { Throw = new InvalidOperationException("cache down") }, second]);
 
         var outcome = Assert.Single(await dispatcher.DispatchAsync([Unit(RabbitMqPipeline("asd"))], CancellationToken.None));
@@ -110,7 +111,7 @@ public sealed class PipelineDispatcherTests
     {
         using var cancellation = new CancellationTokenSource();
         await cancellation.CancelAsync();
-        var dispatcher = CreateDispatcher([new FakeTransport("rabbitmq") { Delay = TimeSpan.FromSeconds(5) }]);
+        var dispatcher = CreateDispatcher([new FakeTransport(PipelineTransportKind.RabbitMq) { Delay = TimeSpan.FromSeconds(5) }]);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => dispatcher.DispatchAsync([Unit(RabbitMqPipeline("asd"))], cancellation.Token));
@@ -120,7 +121,7 @@ public sealed class PipelineDispatcherTests
     public void DuplicateTransportKindsAreRejected()
     {
         Assert.Throws<InvalidOperationException>(
-            () => CreateDispatcher([new FakeTransport("rabbitmq"), new FakeTransport("rabbitmq")]));
+            () => CreateDispatcher([new FakeTransport(PipelineTransportKind.RabbitMq), new FakeTransport(PipelineTransportKind.RabbitMq)]));
     }
 
     private static PipelineDispatcher CreateDispatcher(
@@ -128,11 +129,11 @@ public sealed class PipelineDispatcherTests
         IDispatchDeliveryListener[]? listeners = null) =>
         new(transports, listeners ?? [], NullLogger<PipelineDispatcher>.Instance);
 
-    private sealed class FakeTransport(string kind) : IDispatchTransport
+    private sealed class FakeTransport(PipelineTransportKind kind) : IDispatchTransport
     {
         private long _completedAt;
 
-        public string Kind => kind;
+        public PipelineTransportKind Kind => kind;
         public TimeSpan Delay { get; init; }
         public Exception? Throw { get; init; }
         public Func<DispatchUnit, DispatchOutcome> Result { get; init; } = unit => DispatchOutcome.Delivered(unit);

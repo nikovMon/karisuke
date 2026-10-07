@@ -1,4 +1,5 @@
 using ImagingPipeline.Observability;
+using ImagingPipeline.PipelineCatalog;
 using ImagingPipeline.UnifiedGateway.Processing;
 
 namespace ImagingPipeline.UnifiedGateway.Dispatch;
@@ -14,7 +15,8 @@ public sealed record DispatchUnit(
     IReadOnlyDictionary<string, object?>? SourceHeaders = null)
 {
     public string PipelineId => Work.Pipeline.PipelineId;
-    public string TransportKind => Work.Pipeline.Transport.Kind;
+    // The catalog rejects a pipeline without a transport kind at startup.
+    public PipelineTransportKind TransportKind => Work.Pipeline.Transport.Kind!.Value;
 }
 
 public enum DispatchStatus

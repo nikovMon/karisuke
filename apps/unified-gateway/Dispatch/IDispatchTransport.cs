@@ -1,3 +1,5 @@
+using ImagingPipeline.PipelineCatalog;
+
 namespace ImagingPipeline.UnifiedGateway.Dispatch;
 
 /// <summary>
@@ -7,7 +9,7 @@ namespace ImagingPipeline.UnifiedGateway.Dispatch;
 public interface IDispatchTransport
 {
     /// <summary>The catalog <c>Transport.Kind</c> this transport handles.</summary>
-    string Kind { get; }
+    PipelineTransportKind Kind { get; }
 
     Task<DispatchOutcome> SendAsync(DispatchUnit unit, CancellationToken cancellationToken);
 }

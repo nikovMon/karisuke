@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using ImagingPipeline.Observability;
+using ImagingPipeline.PipelineCatalog;
 
 namespace ImagingPipeline.UnifiedGateway.Dispatch;
 
@@ -10,7 +11,7 @@ namespace ImagingPipeline.UnifiedGateway.Dispatch;
 /// </summary>
 public sealed class PipelineDispatcher
 {
-    private readonly FrozenDictionary<string, IDispatchTransport> _transports;
+    private readonly FrozenDictionary<PipelineTransportKind, IDispatchTransport> _transports;
     private readonly IReadOnlyList<IDispatchDeliveryListener> _listeners;
     private readonly ILogger<PipelineDispatcher> _logger;
 
@@ -19,16 +20,16 @@ public sealed class PipelineDispatcher
         IEnumerable<IDispatchDeliveryListener> listeners,
         ILogger<PipelineDispatcher> logger)
     {
-        var byKind = new Dictionary<string, IDispatchTransport>(StringComparer.Ordinal);
+        var byKind = new Dictionary<PipelineTransportKind, IDispatchTransport>();
         foreach (var transport in transports)
         {
             if (!byKind.TryAdd(transport.Kind, transport))
             {
-                throw new InvalidOperationException($"More than one dispatch transport is registered for kind '{transport.Kind}'.");
+                throw new InvalidOperationException($"More than one dispatch transport is registered for kind '{transport.Kind.Value()}'.");
             }
         }
 
-        _transports = byKind.ToFrozenDictionary(StringComparer.Ordinal);
+        _transports = byKind.ToFrozenDictionary();
         _listeners = listeners.ToArray();
         _logger = logger;
     }

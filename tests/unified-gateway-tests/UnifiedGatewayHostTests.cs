@@ -122,7 +122,7 @@ public sealed class UnifiedGatewayHostTests
         var dispatcher = factory.Services.GetRequiredService<PipelineDispatcher>();
         var transports = factory.Services.GetServices<IDispatchTransport>().Select(transport => transport.Kind);
         Assert.NotNull(dispatcher);
-        Assert.Equal(["rabbitmq", "http"], transports);
+        Assert.Equal([PipelineTransportKind.RabbitMq, PipelineTransportKind.Http], transports);
 
         var handler = factory.Services.GetRequiredService<IHttpMessageHandlerFactory>()
             .CreateHandler(HttpDispatchTransport.HttpClientName);

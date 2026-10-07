@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using ImagingPipeline.Observability;
+using ImagingPipeline.PipelineCatalog;
 
 namespace ImagingPipeline.UnifiedGateway.Dispatch;
 
@@ -35,11 +36,11 @@ internal sealed class DispatchTelemetry : IDisposable
             new("messaging.message.id", unit.DispatchId),
             new("messaging.message.conversation_id", unit.SourceMessageId),
             new(TelemetryAttributeNames.PipelineId, unit.PipelineId),
-            new(TelemetryAttributeNames.PipelineTransport, unit.TransportKind)
+            new(TelemetryAttributeNames.PipelineTransport, unit.TransportKind.Value())
         });
         _span = PipelineSpanScope.StartStage(PipelineStage.UnifiedGateway, "dispatch", default);
         _span.SetTag(TelemetryAttributeNames.PipelineId, unit.PipelineId);
-        _span.SetTag(TelemetryAttributeNames.PipelineTransport, unit.TransportKind);
+        _span.SetTag(TelemetryAttributeNames.PipelineTransport, unit.TransportKind.Value());
         _span.SetTag("messaging.message.id", unit.DispatchId);
     }
 
@@ -102,7 +103,7 @@ internal sealed class DispatchTelemetry : IDisposable
         var tags = new TagList
         {
             { TelemetryAttributeNames.PipelineId, _unit.PipelineId },
-            { TelemetryAttributeNames.PipelineTransport, _unit.TransportKind },
+            { TelemetryAttributeNames.PipelineTransport, _unit.TransportKind.Value() },
             { TelemetryAttributeNames.PipelineOutcome, outcome.Value() }
         };
         if (error != TelemetryErrorCategory.None)
