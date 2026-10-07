@@ -47,56 +47,31 @@ internal sealed class RabbitMqDestinationPublisher : IRabbitMqDestinationPublish
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
 
         var route = _routes.GetOrAdd(destination.Connection, CreateRoute).Value;
-        var started = TelemetryTiming.StartTimestamp();
-        var outcome = TelemetryOutcome.Success;
-        var error = TelemetryErrorCategory.None;
+        using var telemetry = RabbitMqSendTelemetry.Begin(destination.TelemetryName, message.Body.LongLength, cancellationToken);
 
-        try
+        // Headers belong to the caller's payload contract; only the shared timing headers are added.
+        var headers = RabbitMqHeaders.Clone(message.Headers);
+        PipelineTimingHeaders.EnsureStarted(headers);
+        var properties = new BasicProperties
         {
-            // Headers belong to the caller's payload contract; only the shared timing headers are added.
-            var headers = RabbitMqHeaders.Clone(message.Headers);
-            PipelineTimingHeaders.EnsureStarted(headers);
-            var properties = new BasicProperties
-            {
-                MessageId = message.MessageId,
-                CorrelationId = message.CorrelationId,
-                ContentType = message.ContentType,
-                Persistent = true,
-                Headers = headers
-            };
+            MessageId = message.MessageId,
+            CorrelationId = message.CorrelationId,
+            ContentType = message.ContentType,
+            Persistent = true,
+            Headers = headers
+        };
 
-            await using var lease = await route.Channels.LeaseAsync(cancellationToken);
-            await EnsureDeclaredAsync(lease.Channel, destination, cancellationToken);
-            MessagingTimingHeaders.StampPublished(headers);
-            await lease.Channel.BasicPublishAsync(
-                exchange: destination.ExchangeName,
-                routingKey: destination.EffectiveRoutingKey,
-                mandatory: true,
-                basicProperties: properties,
-                body: message.Body,
-                cancellationToken: cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            outcome = TelemetryOutcome.Cancelled;
-            error = TelemetryErrorCategory.Cancelled;
-            throw;
-        }
-        catch
-        {
-            outcome = TelemetryOutcome.Failure;
-            error = TelemetryErrorCategory.Publish;
-            throw;
-        }
-        finally
-        {
-            MessagingTelemetry.RecordSent(
-                destination.TelemetryName,
-                message.Body.LongLength,
-                TelemetryTiming.ElapsedSeconds(started),
-                outcome,
-                error);
-        }
+        await using var lease = await route.Channels.LeaseAsync(cancellationToken);
+        await EnsureDeclaredAsync(lease.Channel, destination, cancellationToken);
+        MessagingTimingHeaders.StampPublished(headers);
+        await lease.Channel.BasicPublishAsync(
+            exchange: destination.ExchangeName,
+            routingKey: destination.EffectiveRoutingKey,
+            mandatory: true,
+            basicProperties: properties,
+            body: message.Body,
+            cancellationToken: cancellationToken);
+        telemetry.Succeeded();
     }
 
     private async Task EnsureDeclaredAsync(
