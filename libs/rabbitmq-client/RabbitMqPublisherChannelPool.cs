@@ -18,7 +18,6 @@ internal enum RabbitMqPublisherPoolRole
 {
     Output,
     InputCluster,
-    // Destinations are declared per publish target by RabbitMqDestinationPublisher.
     Destination
 }
 
