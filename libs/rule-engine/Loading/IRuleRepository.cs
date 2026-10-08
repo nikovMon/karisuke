@@ -12,7 +12,7 @@ public interface IRuleRepository
 /// The documents read from an index. <see cref="RejectedSources"/> holds documents that could not
 /// even be read as rules; they are reported, not fatal.
 /// </summary>
-public sealed record RuleLoadResult(IReadOnlyList<RuleDto> Rules, IReadOnlyList<RuleRejection> RejectedSources);
+public sealed record RuleLoadResult(IReadOnlyList<PipelineRuleDocument> Rules, IReadOnlyList<RuleRejection> RejectedSources);
 
 /// <summary>A rule left out of a snapshot, and why.</summary>
 public sealed record RuleRejection(string RuleId, string Reason, Exception? Exception = null);

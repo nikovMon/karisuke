@@ -1,5 +1,7 @@
+using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.GeometryUtils;
+using ImagingPipeline.PipelineContracts;
 using ImagingPipeline.RuleEngine.Input;
 using ImagingPipeline.RuleEngine.Rules;
 
@@ -9,28 +11,30 @@ internal static class RuleTestData
 {
     public static readonly DateTimeOffset Now = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
 
-    public static RuleDto Rule(string id = "rule-1") => new()
+    public static readonly IPipelineContract Contract = new AsdPipelineContract();
+
+    public static PipelineRuleDocument Rule(string id = "rule-1") => new()
     {
         Id = id,
         RuleName = id,
-        AlgorithmNames = [AlgorithmName.FindAir],
-        Sensors = [new SensorConfig { Name = "camera", RegistrationQualities = [RegistrationQuality.Accurate] }],
-        TenantsInfo =
-        [
-            new TenantInfo
-            {
-                TenantId = "tenant-1",
-                TilingConfigs = [new TilingConfig { TileSizeWidth = 512, TileSizeHeight = 512 }]
-            }
-        ],
-        MinimumResolution = 0.5,
-        MaximumResolution = 1,
-        LocationWkt = "POLYGON ((0 0, 2 0, 2 2, 0 2, 0 0))"
+        Match = new RuleMatchConditions
+        {
+            Sensors = [new SensorConfig { Name = "camera", RegistrationQualities = [RegistrationQuality.Accurate] }],
+            Resolution = new ResolutionRange { Minimum = 0.5, Maximum = 1 },
+            LocationWkt = "POLYGON ((0 0, 2 0, 2 2, 0 2, 0 0))"
+        },
+        RunParams = [AsdRunParams("tenant-1")]
     };
 
-    public static ActiveRule ActiveRule(RuleDto? rule = null) =>
-        Assert.Single(new RuleSnapshotBuilder(TimeSpan.FromDays(30))
-            .Build(new([rule ?? Rule()], [])).Rules);
+    public static JsonElement AsdRunParams(string tenantId) => JsonSerializer.SerializeToElement(new
+    {
+        tenantId,
+        algorithmNames = new[] { "FindAir" },
+        tilingConfigs = new[] { new { tileSizeWidth = 512, tileSizeHeight = 512, tileOverlapWidth = 0, tileOverlapHeight = 0 } }
+    });
+
+    public static ActiveRule ActiveRule(PipelineRuleDocument? rule = null) =>
+        Assert.Single(RuleSnapshotBuilder.Build(new([rule ?? Rule()], []), Contract).Rules);
 
     public static GatewayInputMessage Image(
         string sensorName = "camera",

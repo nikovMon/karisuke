@@ -50,7 +50,7 @@ public sealed class RuleMatcherTests
     public void RuleWithoutSensorsMatchesAnySensor()
     {
         var rule = Rule();
-        rule.Sensors = [];
+        rule.Match!.Sensors = null;
 
         Assert.Single(_matcher.Match(Image(sensorName: "any-camera"), [ActiveRule(rule)]).Matches);
     }
@@ -59,7 +59,7 @@ public sealed class RuleMatcherTests
     public void SensorGridTypesRestrictTheMatch()
     {
         var rule = Rule();
-        rule.Sensors = [new SensorConfig { Name = "camera", GridTypes = ["grid-a"] }];
+        rule.Match!.Sensors = [new SensorConfig { Name = "camera", GridTypes = ["grid-a"] }];
         var activeRule = ActiveRule(rule);
 
         Assert.Single(_matcher.Match(Image(gridType: "grid-a"), [activeRule]).Matches);
@@ -70,10 +70,32 @@ public sealed class RuleMatcherTests
     public void PhotoOlderThanTheRuleLimitIsNoMatch()
     {
         var rule = Rule();
-        rule.IsPhotoOld = true;
+        rule.Match!.MaxPhotoAgeDays = 30;
         var oldPhoto = Image(photoTime: Now.AddDays(-31));
 
         Assert.Equal(RuleMissReason.PhotoAge, Assert.Single(_matcher.Match(oldPhoto, [ActiveRule(rule)]).Misses).Reason);
         Assert.Single(_matcher.Match(oldPhoto, [ActiveRule()]).Matches);
+    }
+
+    [Fact]
+    public void RuleWithoutLocationCoversTheWholeImage()
+    {
+        var rule = Rule();
+        rule.Match!.LocationWkt = null;
+        var image = Image();
+
+        var match = Assert.Single(_matcher.Match(image, [ActiveRule(rule)]).Matches);
+
+        Assert.True(match.IntersectionGeometry.EqualsExact(image.Geometry));
+    }
+
+    [Fact]
+    public void MatchAllRuleMatchesAnyImage()
+    {
+        var rule = Rule();
+        rule.Match = null;
+        rule.MatchAll = true;
+
+        Assert.Single(_matcher.Match(Image(sensorName: "any", bestResolution: 99), [ActiveRule(rule)]).Matches);
     }
 }

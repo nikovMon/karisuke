@@ -6,41 +6,65 @@ namespace ImagingPipeline.RuleEngine.Tests;
 
 public sealed class RuleSnapshotBuilderTests
 {
-    private readonly RuleSnapshotBuilder _builder = new(TimeSpan.FromDays(30));
-
     [Fact]
-    public void ValidRulesArePreparedForMatching()
+    public void ValidRuleIsPreparedForMatching()
     {
         var rule = Rule();
-        rule.IsPhotoOld = true;
+        rule.Match!.MaxPhotoAgeDays = 30;
+        rule.RunParams = [AsdRunParams("tenant-1"), AsdRunParams("tenant-2")];
 
-        var snapshot = _builder.Build(new([rule], []));
+        var snapshot = RuleSnapshotBuilder.Build(new([rule], []), Contract);
 
         var activeRule = Assert.Single(snapshot.Rules);
         Assert.Empty(snapshot.Rejections);
         Assert.Equal(TimeSpan.FromDays(30), activeRule.MaxPhotoAge);
         Assert.True(activeRule.Sensors.ContainsKey("camera"));
-        Assert.False(activeRule.Geometry.IsEmpty);
+        Assert.False(activeRule.Geometry!.IsEmpty);
+        Assert.Equal(2, activeRule.RunParams.Count);
         Assert.False(snapshot.AllRulesRejected);
     }
 
     [Fact]
-    public void InvalidRuleIsRejectedWithAReasonWithoutStoppingTheOthers()
+    public void AbsentConditionsBecomeNoConstraint()
     {
-        var invalid = Rule("invalid");
-        invalid.MinimumResolution = 0;
-        var badGeometry = Rule("bad-geometry");
-        badGeometry.LocationWkt = "POLYGON ((0 0";
+        var rule = Rule();
+        rule.Match = null;
+        rule.MatchAll = true;
 
-        var snapshot = _builder.Build(new([invalid, Rule("valid"), badGeometry, null!], []));
+        var activeRule = Assert.Single(RuleSnapshotBuilder.Build(new([rule], []), Contract).Rules);
+
+        Assert.Empty(activeRule.Sensors);
+        Assert.Equal(0, activeRule.MinimumResolution);
+        Assert.Equal(double.PositiveInfinity, activeRule.MaximumResolution);
+        Assert.Null(activeRule.MaxPhotoAge);
+        Assert.Null(activeRule.Geometry);
+    }
+
+    [Fact]
+    public void InvalidRulesAreRejectedWithAReasonWithoutStoppingTheOthers()
+    {
+        var invalidDocument = Rule("invalid-document");
+        invalidDocument.Match = null;
+        var invalidRunParams = Rule("invalid-run-params");
+        invalidRunParams.RunParams = [AsdRunParams(" ")];
+        var badGeometry = Rule("bad-geometry");
+        badGeometry.Match!.LocationWkt = "POLYGON ((0 0";
+
+        var snapshot = RuleSnapshotBuilder.Build(
+            new([invalidDocument, Rule("valid"), invalidRunParams, badGeometry, null!], []), Contract);
 
         Assert.Equal("valid", Assert.Single(snapshot.Rules).Id);
         Assert.Collection(
             snapshot.Rejections,
             rejection =>
             {
-                Assert.Equal("invalid", rejection.RuleId);
-                Assert.Contains("minimumResolution", rejection.Reason, StringComparison.Ordinal);
+                Assert.Equal("invalid-document", rejection.RuleId);
+                Assert.Contains("matchAll", rejection.Reason, StringComparison.Ordinal);
+            },
+            rejection =>
+            {
+                Assert.Equal("invalid-run-params", rejection.RuleId);
+                Assert.Contains("runParams[0].tenantId", rejection.Reason, StringComparison.Ordinal);
             },
             rejection =>
             {
@@ -53,7 +77,7 @@ public sealed class RuleSnapshotBuilderTests
     [Fact]
     public void SourceRejectionsAreKeptAndAnAllRejectedLoadIsFlagged()
     {
-        var snapshot = _builder.Build(new([], [new RuleRejection("unreadable", "Its source was null.")]));
+        var snapshot = RuleSnapshotBuilder.Build(new([], [new RuleRejection("unreadable", "Its source was null.")]), Contract);
 
         Assert.Empty(snapshot.Rules);
         Assert.Equal("unreadable", Assert.Single(snapshot.Rejections).RuleId);
@@ -63,6 +87,6 @@ public sealed class RuleSnapshotBuilderTests
     [Fact]
     public void EmptyLoadIsNotFlagged()
     {
-        Assert.False(_builder.Build(new([], [])).AllRulesRejected);
+        Assert.False(RuleSnapshotBuilder.Build(new([], []), Contract).AllRulesRejected);
     }
 }
