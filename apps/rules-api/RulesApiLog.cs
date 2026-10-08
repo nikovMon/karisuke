@@ -101,6 +101,10 @@ internal static partial class RulesApiLog
         string failedIdSample,
         int omittedFailureCount);
 
+    // The pipeline ID travels as a structured field in the log scope, not in the message.
+    [LoggerMessage(5030, LogLevel.Warning, "Requested pipeline is not configured.")]
+    public static partial void PipelineNotFound(this ILogger logger);
+
     [LoggerMessage(5050, LogLevel.Warning, "Elasticsearch health probe returned an invalid response. HttpStatusCode: {HttpStatusCode}; FailureType: {FailureType}")]
     public static partial void ElasticsearchHealthInvalidResponse(
         this ILogger logger,

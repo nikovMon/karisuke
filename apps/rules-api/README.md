@@ -39,6 +39,10 @@ dotnet run --project apps/rules-api/ImagingPipeline.Rules.Api.csproj
 
 Docker Compose exposes the service on host port `8080`.
 
+### Pipeline catalog
+
+The API loads the same pipeline catalog as the unified gateway: `pipelinecatalog.json` next to the app, or the file named by the `PipelineCatalogFile` setting. An invalid catalog stops startup. The API reads pipeline IDs and contracts from it, never transport settings. The catalog still has to validate in full, so RabbitMQ credentials only need placeholder values here.
+
 ## Rule Schema
 
 Rule documents use this JSON shape:
@@ -149,6 +153,21 @@ Logging__LogLevel__ImagingPipeline.Rules.Api=Debug
 Trace and span identifiers are supplied by OpenTelemetry log correlation rather than repeated in message templates.
 
 ## Routes
+
+### GET /pipelines
+
+Lists every configured pipeline, enabled or not, ordered by ID. Transport settings are never returned.
+
+```json
+[
+  { "pipelineId": "algo", "contractId": "algo", "enabled": true },
+  { "pipelineId": "asd", "contractId": "asd", "enabled": true }
+]
+```
+
+### GET /pipelines/{pipelineId}
+
+Returns one pipeline in the same shape, or `404 Not Found` when the ID is not in the catalog.
 
 ### GET /health
 
