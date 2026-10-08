@@ -53,7 +53,10 @@ public static class RuleSnapshotBuilder
             return false;
         }
 
-        var errors = ValidateDocument(rule).Concat(ValidateRunParams(rule, contract)).ToList();
+        var errors = ValidateDocument(rule)
+            .Concat(ValidateRunParams(rule, contract))
+            .Concat(contract.ValidateRuleLocation(rule.Match?.LocationWkt).Select(error => $"{error.Field}: {error.Message}"))
+            .ToList();
         if (errors.Count > 0)
         {
             rejection = new RuleRejection(RuleLabel(rule), DescribeErrors(errors));

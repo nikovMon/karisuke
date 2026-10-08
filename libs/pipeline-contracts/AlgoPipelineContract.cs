@@ -37,6 +37,12 @@ public sealed class AlgoPipelineContract : IPipelineContract
         return errors.AsReadOnly();
     }
 
+    // Algo receives the rule's area as focusedWkt, so an Algo rule needs a location.
+    public IReadOnlyList<ContractValidationError> ValidateRuleLocation(string? locationWkt) =>
+        string.IsNullOrWhiteSpace(locationWkt)
+            ? [new("match.locationWkt", "Must be supplied; Algo sends the rule's location as focusedWkt.")]
+            : [];
+
     public IReadOnlyList<ContractValidationError> ValidateContext(PipelineDispatchContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
@@ -45,9 +51,7 @@ public sealed class AlgoPipelineContract : IPipelineContract
             errors.Add(new("input.id", "Must be a nonempty string."));
         if (PhotoTime(context) == default)
             errors.Add(new("input.photoTime", "Must be supplied."));
-        // Algo receives the rule's area as focusedWkt, so an Algo rule needs a location.
-        if (string.IsNullOrWhiteSpace(context.RuleLocationWkt))
-            errors.Add(new("rule.locationWkt", "Must be supplied."));
+        errors.AddRange(ValidateRuleLocation(context.RuleLocationWkt));
         return errors.AsReadOnly();
     }
 
