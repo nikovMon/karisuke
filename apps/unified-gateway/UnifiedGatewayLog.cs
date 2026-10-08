@@ -15,6 +15,12 @@ internal static partial class UnifiedGatewayLog
     [LoggerMessage(6003, LogLevel.Warning, "Dispatch delivery listener failed; the unit remains delivered.")]
     public static partial void DeliveryListenerFailed(this ILogger logger, Exception exception);
 
+    [LoggerMessage(6020, LogLevel.Warning, "Source message is invalid; it will be dead-lettered.")]
+    public static partial void SourceMessageRejected(this ILogger logger, Exception exception);
+
+    [LoggerMessage(6021, LogLevel.Information, "Source message processed.")]
+    public static partial void SourceMessageProcessed(this ILogger logger);
+
     [LoggerMessage(6010, LogLevel.Information, "Pipeline rules loaded.")]
     public static partial void PipelineRulesLoaded(this ILogger logger);
 
