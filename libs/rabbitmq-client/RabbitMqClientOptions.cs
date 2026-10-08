@@ -60,6 +60,8 @@ public sealed class RabbitMqClientOptions
     internal string EffectiveInputExchange => InputExchange;
     internal string EffectiveInputExchangeType => InputExchangeType;
     internal string EffectiveInputRoutingKey => EffectiveValue(InputRoutingKey, InputQueue);
+    internal bool HasOutput => !string.IsNullOrWhiteSpace(OutputQueue);
+
     internal string EffectiveOutputRoutingKey => string.IsNullOrWhiteSpace(OutputRoutingKey) ? OutputQueue : OutputRoutingKey;
     internal string EffectiveRetryRoutingKey => string.IsNullOrWhiteSpace(RetryRoutingKey) ? RetryQueue : RetryRoutingKey;
     internal string EffectiveDeadLetterExchange => HeadersArguments.TryGetValue("x-dead-letter-exchange", out var exchange)
@@ -110,10 +112,10 @@ public sealed class RabbitMqClientOptions
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(OutputQueue) ||
-            string.IsNullOrWhiteSpace(EffectiveDeadLetterQueue))
+        // OutputQueue is optional: a consumer whose handler publishes elsewhere has no output.
+        if (string.IsNullOrWhiteSpace(EffectiveDeadLetterQueue))
         {
-            error = "RabbitMq OutputQueue and DeadLetterQueue must not be empty for consumers.";
+            error = "RabbitMq DeadLetterQueue must not be empty for consumers.";
             return false;
         }
 
