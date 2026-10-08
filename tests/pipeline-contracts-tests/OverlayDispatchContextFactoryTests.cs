@@ -39,7 +39,10 @@ public sealed class OverlayDispatchContextFactoryTests
     [Fact]
     public void AlgoOverlayDoesNotRequireAsdMetadataButAsdContractRejectsMissingValues()
     {
-        var context = Context("""{"id":"image-a","photoTime":"2026-09-23T10:00:00Z"}""");
+        var context = Context("""{"id":"image-a","photoTime":"2026-09-23T10:00:00Z"}""") with
+        {
+            RuleLocationWkt = "POLYGON ((0 0, 2 0, 2 2, 0 0))"
+        };
         Assert.Empty(new AlgoPipelineContract().ValidateContext(context));
         var errors = new AsdPipelineContract().ValidateContext(context);
         Assert.Contains(errors, error => error.Field == "input.imageUrl");

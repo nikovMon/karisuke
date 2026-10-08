@@ -53,6 +53,12 @@ public sealed record PipelineDispatchContext(
     public string? NextOverlayId { get; init; }
 
     /// <summary>
+    /// The matched rule's own location as WKT, for contracts that send the rule area rather than the
+    /// ROI (the image's intersection with it). Null when the rule has no location.
+    /// </summary>
+    public string? RuleLocationWkt { get; init; }
+
+    /// <summary>
     /// The legacy Algo clock value from DateTime.Parse. Kept separately from the UTC timestamp
     /// used by ASD so formatting the mission date does not introduce a second conversion.
     /// </summary>

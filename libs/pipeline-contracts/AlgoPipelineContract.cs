@@ -3,7 +3,6 @@ using System.Collections.Frozen;
 using System.Globalization;
 using System.Text.Encodings.Web;
 using System.Text.Json;
-using ImagingPipeline.GeometryUtils;
 
 namespace ImagingPipeline.PipelineContracts;
 
@@ -13,7 +12,7 @@ public sealed class AlgoPipelineContract : IPipelineContract
     private static readonly FrozenSet<string> RunParamFields = new[]
     {
         "customer", "profile_name", "hebrew_rule_name", "algorithm_name", "priority", "username",
-        "run_every_other_image", "should_check_in_vip", "location_geojson"
+        "run_every_other_image", "should_check_in_vip"
     }.ToFrozenSet(StringComparer.Ordinal);
     private static readonly FrozenSet<string> SettingFields = new[]
     {
@@ -46,6 +45,9 @@ public sealed class AlgoPipelineContract : IPipelineContract
             errors.Add(new("input.id", "Must be a nonempty string."));
         if (PhotoTime(context) == default)
             errors.Add(new("input.photoTime", "Must be supplied."));
+        // Algo receives the rule's area as focusedWkt, so an Algo rule needs a location.
+        if (string.IsNullOrWhiteSpace(context.RuleLocationWkt))
+            errors.Add(new("rule.locationWkt", "Must be supplied."));
         return errors.AsReadOnly();
     }
 
@@ -66,7 +68,7 @@ public sealed class AlgoPipelineContract : IPipelineContract
         using var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         writer.WriteStartObject();
         writer.WriteString("modelName", parameters.ProfileName);
-        writer.WriteString("focusedWkt", parameters.FocusedWkt);
+        writer.WriteString("focusedWkt", context.RuleLocationWkt);
         writer.WriteString("origin", settings.Origin);
         writer.WriteString("queueType", settings.QueueType);
         writer.WriteNumber("priority", parameters.Priority);
@@ -102,7 +104,7 @@ public sealed class AlgoPipelineContract : IPipelineContract
         if (value.ValueKind != JsonValueKind.Object)
         {
             errors.Add(new("runParams", "Must be an object."));
-            return new("", null, null, "", 0, null, false, false, "");
+            return new("", null, null, "", 0, null, false, false);
         }
         ValidateProperties(value, RunParamFields, allowUnknown: false, errors);
         return new(
@@ -113,8 +115,7 @@ public sealed class AlgoPipelineContract : IPipelineContract
             ReadInteger(value, "priority", errors),
             ReadNullableString(value, "username", errors),
             ReadBoolean(value, "run_every_other_image", errors),
-            ReadBoolean(value, "should_check_in_vip", errors),
-            ReadRuleWkt(value, errors));
+            ReadBoolean(value, "should_check_in_vip", errors));
     }
 
     private static AlgoSettings ParseSettings(JsonElement value, List<ContractValidationError> errors)
@@ -130,27 +131,6 @@ public sealed class AlgoPipelineContract : IPipelineContract
             ReadRequiredString(value, "Origin", errors),
             ReadRequiredString(value, "QueueType", errors),
             ReadBoolean(value, "SaveDetections", errors));
-    }
-
-    private static string ReadRuleWkt(JsonElement value, List<ContractValidationError> errors)
-    {
-        if (value.TryGetProperty("location_geojson", out var geoJson) && geoJson.ValueKind == JsonValueKind.Object)
-        {
-            try
-            {
-                // This is the original rule geometry, not an intersection or the input ROI.
-                var geometry = GeometryUtilities.ReadGeoJson(geoJson);
-                if (geometry.Coordinates.All(coordinate => double.IsFinite(coordinate.X) && double.IsFinite(coordinate.Y)))
-                    return GeometryUtilities.WriteWkt(geometry);
-            }
-            catch (Exception exception) when (exception is GeometryValidationException or Newtonsoft.Json.JsonException
-                or ArgumentException or FormatException or InvalidOperationException or NullReferenceException)
-            {
-                // Surface a field error without logging rule geometry or library exception contents.
-            }
-        }
-        errors.Add(new("location_geojson", "Must be a valid, nonempty GeoJSON geometry with finite coordinates."));
-        return string.Empty;
     }
 
     private static string ReadRequiredString(JsonElement value, string name, List<ContractValidationError> errors)
@@ -209,7 +189,7 @@ public sealed class AlgoPipelineContract : IPipelineContract
     }
 
     private sealed record AlgoRunParameters(string Customer, string? ProfileName, string? HebrewRuleName,
-        string AlgorithmName, int Priority, string? Username, bool RunEveryOtherImage, bool ShouldCheckInVip, string FocusedWkt);
+        string AlgorithmName, int Priority, string? Username, bool RunEveryOtherImage, bool ShouldCheckInVip);
 
     private sealed record AlgoSettings(string XUserName, string Origin, string QueueType, bool SaveDetections);
 }

@@ -1,6 +1,6 @@
 # Pipeline contracts
 
-Pure validation and payload construction for the gateway and future service consumers. This library performs no rule matching, spatial indexing, geometry intersections, network calls, or message delivery. Algo converts the original rule geometry from GeoJSON to WKT.
+Pure validation and payload construction for the gateway and future service consumers. This library performs no rule matching, spatial indexing, geometry intersections, network calls, or message delivery.
 
 `PipelineContractRegistry` resolves explicitly registered contract IDs using ordinal comparison. Unknown IDs fail resolution. The gateway registers `AsdPipelineContract` as `asd` and `AlgoPipelineContract` as `algo`. Pipeline contracts use unversioned IDs.
 
@@ -46,15 +46,11 @@ One Algo run-parameter object describes one selected rule's mission request:
   "priority": 1,
   "username": null,
   "run_every_other_image": false,
-  "should_check_in_vip": false,
-  "location_geojson": {
-    "type": "Polygon",
-    "coordinates": [[[0, 0], [2, 0], [2, 2], [0, 0]]]
-  }
+  "should_check_in_vip": false
 }
 ```
 
-The optional `profile_name`, `hebrew_rule_name` and `username` accept strings or null. The other fields are required, with the shown JSON types. `algorithm_name` is one string and does not use ASD's algorithm enum. `priority` is a 32-bit integer without an invented business range. Unknown and duplicate run parameters, malformed geometry, and empty geometry are rejected. These are the payload-relevant fields, not the entire stored rule document: matching conditions and rule metadata remain outside this contract.
+The optional `profile_name`, `hebrew_rule_name` and `username` accept strings or null. The other fields are required, with the shown JSON types. `algorithm_name` is one string and does not use ASD's algorithm enum. `priority` is a 32-bit integer without an invented business range. Unknown and duplicate run parameters are rejected. These are the payload-relevant fields, not the entire stored rule document: matching conditions and rule metadata remain outside this contract.
 
 Configure each Algo pipeline's `ExtraData` with:
 
@@ -69,7 +65,7 @@ Configure each Algo pipeline's `ExtraData` with:
 
 All four settings are required with nonempty strings and a JSON boolean. Unknown extra settings are allowed and ignored; they cannot override other output fields or create a nested `extraData` property. Duplicate recognized settings are rejected. Two pipelines may use the same `algo` contract with different settings.
 
-The body follows the supplied Algo Manager builder: `customer` supplies `requestingUnit` and `displayName`; `profile_name` supplies `modelName`; `username` falls back to `XUserName` only when null. `missionName` combines the rule's Hebrew name with the image date formatted `dd/MM/yyyy` using invariant culture. The original `location_geojson` supplies `focusedWkt`, independently of the input ROI. `origin`, `queueType` and `saveDetections` come from `ExtraData`.
+The body follows the supplied Algo Manager builder: `customer` supplies `requestingUnit` and `displayName`; `profile_name` supplies `modelName`; `username` falls back to `XUserName` only when null. `missionName` combines the rule's Hebrew name with the image date formatted `dd/MM/yyyy` using invariant culture. The matched rule's own location supplies `focusedWkt`, independently of the input ROI. The caller passes it as `RuleLocationWkt` on the context, from the rule's `match.locationWkt`, so the polygon is stored once; a context without it is rejected. `origin`, `queueType` and `saveDetections` come from `ExtraData`.
 
 `tasksData` contains one task with `imageId`. When `run_every_other_image` is true, its nullable `legId`, `prevOverlayId` and `nextOverlayId` come from the overlay. When `should_check_in_vip` is true, `photoTime` is assigned. Unassigned nullable properties are serialized as null. These flags describe downstream behavior; the builder does not perform alternating-image filtering or VIP checks.
 
