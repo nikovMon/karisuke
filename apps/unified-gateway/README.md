@@ -171,6 +171,12 @@ Nested overrides such as `...__ExtraData__enabled` are rejected. Configuration s
 
 The old pipeline array format and nested `PipelineId` fields are rejected. Migrate deployment files to named objects and change indexed environment/CLI paths to pipeline IDs. IDs cannot differ only by case, contain `__`, or end with `_`; those spellings are ambiguous in environment-variable paths. Runtime lookups retain the configured ID spelling and remain case-sensitive. Overrides must use exactly the same spelling; case variants across providers fail startup.
 
+## Rules
+
+`PipelineRuleSnapshots` holds the active rules of every enabled pipeline. Each pipeline's rules are read from the index its catalog entry names, as v2 documents, and prepared with `libs/rule-engine`; run parameters are checked against the pipeline's contract. A rule that fails is left out and logged with its ID and reason (up to 10 per load).
+
+Startup fails unless every enabled pipeline loads. After that, rules reload every `RuleRefresh:IntervalSeconds` (default 60) plus up to `RuleRefresh:JitterSeconds` (default 5). Each pipeline reloads on its own: a failed reload, or one where every rule was rejected, keeps that pipeline's previous rules and leaves the others untouched. Logs carry `pipeline.id` and counts as fields; `unified_gateway.rules.loads` counts loads by pipeline and outcome. Elasticsearch connection settings come from the `Elasticsearch` section.
+
 ## Dispatch
 
 `PipelineDispatcher.DispatchAsync(units)` sends prepared work over each pipeline's transport, in parallel, and returns one outcome per unit in input order:

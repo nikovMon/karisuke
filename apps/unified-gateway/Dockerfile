@@ -9,6 +9,8 @@ COPY libs/pipeline-contracts/ImagingPipeline.PipelineContracts.csproj libs/pipel
 COPY libs/common-dtos/ImagingPipeline.Common.Dtos.csproj libs/common-dtos/
 COPY libs/geometry-utils/GeometryUtils.csproj libs/geometry-utils/
 COPY libs/observability/ImagingPipeline.Observability.csproj libs/observability/
+COPY libs/rule-engine/ImagingPipeline.RuleEngine.csproj libs/rule-engine/
+COPY libs/elasticsearch-client/ElasticsearchClient.csproj libs/elasticsearch-client/
 COPY libs/rabbitmq-client/RabbitMqClient.csproj libs/rabbitmq-client/
 RUN dotnet restore apps/unified-gateway/ImagingPipeline.UnifiedGateway.csproj
 
