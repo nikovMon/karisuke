@@ -1,3 +1,5 @@
+using System.Text.Json;
+using ImagingPipeline.PipelineContracts;
 using ImagingPipeline.RuleEngine.Loading;
 using ImagingPipeline.RuleEngine.Rules;
 using static ImagingPipeline.RuleEngine.Tests.RuleTestData;
@@ -75,6 +77,23 @@ public sealed class RuleSnapshotBuilderTests
     }
 
     [Fact]
+    public void ContractCanRequireARuleLocation()
+    {
+        var withLocation = Rule("with-location");
+        withLocation.RunParams = [AlgoRunParams()];
+        var withoutLocation = Rule("without-location");
+        withoutLocation.Match!.LocationWkt = null;
+        withoutLocation.RunParams = [AlgoRunParams()];
+
+        var snapshot = RuleSnapshotBuilder.Build(new([withLocation, withoutLocation], []), new AlgoPipelineContract());
+
+        Assert.Equal("with-location", Assert.Single(snapshot.Rules).Id);
+        var rejection = Assert.Single(snapshot.Rejections);
+        Assert.Equal("without-location", rejection.RuleId);
+        Assert.Contains("match.locationWkt", rejection.Reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SourceRejectionsAreKeptAndAnAllRejectedLoadIsFlagged()
     {
         var snapshot = RuleSnapshotBuilder.Build(new([], [new RuleRejection("unreadable", "Its source was null.")]), Contract);
@@ -89,4 +108,13 @@ public sealed class RuleSnapshotBuilderTests
     {
         Assert.False(RuleSnapshotBuilder.Build(new([], []), Contract).AllRulesRejected);
     }
+
+    private static JsonElement AlgoRunParams() => JsonSerializer.SerializeToElement(new
+    {
+        customer = "customer-a",
+        algorithm_name = "algorithm-a",
+        priority = 1,
+        run_every_other_image = false,
+        should_check_in_vip = false
+    });
 }

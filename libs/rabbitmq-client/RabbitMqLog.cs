@@ -97,6 +97,9 @@ internal static partial class RabbitMqLog
         double timeoutSeconds,
         string connectionRole);
 
+    [LoggerMessage(115, LogLevel.Warning, "RabbitMQ consumer stopped unexpectedly; restarting after a delay.")]
+    public static partial void ConsumerRestartScheduled(ILogger logger, Exception? exception);
+
     [LoggerMessage(200, LogLevel.Information,
         "RabbitMQ flow control started, watching {QueueCount} queue(s) with poll interval {PollIntervalSeconds}s")]
     public static partial void FlowControlStarted(

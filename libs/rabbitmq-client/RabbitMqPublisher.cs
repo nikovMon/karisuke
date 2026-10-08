@@ -30,7 +30,9 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
             cancellationToken);
 
     public Task PublishToOutputAsync(RabbitMqMessageEnvelope message, CancellationToken cancellationToken = default) =>
-        PublishCoreAsync(
+        !_options.HasOutput
+            ? throw new InvalidOperationException("RabbitMq OutputQueue is not configured, so handler outputs cannot be published.")
+            : PublishCoreAsync(
             _channels,
             _options.OutputExchange,
             _options.EffectiveOutputRoutingKey,

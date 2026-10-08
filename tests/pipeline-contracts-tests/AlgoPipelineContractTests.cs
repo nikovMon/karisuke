@@ -134,7 +134,9 @@ public sealed class AlgoPipelineContractTests
     public void RuleWithoutLocationCannotBuild()
     {
         var context = Context() with { RuleLocationWkt = null };
-        Assert.Contains(_contract.ValidateContext(context), error => error.Field == "rule.locationWkt");
+        Assert.Contains(_contract.ValidateContext(context), error => error.Field == "match.locationWkt");
+        Assert.NotEmpty(_contract.ValidateRuleLocation(null));
+        Assert.Empty(_contract.ValidateRuleLocation("POLYGON ((0 0, 2 0, 2 2, 0 0))"));
         Assert.Throws<ArgumentException>(() => _contract.BuildPayload(context, Json(Rule), Json(Settings)));
     }
 

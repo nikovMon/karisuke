@@ -177,6 +177,16 @@ The old pipeline array format and nested `PipelineId` fields are rejected. Migra
 
 Startup fails unless every enabled pipeline loads. After that, rules reload every `RuleRefresh:IntervalSeconds` (default 60) plus up to `RuleRefresh:JitterSeconds` (default 5). Each pipeline reloads on its own: a failed reload, or one where every rule was rejected, keeps that pipeline's previous rules and leaves the others untouched. Logs carry `pipeline.id` and counts as fields; `unified_gateway.rules.loads` counts loads by pipeline and outcome. Elasticsearch connection settings come from the `Elasticsearch` section.
 
+## Source consumption
+
+`SourceMessageHandler` handles each image update from the source queue (the `RabbitMq` section; `RabbitMqConsumerService` from `libs/rabbitmq-client` runs the consumer and restarts it on failure). Rules are loaded before consuming starts.
+
+1. An update whose `x-updated-fields` header does not list `gridType` is acknowledged without logging.
+2. The overlay is parsed and validated. An invalid message is dead-lettered and logged with its `error.code`.
+3. Every enabled pipeline's rules are matched. One log per pipeline lists the matched rules and why the others missed.
+4. Each matched rule produces one unit per run-params entry; identical runs collapse. The task ID is the dispatch ID, the ROI is the image footprint cut to the rule's area, and the rule's own location is passed for contracts that send it.
+5. Units are prepared by their pipeline's contract and dispatched. Any retryable failure retries the whole message; targets dedupe already delivered units by dispatch ID. Otherwise any rejected or invalid unit dead-letters the message, naming the failed pipelines. One log per message records the unit and failure counts.
+
 ## Dispatch
 
 `PipelineDispatcher.DispatchAsync(units)` sends prepared work over each pipeline's transport, in parallel, and returns one outcome per unit in input order:

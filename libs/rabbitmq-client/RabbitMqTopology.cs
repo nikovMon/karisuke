@@ -59,6 +59,11 @@ internal static class RabbitMqTopology
         RabbitMqClientOptions options,
         CancellationToken cancellationToken)
     {
+        if (!options.HasOutput)
+        {
+            return;
+        }
+
         await DeclareExchangeAsync(channel, options.OutputExchange, options.OutputExchangeType,
             options.OutputExchangeHeaders, cancellationToken);
         await DeclareQueueAsync(channel, options.OutputQueue, options.OutputQueueHeaders, cancellationToken);

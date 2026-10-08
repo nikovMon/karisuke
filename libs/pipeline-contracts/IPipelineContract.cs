@@ -14,6 +14,13 @@ public interface IPipelineContract
             ? []
             : [new("extraData", "Must be a JSON object when provided.")];
 
+    /// <summary>
+    /// Validates a rule's location (<c>match.locationWkt</c>, null when absent) for contracts that
+    /// use it. Checked when rules load, so a rule this contract cannot serve is rejected once
+    /// rather than on every message it matches.
+    /// </summary>
+    IReadOnlyList<ContractValidationError> ValidateRuleLocation(string? locationWkt) => [];
+
     /// <summary>Validates only the event fields used by this contract.</summary>
     IReadOnlyList<ContractValidationError> ValidateContext(PipelineDispatchContext context) => [];
 
