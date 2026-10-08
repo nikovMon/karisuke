@@ -141,11 +141,11 @@ public sealed class SourceMessageHandlerTests
     /// <summary>The handler wired to real rules, matching, preparation and dispatch, with a fake transport.</summary>
     private sealed class Gateway : IAsyncDisposable
     {
-        private readonly PipelineRuleSnapshots _snapshots;
+        private readonly GatewayRuleCache _cache;
 
-        private Gateway(PipelineRuleSnapshots snapshots, SourceMessageHandler handler, RecordingTransport transport, RecordingLogger logger)
+        private Gateway(GatewayRuleCache cache, SourceMessageHandler handler, RecordingTransport transport, RecordingLogger logger)
         {
-            _snapshots = snapshots;
+            _cache = cache;
             Handler = handler;
             Transport = transport;
             Logger = logger;
@@ -161,30 +161,30 @@ public sealed class SourceMessageHandlerTests
         {
             var catalog = CreateCatalog(RabbitMqPipeline("asd"));
             var contracts = new PipelineContractRegistry([new AsdPipelineContract()]);
-            var snapshots = new PipelineRuleSnapshots(
+            var cache = new GatewayRuleCache(
                 catalog,
                 catalog,
                 contracts,
                 new StaticRuleRepository(new RuleLoadResult(rules, [])),
                 Options.Create(new RuleRefreshOptions { IntervalSeconds = 3600 }),
-                NullLogger<PipelineRuleSnapshots>.Instance);
-            await snapshots.StartAsync(CancellationToken.None);
+                NullLogger<GatewayRuleCache>.Instance);
+            await cache.StartAsync(CancellationToken.None);
 
             var transport = new RecordingTransport(send ?? (unit => DispatchOutcome.Delivered(unit)));
             var logger = new RecordingLogger();
             var handler = new SourceMessageHandler(
-                snapshots,
+                cache,
                 new RuleMatcher(TimeProvider.System),
                 new PipelineWorkPreparer(catalog, contracts, NullLogger<PipelineWorkPreparer>.Instance),
                 new PipelineDispatcher([transport], [], NullLogger<PipelineDispatcher>.Instance),
                 logger);
-            return new Gateway(snapshots, handler, transport, logger);
+            return new Gateway(cache, handler, transport, logger);
         }
 
         public async ValueTask DisposeAsync()
         {
-            await _snapshots.StopAsync(CancellationToken.None);
-            _snapshots.Dispose();
+            await _cache.StopAsync(CancellationToken.None);
+            _cache.Dispose();
         }
     }
 

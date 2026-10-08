@@ -17,7 +17,7 @@ namespace ImagingPipeline.UnifiedGateway.Source;
 /// consumer whether the message succeeded, should be retried, or should be dead-lettered.
 /// </summary>
 public sealed class SourceMessageHandler(
-    PipelineRuleSnapshots rules,
+    GatewayRuleCache ruleCache,
     RuleMatcher matcher,
     PipelineWorkPreparer preparer,
     PipelineDispatcher dispatcher,
@@ -66,7 +66,7 @@ public sealed class SourceMessageHandler(
         List<string> invalidPipelines)
     {
         var units = new Dictionary<string, DispatchUnit>(StringComparer.Ordinal);
-        foreach (var pipelineRules in rules.Current)
+        foreach (var pipelineRules in ruleCache.Current)
         {
             var pipelineId = pipelineRules.Pipeline.PipelineId;
             using var pipelineScope = logger.BeginScope(new KeyValuePair<string, object?>[] { new(TelemetryAttributeNames.PipelineId, pipelineId) });
