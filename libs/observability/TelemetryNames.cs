@@ -130,4 +130,10 @@ public static class TelemetryAttributeNames
     public const string RulesMissedResolutionIds = "findair.rules.missed.resolution.ids";
     public const string RulesMissedResolutionCount = "findair.rules.missed.resolution.count";
     public const string RulesMissedGeometryCount = "findair.rules.missed.geometry.count";
+
+    // Loading one pipeline's rules.
+    public const string RulesLoadedCount = "findair.rules.loaded.count";
+    public const string RulesRejectedCount = "findair.rules.rejected.count";
+    public const string RulesRetainedCount = "findair.rules.retained.count";
+    public const string RuleRejectionReason = "findair.rule.rejection.reason";
 }

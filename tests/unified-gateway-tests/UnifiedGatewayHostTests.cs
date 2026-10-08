@@ -1,11 +1,13 @@
 using System.Net;
 using System.Text.Json;
 using ImagingPipeline.PipelineCatalog;
+using ImagingPipeline.RuleEngine.Loading;
 using ImagingPipeline.UnifiedGateway.Dispatch;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace ImagingPipeline.UnifiedGateway.Tests;
@@ -24,7 +26,7 @@ public sealed class UnifiedGatewayHostTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("Healthy", body.RootElement.GetProperty("status").GetString());
         Assert.False(body.RootElement.GetProperty("dispatchActive").GetBoolean());
-        Assert.Equal(new[] { "catalog", "contracts" }, body.RootElement.GetProperty("capabilities")
+        Assert.Equal(new[] { "catalog", "contracts", "rules" }, body.RootElement.GetProperty("capabilities")
             .EnumerateArray().Select(capability => capability.GetString()));
         Assert.False(body.RootElement.TryGetProperty("retryWorkerEnabled", out _));
         var source = factory.Services.GetRequiredService<IRuleSourceResolver>().Resolve("asd");
@@ -141,9 +143,21 @@ public sealed class UnifiedGatewayHostTests
         {
             builder.UseEnvironment("Testing");
             builder.UseSetting("Observability:Enabled", "false");
+            // Rules load at startup; tests have no Elasticsearch, so every index is empty.
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IRuleRepository>();
+                services.AddSingleton<IRuleRepository, EmptyRuleRepository>();
+            });
             if (settings is not null)
             {
                 builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(settings));
             }
         });
+
+    private sealed class EmptyRuleRepository : IRuleRepository
+    {
+        public Task<RuleLoadResult> GetActiveRulesAsync(string indexName, CancellationToken cancellationToken) =>
+            Task.FromResult(new RuleLoadResult([], []));
+    }
 }

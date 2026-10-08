@@ -1,10 +1,13 @@
+using ImagingPipeline.ElasticsearchClient;
 using ImagingPipeline.Observability;
 using ImagingPipeline.PipelineCatalog;
 using ImagingPipeline.PipelineContracts;
 using ImagingPipeline.RabbitMqClient;
+using ImagingPipeline.RuleEngine.Loading;
 using ImagingPipeline.UnifiedGateway.Configuration;
 using ImagingPipeline.UnifiedGateway.Dispatch;
 using ImagingPipeline.UnifiedGateway.Processing;
+using ImagingPipeline.UnifiedGateway.Rules;
 
 namespace ImagingPipeline.UnifiedGateway;
 
@@ -32,13 +35,22 @@ public sealed partial class Program
         builder.Services.AddSingleton<IDispatchTransport, HttpDispatchTransport>();
         builder.Services.AddSingleton<PipelineDispatcher>();
 
+        builder.Services.AddElasticsearchClient(builder.Configuration);
+        builder.Services.AddSingleton<IRuleRepository, ElasticsearchRuleRepository>();
+        builder.Services.AddOptions<RuleRefreshOptions>()
+            .Bind(builder.Configuration.GetSection(RuleRefreshOptions.SectionName))
+            .Validate(options => options.IsValid(), "RuleRefresh needs IntervalSeconds > 0 and JitterSeconds >= 0.")
+            .ValidateOnStart();
+        builder.Services.AddSingleton<GatewayRuleCache>();
+        builder.Services.AddHostedService(provider => provider.GetRequiredService<GatewayRuleCache>());
+
         var app = builder.Build();
         var catalog = app.Services.GetRequiredService<IPipelineCatalog>();
 
         app.MapGet("/health", () => Results.Ok(new
         {
             status = "Healthy",
-            capabilities = new[] { "catalog", "contracts" },
+            capabilities = new[] { "catalog", "contracts", "rules" },
             dispatchActive = false
         }));
         app.MapImagingPipelinePrometheusScrapingEndpoint();

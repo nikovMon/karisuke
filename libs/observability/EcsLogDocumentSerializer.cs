@@ -63,7 +63,11 @@ internal static class EcsLogDocumentSerializer
             [TelemetryAttributeNames.RulesMissedSensorCount] = TelemetryAttributeNames.RulesMissedSensorCount,
             [TelemetryAttributeNames.RulesMissedResolutionIds] = TelemetryAttributeNames.RulesMissedResolutionIds,
             [TelemetryAttributeNames.RulesMissedResolutionCount] = TelemetryAttributeNames.RulesMissedResolutionCount,
-            [TelemetryAttributeNames.RulesMissedGeometryCount] = TelemetryAttributeNames.RulesMissedGeometryCount
+            [TelemetryAttributeNames.RulesMissedGeometryCount] = TelemetryAttributeNames.RulesMissedGeometryCount,
+            [TelemetryAttributeNames.RulesLoadedCount] = TelemetryAttributeNames.RulesLoadedCount,
+            [TelemetryAttributeNames.RulesRejectedCount] = TelemetryAttributeNames.RulesRejectedCount,
+            [TelemetryAttributeNames.RulesRetainedCount] = TelemetryAttributeNames.RulesRetainedCount,
+            [TelemetryAttributeNames.RuleRejectionReason] = TelemetryAttributeNames.RuleRejectionReason
         };
 
     public static byte[] SerializeBatch(
