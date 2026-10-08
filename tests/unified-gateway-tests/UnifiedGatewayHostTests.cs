@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using ImagingPipeline.PipelineCatalog;
+using ImagingPipeline.UnifiedGateway.Dispatch;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -110,6 +111,29 @@ public sealed class UnifiedGatewayHostTests
             ["PipelineCatalog:Pipelines:algo:ExtraData"] = "{}"
         });
         Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
+    }
+
+    [Fact]
+    public void DispatcherResolvesBothCatalogTransportsAndHttpDispatchDoesNotFollowRedirects()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        var dispatcher = factory.Services.GetRequiredService<PipelineDispatcher>();
+        var transports = factory.Services.GetServices<IDispatchTransport>().Select(transport => transport.Kind);
+        Assert.NotNull(dispatcher);
+        Assert.Equal([PipelineTransportKind.RabbitMq, PipelineTransportKind.Http], transports);
+
+        var handler = factory.Services.GetRequiredService<IHttpMessageHandlerFactory>()
+            .CreateHandler(HttpDispatchTransport.HttpClientName);
+        while (handler is DelegatingHandler delegating)
+        {
+            handler = delegating.InnerHandler!;
+        }
+
+        Assert.False(Assert.IsType<SocketsHttpHandler>(handler).AllowAutoRedirect);
+        Assert.Equal(Timeout.InfiniteTimeSpan, factory.Services.GetRequiredService<IHttpClientFactory>()
+            .CreateClient(HttpDispatchTransport.HttpClientName).Timeout);
     }
 
     private static WebApplicationFactory<Program> CreateFactory(Dictionary<string, string?>? settings = null) =>

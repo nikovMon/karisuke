@@ -2,7 +2,7 @@
 
 This Nx application implements the **Catalog & Contracts Foundation** ticket. It hosts a validated pipeline catalog and prepares contract payloads for an already matched pipeline. The existing gateway and Rules API retain their current behavior.
 
-**Transport & Dispatch is outside this change.** The application has no RabbitMQ consumer/publisher, HTTP sender/request factory, connection/channel pool, dispatch coordinator, retry worker or retry/DLQ topology. HTTP and RabbitMQ output settings are passive catalog descriptors. Starting the application does not open broker connections or contact downstream endpoints.
+**Transport & Dispatch is in progress.** The dispatch core and the RabbitMQ and HTTP transports exist (see [Dispatch](#dispatch)), but nothing calls them yet: there is no source consumer, so starting the application does not open broker connections or contact downstream endpoints.
 
 ## Retained features
 
@@ -171,6 +171,47 @@ Nested overrides such as `...__ExtraData__enabled` are rejected. Configuration s
 
 The old pipeline array format and nested `PipelineId` fields are rejected. Migrate deployment files to named objects and change indexed environment/CLI paths to pipeline IDs. IDs cannot differ only by case, contain `__`, or end with `_`; those spellings are ambiguous in environment-variable paths. Runtime lookups retain the configured ID spelling and remain case-sensitive. Overrides must use exactly the same spelling; case variants across providers fail startup.
 
+## Dispatch
+
+`PipelineDispatcher.DispatchAsync(units)` sends prepared work over each pipeline's transport, in parallel, and returns one outcome per unit in input order:
+
+| Outcome | Meaning |
+|---|---|
+| `Delivered` | The transport confirmed delivery (RabbitMQ publisher confirm). |
+| `Retryable` | Transient failure, such as a broker or connection error. Sending again may succeed. |
+| `Rejected` | Sending again will not help, for example no transport or destination is configured for the unit. |
+
+The dispatcher never throws for a failed unit; only cancellation propagates. Deciding what an outcome means for the source message belongs to the caller. A failed outcome carries a bounded error category (`TelemetryErrorCategory`, such as `timeout`, `connection`, `unavailable`, `dependency`, `validation` or `publish`), the HTTP status code when an endpoint answered, and the exception if there was one.
+
+A `DispatchUnit` is prepared work plus:
+
+- **`DispatchId`**: built by `DispatchIdentity.Create(imageId, pipelineId, ruleId, runParams)` as `{imageId}:{pipelineId}:{ruleId}:{hash}`. The hash covers the run parameters with object properties sorted, so the same match always yields the same ID. It is the downstream idempotency key: the AMQP `MessageId`, and later the HTTP `Idempotency-Key`.
+- **`SourceMessageId`** and **`SourceHeaders`** from the consumed message. The source message ID becomes the AMQP `CorrelationId`.
+
+Transports implement `IDispatchTransport` and are selected by the catalog's `Transport.Kind`. `RabbitMqDispatchTransport` resolves each enabled `rabbitmq` pipeline's output and named connection once, at startup, and publishes through `IRabbitMqDestinationPublisher` from `libs/rabbitmq-client`. The broker connection comes from the catalog only; the application needs no `RabbitMq` output settings. Published headers are the contract's string attributes, then its typed RabbitMQ attributes (which win on a name clash), plus the source's `findair-started-at-unix-ms`. Trace context is injected from the current span; no other source headers are forwarded.
+
+`HttpDispatchTransport` sends each unit as one request to its enabled `http` pipeline's catalog `Endpoint`, with the catalog `Method`, from inside the message handler:
+
+- **Body:** the payload bytes, with the contract's content type.
+- **Headers:** the catalog `Headers`, then the contract's string attributes, then `Idempotency-Key: {DispatchId}`. Later entries win on a name clash. The receiving endpoint should deduplicate on `Idempotency-Key`, because a retried source message sends the same unit again.
+- **Timeout:** `TimeoutSeconds` bounds the whole request, including connection setup. The shared `HttpClient` has no timeout of its own, and redirects are not followed.
+
+| Result | Outcome |
+|---|---|
+| 2xx | `Delivered` |
+| 408, 429, 5xx, timeout, connection failure | `Retryable` |
+| Any other status, including 3xx | `Rejected` |
+
+`Retry-After` is not honoured: a retryable unit makes the whole source message use the existing retry queues and their fixed delays. A slow endpoint holds a consumer slot for up to its timeout, so keep `TimeoutSeconds` short.
+
+`IDispatchDeliveryListener` registrations are notified after each confirmed delivery, for example to record a unit as already processed. A listener failure is logged and does not change the outcome.
+
+Telemetry for each unit is owned by `DispatchTelemetry`:
+
+- **Span** `unified_gateway.dispatch` (stage `unified_gateway`): `Ok` when delivered; otherwise `Error` with `error.type` and `findair.error.category`. Tagged with `pipeline.id`, `pipeline.transport`, `findair.outcome` and `http.response.status_code` when present.
+- **Metrics** `unified_gateway.dispatch.units` and `unified_gateway.dispatch.duration`, tagged with `pipeline.id`, `pipeline.transport`, `findair.outcome` and, on failure, `error.type`.
+- **Logs** with static messages, so they group by message: 6001 delivered (debug), 6002 failed (warning, with the exception), 6003 delivery listener failed. One log scope per unit carries the dispatch ID (`messaging.message.id`), source message ID (`messaging.message.conversation_id`), `pipeline.id` and `pipeline.transport`; the failure log adds `findair.outcome`, `error.type` and `http.response.status_code`. These are the same field names as on the span and metrics, so a dead-lettered source message can be traced to the pipeline that failed by filtering, not by parsing text.
+
 ## Validation and observability
 
 Startup rejects unknown catalog configuration fields, duplicate/invalid pipeline IDs, unregistered contracts, invalid rule-index names, unsupported or multiple transport descriptors, invalid connection references, invalid queue/exchange/header settings and non-object extra data. Disabled entries undergo the same validation. `RulesIndex` validation checks a lowercase literal index/alias name and its length/characters; it does not check index existence, Elasticsearch mappings or rule document fields.
@@ -181,6 +222,6 @@ The host uses the same observability bootstrap as the regular gateway, with a di
 
 ## Later tickets
 
-The Rule Engine ticket owns Elasticsearch rule loading, validation of rule documents, matching and refreshable snapshots, with no spatial index. The Transport & Dispatch ticket owns input consumption, HTTP/RabbitMQ sends, cross-cluster routing, channel pools, acknowledgements, internal HTTP retries and external retry/DLQ processing.
+The Rule Engine ticket owns Elasticsearch rule loading, validation of rule documents, matching and refreshable snapshots, with no spatial index. The rest of the Transport & Dispatch ticket covers input consumption, and acknowledgement, retry and dead-letter handling of source messages.
 
-The retained retry design decision for that later ticket is to queue **only failed outgoing units**, preserving their prepared body, headers, destination and dispatch ID. A retry resends saved work without matching rules again. This is a future design decision, not an implemented worker or delivery guarantee in this foundation.
+Retry reuses the existing per-message mechanism of `libs/rabbitmq-client`: if any unit is retryable, the whole source message is retried and matched again, so units that were already delivered are sent again with the same dispatch ID. A per-pipeline record of delivered units, plugged in through `IDispatchDeliveryListener`, can later skip them.

@@ -157,7 +157,7 @@ public sealed class PipelineCatalogOptionsValidator(IPipelineContractRegistry co
 
         switch (transport.Kind)
         {
-            case "rabbitmq":
+            case PipelineTransportKind.RabbitMq:
                 if (transport.RabbitMq is null || transport.Http is not null)
                 {
                     errors.Add($"{prefix} must contain RabbitMq settings and no Http settings for kind 'rabbitmq'.");
@@ -172,7 +172,7 @@ public sealed class PipelineCatalogOptionsValidator(IPipelineContractRegistry co
                 RabbitMqOptionsValidation.ValidateQueue(transport.RabbitMq.Output, $"{prefix}:RabbitMq:Output", errors);
                 break;
 
-            case "http":
+            case PipelineTransportKind.Http:
                 if (transport.Http is null || transport.RabbitMq is not null)
                 {
                     errors.Add($"{prefix} must contain Http settings and no RabbitMq settings for kind 'http'.");
@@ -199,7 +199,7 @@ public sealed class PipelineCatalogOptionsValidator(IPipelineContractRegistry co
                 break;
 
             default:
-                errors.Add($"{prefix}:Kind must be exactly 'http' or 'rabbitmq'.");
+                errors.Add($"{prefix}:Kind must be 'http' or 'rabbitmq'.");
                 break;
         }
     }

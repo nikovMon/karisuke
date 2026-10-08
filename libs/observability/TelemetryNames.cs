@@ -117,4 +117,6 @@ public static class TelemetryAttributeNames
     public const string DependencyName = "findair.dependency.name";
     public const string DependencyOperation = "findair.dependency.operation";
     public const string ProjectionMode = "findair.projection.mode";
+    public const string PipelineId = "pipeline.id";
+    public const string PipelineTransport = "pipeline.transport";
 }

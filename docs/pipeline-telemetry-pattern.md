@@ -285,6 +285,7 @@ part of the dump that catches a changed span extent.
 | TB Consumer | Migrated; reference implementation |
 | TB Publisher | Not migrated; still has the hand-rolled form |
 | Gateway | Not migrated; still has the hand-rolled form |
+| Unified Gateway | Dispatch uses `PipelineSpanScope` and a per-unit `DispatchTelemetry` scope; contract preparation is still hand-rolled |
 
 The TB Consumer migration changed no emitted telemetry. Every span, metric, and
 log — including which span each log is attributed to — was verified identical

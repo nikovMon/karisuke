@@ -17,7 +17,8 @@ internal interface IRabbitMqInputClusterChannelPool : IRabbitMqPublisherChannelP
 internal enum RabbitMqPublisherPoolRole
 {
     Output,
-    InputCluster
+    InputCluster,
+    Destination
 }
 
 internal readonly struct RabbitMqPublisherChannelLease : IAsyncDisposable
@@ -121,6 +122,7 @@ internal class RabbitMqPublisherChannelPool : IRabbitMqPublisherChannelPool
         _role switch
         {
             RabbitMqPublisherPoolRole.InputCluster => RabbitMqTopology.DeclareInputAsync(channel, _options, cancellationToken),
+            RabbitMqPublisherPoolRole.Destination => Task.CompletedTask,
             _ when _options.InputCluster is not null => RabbitMqTopology.DeclareOutputAsync(channel, _options, cancellationToken),
             _ => RabbitMqTopology.DeclareAsync(channel, _options, cancellationToken)
         };

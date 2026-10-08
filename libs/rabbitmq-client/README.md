@@ -253,6 +253,49 @@ explicit exchange/routing-key pair. The publisher leases a channel from a
 bounded publish-channel pool, marks the message persistent, enables publisher
 confirmations, and awaits the confirmation before returning.
 
+## Publish to destinations on other brokers
+
+A **destination** says where messages should go: which broker (host, port,
+credentials), which queue, and optionally which exchange and routing key to publish
+through. `IRabbitMqDestinationPublisher` publishes to a destination supplied with each
+call, on that destination's own broker connection. Brokers and queues come from the caller
+(for example, a per-pipeline catalog), not from the `RabbitMq` section. From that
+section it reads only `PublisherChannelPoolSize` and `ReconnectDelaySeconds`; the
+section may be absent, in which case the defaults apply.
+
+```csharp
+builder.Services.AddRabbitMqDestinationPublisher(builder.Configuration);
+
+var destination = new RabbitMqDestination
+{
+    Connection = new RabbitMqDestinationConnection("asd-output", "broker", 5672, "user", "password", "/"),
+    QueueName = "int.algo.tb_publisher",
+    QueueArguments = new Dictionary<string, object?>
+    {
+        ["x-dead-letter-exchange"] = "",
+        ["x-dead-letter-routing-key"] = "int.algo.tb_publisher.dlq"
+    }
+};
+
+await publisher.PublishAsync(destination, message, cancellationToken);
+```
+
+- One connection and one confirmed-channel pool are created lazily per distinct
+  `RabbitMqDestinationConnection` value. `PublisherChannelPoolSize` applies to each one.
+- The queue is declared durable. A non-empty `ExchangeName` is declared too, and the
+  queue is bound to it with `RoutingKey` and `BindingArguments` when
+  `BindQueueToExchange` is set. Each destination is declared once per channel; a
+  failed declaration closes that channel, so it is retried on a fresh one.
+- An empty `ExchangeName` publishes through the default exchange by queue name.
+  Otherwise the message is published to the exchange with `RoutingKey`, which may be
+  empty for fanout and headers exchanges.
+- Message headers are sent as given. Unlike `IRabbitMqPublisher`, there is no
+  header allow-list, contract-version stamp or retry-count reset: the caller's payload
+  contract owns its headers. The library adds only `findair-started-at-unix-ms` when
+  missing, refreshes `findair-published-at-unix-ms`, and injects trace context.
+- Publishes are persistent, mandatory and confirmed, and recorded in the shared
+  send metrics under the exchange name, or the queue name for the default exchange.
+
 ## Consume one message at a time
 
 ```csharp

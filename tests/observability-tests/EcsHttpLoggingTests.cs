@@ -104,6 +104,45 @@ public sealed class EcsHttpLoggingTests
     }
 
     [Fact]
+    public async Task Serializer_MapsPipelineDispatchFieldsWithoutReplacingTheExceptionType()
+    {
+        var options = CreateOptions();
+        var buffer = new EcsLogBuffer(options);
+        using var provider = new EcsHttpLoggerProvider(buffer, options);
+        provider.SetScopeProvider(new LoggerExternalScopeProvider());
+        var logger = provider.CreateLogger("ImagingPipeline.Tests.Dispatch");
+
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            [TelemetryAttributeNames.PipelineId] = "algo",
+            [TelemetryAttributeNames.PipelineTransport] = "http",
+            [TelemetryAttributeNames.PipelineOutcome] = "rejected",
+            [TelemetryAttributeNames.ErrorCategory] = "validation",
+            ["StatusCode"] = 422
+        });
+        logger.LogWarning(new InvalidOperationException("endpoint said no"), "Pipeline dispatch failed.");
+
+        var logEvent = await buffer.ReadAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
+        Assert.NotNull(logEvent);
+        using var json = JsonDocument.Parse(EcsLogDocumentSerializer.SerializeBatch(
+            [logEvent],
+            CreateResource(),
+            new EcsLogDataStreamOptions("findair", "production")));
+        var document = json.RootElement[0];
+
+        Assert.Equal("algo", document.GetProperty("pipeline").GetProperty("id").GetString());
+        Assert.Equal("http", document.GetProperty("pipeline").GetProperty("transport").GetString());
+        Assert.Equal("rejected", document.GetProperty("findair").GetProperty("outcome").GetString());
+        Assert.Equal("validation", document.GetProperty("findair").GetProperty("error").GetProperty("category").GetString());
+        // The exception class stays in error.type; a category field must not replace it.
+        Assert.Equal(
+            typeof(InvalidOperationException).FullName,
+            document.GetProperty("error").GetProperty("type").GetString());
+        Assert.Equal(422, document.GetProperty("http").GetProperty("response").GetProperty("status_code").GetInt32());
+        Assert.False(document.TryGetProperty("labels", out _));
+    }
+
+    [Fact]
     public async Task Exporter_RetriesRetryableResponseAndSendsJsonArray()
     {
         var options = CreateOptions() with

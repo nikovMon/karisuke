@@ -53,6 +53,28 @@ internal sealed class RabbitMqInputClusterConnectionManager : RabbitMqConnection
     }
 }
 
+internal sealed class RabbitMqDestinationConnectionManager : RabbitMqConnectionManager
+{
+    public RabbitMqDestinationConnectionManager(
+        RabbitMqDestinationConnection connection,
+        int reconnectDelaySeconds,
+        ILogger<RabbitMqConnectionManager> logger)
+        : base(
+            Options.Create(new RabbitMqClientOptions
+            {
+                Host = connection.Host,
+                Port = connection.Port,
+                Username = connection.Username,
+                Password = connection.Password,
+                VirtualHost = connection.VirtualHost,
+                ReconnectDelaySeconds = reconnectDelaySeconds
+            }),
+            logger,
+            $"destination-{connection.Name}")
+    {
+    }
+}
+
 internal sealed record RabbitMqConnectionSettings(
     string Host,
     int Port,

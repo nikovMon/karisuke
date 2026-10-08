@@ -10,8 +10,7 @@ public sealed class AlgoPipelineContractTests
     private const string Rule = """
         {"customer":"customer-a","profile_name":"profile-a","hebrew_rule_name":"Mission",
          "algorithm_name":"custom-algorithm","priority":7,"username":null,
-         "run_every_other_image":true,"should_check_in_vip":true,
-         "location_geojson":{"type":"Polygon","coordinates":[[[0,0],[2,0],[2,2],[0,0]]]}}
+         "run_every_other_image":true,"should_check_in_vip":true}
         """;
     private const string Settings = """
         {"XUserName":"configured-user","Origin":"configured-origin","QueueType":"configured-queue","SaveDetections":true}
@@ -124,15 +123,19 @@ public sealed class AlgoPipelineContractTests
     }
 
     [Fact]
-    public void MultipolygonRuleProducesMultipolygonWkt()
+    public void FocusedWktIsTheRuleLocationAsGiven()
     {
-        var rule = JsonNode.Parse(Rule)!;
-        rule["location_geojson"] = JsonNode.Parse("""
-            {"type":"MultiPolygon","coordinates":[[[[0,0],[2,0],[2,2],[0,0]]],[[[10,10],[12,10],[12,12],[10,10]]]]}
-            """);
-        using var body = Body(Context(), rule.ToJsonString());
-        Assert.Equal("MULTIPOLYGON (((0 0, 2 0, 2 2, 0 0)), ((10 10, 12 10, 12 12, 10 10)))",
-            body.RootElement.GetProperty("focusedWkt").GetString());
+        const string multiPolygon = "MULTIPOLYGON (((0 0, 2 0, 2 2, 0 0)), ((10 10, 12 10, 12 12, 10 10)))";
+        using var body = Body(Context() with { RuleLocationWkt = multiPolygon });
+        Assert.Equal(multiPolygon, body.RootElement.GetProperty("focusedWkt").GetString());
+    }
+
+    [Fact]
+    public void RuleWithoutLocationCannotBuild()
+    {
+        var context = Context() with { RuleLocationWkt = null };
+        Assert.Contains(_contract.ValidateContext(context), error => error.Field == "rule.locationWkt");
+        Assert.Throws<ArgumentException>(() => _contract.BuildPayload(context, Json(Rule), Json(Settings)));
     }
 
     [Fact]
@@ -151,11 +154,8 @@ public sealed class AlgoPipelineContractTests
     }
 
     [Theory]
-    [InlineData("location_geojson", "null")]
-    [InlineData("location_geojson", "{}")]
-    [InlineData("location_geojson", "{\"type\":\"Unknown\",\"coordinates\":[1,2]}")]
-    [InlineData("location_geojson", "{\"type\":\"Polygon\",\"coordinates\":[]}")]
-    [InlineData("location_geojson", "{\"type\":\"Polygon\",\"coordinates\":[[[0,0],[2,2],[0,2],[2,0],[0,0]]]}")]
+    // The rule location now comes from the rule's match, so it is no longer a run parameter.
+    [InlineData("location_geojson", "{\"type\":\"Polygon\",\"coordinates\":[[[0,0],[2,0],[2,2],[0,0]]]}")]
     [InlineData("algorithm_name", "[\"custom-algorithm\"]")]
     [InlineData("priority", "\"7\"")]
     [InlineData("priority", "2147483648")]
@@ -224,7 +224,8 @@ public sealed class AlgoPipelineContractTests
         "", "", 0, 0, 0, "", null, "", "")
     {
         LegId = "leg-a", PrevOverlayId = "image-prev", NextOverlayId = "image-next",
-        OverlayPhotoTime = new DateTime(2026, 9, 23, 0, 15, 0, DateTimeKind.Unspecified)
+        OverlayPhotoTime = new DateTime(2026, 9, 23, 0, 15, 0, DateTimeKind.Unspecified),
+        RuleLocationWkt = "POLYGON ((0 0, 2 0, 2 2, 0 0))"
     };
 
     private static JsonElement Json(string json)

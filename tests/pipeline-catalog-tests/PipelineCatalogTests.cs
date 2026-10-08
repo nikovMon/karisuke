@@ -1,3 +1,4 @@
+using ImagingPipeline.PipelineCatalog;
 using ImagingPipeline.PipelineContracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -56,10 +57,10 @@ public sealed class PipelineCatalogTests
         Assert.Equal(new RuleSource("rules-integ", "asd"), catalog.Resolve("asd"));
         Assert.Equal(new RuleSource("rules-integ", "http-pipeline"), catalog.Resolve("http-pipeline"));
         Assert.Equal("asd", catalog.GetRequired("asd").ContractId);
-        Assert.Equal("rabbitmq", catalog.GetRequired("asd").Transport.Kind);
+        Assert.Equal(PipelineTransportKind.RabbitMq, catalog.GetRequired("asd").Transport.Kind);
         Assert.Equal("publisher", catalog.GetRequired("asd").Transport.RabbitMq!.Output.QueueName);
         Assert.Equal("http", catalog.GetRequired("http-pipeline").ContractId);
-        Assert.Equal("http", catalog.GetRequired("http-pipeline").Transport.Kind);
+        Assert.Equal(PipelineTransportKind.Http, catalog.GetRequired("http-pipeline").Transport.Kind);
         Assert.Equal("https://example.test/missions", catalog.GetRequired("http-pipeline").Transport.Http!.Endpoint);
     }
 
@@ -111,6 +112,7 @@ public sealed class PipelineCatalogTests
     [InlineData("rabbit-connection")]
     [InlineData("rabbit-queue")]
     [InlineData("rabbit-null-queue")]
+    [InlineData("undefined-transport-kind")]
     [InlineData("mixed-settings")]
     [InlineData("http-relative-endpoint")]
     [InlineData("http-credentials")]
@@ -125,7 +127,8 @@ public sealed class PipelineCatalogTests
             "unknown-contract" => definition with { ContractId = "unknown" },
             "missing-contract" => definition with { ContractId = " " },
             "rules-index" => definition with { RulesIndex = " " },
-            "transport-kind" => definition with { Transport = new() { Kind = "kafka" } },
+            "transport-kind" => definition with { Transport = new() { Kind = null } },
+            "undefined-transport-kind" => definition with { Transport = new() { Kind = (PipelineTransportKind)99 } },
             "missing-transport" => definition with { Transport = null! },
             "rabbit-connection" => WithRabbit(definition, new() { Output = new() { QueueName = "publisher" } }),
             "rabbit-queue" => WithRabbit(definition, new() { ConnectionRef = "asd-broker" }),
@@ -168,7 +171,7 @@ public sealed class PipelineCatalogTests
         });
         var catalog = CreateCatalog(new PipelineCatalogOptions { RabbitMqConnections = Connections(), Pipelines = Entries(definition) });
 
-        Assert.Equal("http", catalog.GetRequired("asd").Transport.Kind);
+        Assert.Equal(PipelineTransportKind.Http, catalog.GetRequired("asd").Transport.Kind);
     }
 
     [Theory]
@@ -360,7 +363,6 @@ public sealed class PipelineCatalogTests
 
     [Theory]
     [InlineData("PipelineCatalog:Pipelines:asd:ContractId", "unknown")]
-    [InlineData("PipelineCatalog:Pipelines:asd:Transport:Kind", "unsupported")]
     [InlineData("PipelineCatalog:Pipelines:asd:Transport:RabbitMq:Output:QueueName", "")]
     [InlineData("PipelineCatalog:Pipelines:asd:Transport:RabbitMq:Output:QueueName", "amq.reserved")]
     [InlineData("PipelineCatalog:Pipelines:asd:RulesIndex", "RULES")]
@@ -379,6 +381,22 @@ public sealed class PipelineCatalogTests
         using var host = builder.Build();
 
         await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
+    }
+
+    [Fact]
+    public async Task UnknownTransportKindFailsHostStartupWhileBinding()
+    {
+        var configuration = ValidConfiguration();
+        configuration["PipelineCatalog:Pipelines:asd:Transport:Kind"] = "kafka";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Configuration.Sources.Clear();
+        builder.Configuration.AddInMemoryCollection(configuration);
+        builder.Services.AddSingleton(CreateRegistry());
+        builder.Services.AddPipelineCatalog(builder.Configuration);
+        using var host = builder.Build();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => host.StartAsync());
+        Assert.Contains("Transport:Kind", exception.InnerException?.Message, StringComparison.Ordinal);
     }
 
     private static Dictionary<string, PipelineSettings> Entries(params PipelineDefinition[] pipelines) =>
@@ -409,7 +427,7 @@ public sealed class PipelineCatalogTests
         RulesIndex = $"{pipelineId}-rules",
         Transport = new PipelineTransportOptions
         {
-            Kind = "rabbitmq",
+            Kind = PipelineTransportKind.RabbitMq,
             RabbitMq = new RabbitMqTransportOptions
             {
                 ConnectionRef = "asd-broker",
@@ -419,10 +437,10 @@ public sealed class PipelineCatalogTests
     };
 
     private static PipelineDefinition WithRabbit(PipelineDefinition definition, RabbitMqTransportOptions options) =>
-        definition with { Transport = new() { Kind = "rabbitmq", RabbitMq = options } };
+        definition with { Transport = new() { Kind = PipelineTransportKind.RabbitMq, RabbitMq = options } };
 
     private static PipelineDefinition WithHttp(PipelineDefinition definition, HttpTransportOptions options) =>
-        definition with { Transport = new() { Kind = "http", Http = options } };
+        definition with { Transport = new() { Kind = PipelineTransportKind.Http, Http = options } };
 
     private static Dictionary<string, string?> ValidConfiguration() => new()
     {

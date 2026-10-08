@@ -22,9 +22,28 @@ public sealed record PipelineDefinition : PipelineSettings
     public string PipelineId { get; init; } = string.Empty;
 }
 
+/// <summary>How a pipeline receives its work. Configured as "rabbitmq" or "http".</summary>
+public enum PipelineTransportKind
+{
+    RabbitMq = 1,
+    Http = 2
+}
+
+public static class PipelineTransportKindExtensions
+{
+    /// <summary>The configured spelling, also used as the telemetry value.</summary>
+    public static string Value(this PipelineTransportKind kind) => kind switch
+    {
+        PipelineTransportKind.RabbitMq => "rabbitmq",
+        PipelineTransportKind.Http => "http",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown transport kind.")
+    };
+}
+
 public sealed record PipelineTransportOptions
 {
-    public string Kind { get; init; } = string.Empty;
+    // Nullable, so a missing Kind fails validation instead of defaulting to a transport.
+    public PipelineTransportKind? Kind { get; init; }
     public RabbitMqTransportOptions? RabbitMq { get; init; }
     public HttpTransportOptions? Http { get; init; }
 }
