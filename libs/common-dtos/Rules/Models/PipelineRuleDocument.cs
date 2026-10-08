@@ -29,11 +29,6 @@ public sealed class PipelineRuleDocument : IValidatableObject
     [JsonPropertyName("isActive")]
     public bool IsActive { get; set; } = true;
 
-    /// <summary>Metadata only; never matched.</summary>
-    [JsonPropertyName("area")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Area { get; set; }
-
     /// <summary>
     /// Must be set for a rule with no conditions, so a rule that matches every image is always
     /// deliberate and never the result of clearing the last condition.
@@ -181,34 +176,34 @@ public sealed class RuleMatchConditions
 /// <summary>Allowed best-resolution range, inclusive. Either bound may be omitted, not both.</summary>
 public sealed class ResolutionRange
 {
-    [JsonPropertyName("minimum")]
+    [JsonPropertyName("min")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public double? Minimum { get; set; }
+    public double? Min { get; set; }
 
-    [JsonPropertyName("maximum")]
+    [JsonPropertyName("max")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public double? Maximum { get; set; }
+    public double? Max { get; set; }
 
     internal IEnumerable<string> Validate()
     {
-        if (Minimum is null && Maximum is null)
+        if (Min is null && Max is null)
         {
-            yield return "match.resolution must set minimum, maximum or both; omit it to accept any resolution";
+            yield return "match.resolution must set min, max or both; omit it to accept any resolution";
         }
 
-        if (Minimum is { } minimum && (!double.IsFinite(minimum) || minimum <= 0))
+        if (Min is { } min && (!double.IsFinite(min) || min <= 0))
         {
-            yield return "match.resolution.minimum must be a positive finite number";
+            yield return "match.resolution.min must be a positive finite number";
         }
 
-        if (Maximum is { } maximum && (!double.IsFinite(maximum) || maximum <= 0))
+        if (Max is { } max && (!double.IsFinite(max) || max <= 0))
         {
-            yield return "match.resolution.maximum must be a positive finite number";
+            yield return "match.resolution.max must be a positive finite number";
         }
 
-        if (Minimum > Maximum)
+        if (Min > Max)
         {
-            yield return "match.resolution.maximum must be greater than or equal to minimum";
+            yield return "match.resolution.max must be greater than or equal to min";
         }
     }
 }

@@ -34,8 +34,8 @@ public sealed class RuleSnapshotBuilderTests
         var activeRule = Assert.Single(RuleSnapshotBuilder.Build(new([rule], []), Contract).Rules);
 
         Assert.Empty(activeRule.Sensors);
-        Assert.Equal(0, activeRule.MinimumResolution);
-        Assert.Equal(double.PositiveInfinity, activeRule.MaximumResolution);
+        Assert.Equal(0, activeRule.MinResolution);
+        Assert.Equal(double.PositiveInfinity, activeRule.MaxResolution);
         Assert.Null(activeRule.MaxPhotoAge);
         Assert.Null(activeRule.Geometry);
     }

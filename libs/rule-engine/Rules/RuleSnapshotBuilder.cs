@@ -75,8 +75,8 @@ public static class RuleSnapshotBuilder
         activeRule = new ActiveRule(
             rule.Id,
             BuildSensors(match.Sensors),
-            match.Resolution?.Minimum ?? 0,
-            match.Resolution?.Maximum ?? double.PositiveInfinity,
+            match.Resolution?.Min ?? 0,
+            match.Resolution?.Max ?? double.PositiveInfinity,
             match.MaxPhotoAgeDays is { } days ? TimeSpan.FromDays(days) : null,
             geometry,
             rule.RunParams!.ToArray());

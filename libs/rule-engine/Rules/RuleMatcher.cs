@@ -68,7 +68,7 @@ public sealed class RuleMatcher(TimeProvider timeProvider)
     }
 
     private static bool MatchesResolution(double bestResolution, ActiveRule rule) =>
-        bestResolution >= rule.MinimumResolution && bestResolution <= rule.MaximumResolution;
+        bestResolution >= rule.MinResolution && bestResolution <= rule.MaxResolution;
 
     // A rule without a location covers the whole image. Intersects is a cheap test; the
     // intersection itself is computed only when it can be non-empty.

@@ -11,8 +11,8 @@ namespace ImagingPipeline.RuleEngine.Rules;
 public sealed record ActiveRule(
     string Id,
     IReadOnlyDictionary<string, SensorMatchCriteria> Sensors,
-    double MinimumResolution,
-    double MaximumResolution,
+    double MinResolution,
+    double MaxResolution,
     TimeSpan? MaxPhotoAge,
     Geometry? Geometry,
     IReadOnlyList<JsonElement> RunParams);

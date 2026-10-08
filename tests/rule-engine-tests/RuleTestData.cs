@@ -20,7 +20,7 @@ internal static class RuleTestData
         Match = new RuleMatchConditions
         {
             Sensors = [new SensorConfig { Name = "camera", RegistrationQualities = [RegistrationQuality.Accurate] }],
-            Resolution = new ResolutionRange { Minimum = 0.5, Maximum = 1 },
+            Resolution = new ResolutionRange { Min = 0.5, Max = 1 },
             LocationWkt = "POLYGON ((0 0, 2 0, 2 2, 0 2, 0 0))"
         },
         RunParams = [AsdRunParams("tenant-1")]

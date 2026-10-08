@@ -51,13 +51,13 @@ public sealed class PipelineRuleDocumentValidationTests
     }
 
     [Theory]
-    [InlineData(null, null, "must set minimum, maximum or both")]
-    [InlineData(0.0, null, "minimum must be a positive finite number")]
-    [InlineData(2.0, 1.0, "maximum must be greater than or equal to minimum")]
-    public void InvalidResolutionIsRejected(double? minimum, double? maximum, string error)
+    [InlineData(null, null, "must set min, max or both")]
+    [InlineData(0.0, null, "min must be a positive finite number")]
+    [InlineData(2.0, 1.0, "max must be greater than or equal to min")]
+    public void InvalidResolutionIsRejected(double? min, double? max, string error)
     {
         var rule = Rule();
-        rule.Match!.Resolution = new ResolutionRange { Minimum = minimum, Maximum = maximum };
+        rule.Match!.Resolution = new ResolutionRange { Min = min, Max = max };
 
         Assert.Contains(Errors(rule), message => message.Contains(error, StringComparison.Ordinal));
     }
@@ -66,7 +66,7 @@ public sealed class PipelineRuleDocumentValidationTests
     public void OneResolutionBoundIsEnough()
     {
         var rule = Rule();
-        rule.Match!.Resolution = new ResolutionRange { Maximum = 1 };
+        rule.Match!.Resolution = new ResolutionRange { Max = 1 };
 
         Assert.Empty(Errors(rule));
     }
@@ -99,7 +99,7 @@ public sealed class PipelineRuleDocumentValidationTests
         var rule = JsonSerializer.Deserialize<PipelineRuleDocument>(json)!;
 
         Assert.Empty(Errors(rule));
-        Assert.Equal(0.5, rule.Match!.Resolution!.Minimum);
+        Assert.Equal(0.5, rule.Match!.Resolution!.Min);
         Assert.Contains("\"_id\":\"rule-1\"", json, StringComparison.Ordinal);
         Assert.DoesNotContain("maxPhotoAgeDays", json, StringComparison.Ordinal);
     }
