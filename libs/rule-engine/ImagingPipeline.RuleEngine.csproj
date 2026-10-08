@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>ImagingPipeline.RuleEngine</AssemblyName>
+    <RootNamespace>ImagingPipeline.RuleEngine</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ImagingPipeline.RuleEngine.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="NetTopologySuite" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\common-dtos\ImagingPipeline.Common.Dtos.csproj" />
+    <ProjectReference Include="..\elasticsearch-client\ElasticsearchClient.csproj" />
+    <ProjectReference Include="..\geometry-utils\GeometryUtils.csproj" />
+    <ProjectReference Include="..\observability\ImagingPipeline.Observability.csproj" />
+  </ItemGroup>
+</Project>

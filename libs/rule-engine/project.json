@@ -1,0 +1,7 @@
+{
+  "name": "rule-engine",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "libs/rule-engine",
+  "tags": ["type:lib", "scope:gateway"]
+}
