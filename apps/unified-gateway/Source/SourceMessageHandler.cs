@@ -27,7 +27,6 @@ public sealed class SourceMessageHandler(
         RabbitMqMessageEnvelope message,
         CancellationToken cancellationToken = default)
     {
-        // Only a grid type update can change routing. Other updates are expected and not logged.
         if (!UpdatedFields.Contains(message.Headers, "gridType"))
         {
             return RabbitMqMessageProcessingResult.Success();
@@ -57,8 +56,6 @@ public sealed class SourceMessageHandler(
         return result;
     }
 
-    // One unit per matched rule and run-params entry. Identical runs of one rule share a dispatch
-    // ID, so they collapse into one unit.
     private List<DispatchUnit> PrepareUnits(
         GatewayInputMessage image,
         PipelineDispatchContext imageContext,
@@ -84,7 +81,6 @@ public sealed class SourceMessageHandler(
                         continue;
                     }
 
-                    // The preparer logs why a unit is invalid.
                     var prepared = preparer.Prepare(pipelineId, UnitContext(imageContext, dispatchId, match), runParams);
                     if (prepared.Work is { } work)
                     {
