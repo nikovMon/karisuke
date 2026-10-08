@@ -16,22 +16,22 @@ public sealed record PipelineRules(PipelineDefinition Pipeline, IReadOnlyList<Ac
 /// affects the others. Startup fails unless every enabled pipeline loads, so a running gateway
 /// never matches against a missing rule set.
 /// </summary>
-public sealed class PipelineRuleSnapshots : BackgroundService
+public sealed class GatewayRuleCache : BackgroundService
 {
     private readonly IReadOnlyList<RuleSource> _sources;
     private readonly IRuleRepository _repository;
-    private readonly ILogger<PipelineRuleSnapshots> _logger;
+    private readonly ILogger<GatewayRuleCache> _logger;
     private readonly RuleRefreshOptions _refresh;
     private readonly FrozenDictionary<string, (PipelineDefinition Pipeline, IPipelineContract Contract)> _pipelines;
     private FrozenDictionary<string, PipelineRules> _current = FrozenDictionary<string, PipelineRules>.Empty;
 
-    public PipelineRuleSnapshots(
+    public GatewayRuleCache(
         IPipelineCatalog catalog,
         IRuleSourceResolver sources,
         IPipelineContractRegistry contracts,
         IRuleRepository repository,
         IOptions<RuleRefreshOptions> refresh,
-        ILogger<PipelineRuleSnapshots> logger)
+        ILogger<GatewayRuleCache> logger)
     {
         var enabled = catalog.GetEnabled();
         _sources = enabled.Select(pipeline => sources.Resolve(pipeline.PipelineId)).ToArray();

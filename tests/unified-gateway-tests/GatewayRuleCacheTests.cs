@@ -11,20 +11,20 @@ using static ImagingPipeline.UnifiedGateway.Tests.DispatchTestData;
 
 namespace ImagingPipeline.UnifiedGateway.Tests;
 
-public sealed class PipelineRuleSnapshotsTests
+public sealed class GatewayRuleCacheTests
 {
     [Fact]
     public async Task StartupLoadsEveryEnabledPipelineFromItsOwnIndex()
     {
         var repository = new FakeRuleRepository(_ => Load(Rule("rule-a")));
-        using var snapshots = Snapshots(repository, RabbitMqPipeline("asd"), HttpPipeline("other"), RabbitMqPipeline("off", enabled: false));
+        using var cache = Cache(repository, RabbitMqPipeline("asd"), HttpPipeline("other"), RabbitMqPipeline("off", enabled: false));
 
-        await snapshots.StartAsync(CancellationToken.None);
+        await cache.StartAsync(CancellationToken.None);
 
         Assert.Equal(["asd-pipeline-index", "other-pipeline-index"], repository.Indexes.Order());
-        Assert.Equal(["asd", "other"], snapshots.Current.Select(rules => rules.Pipeline.PipelineId).Order());
-        Assert.All(snapshots.Current, rules => Assert.Equal("rule-a", Assert.Single(rules.Rules).Id));
-        await snapshots.StopAsync(CancellationToken.None);
+        Assert.Equal(["asd", "other"], cache.Current.Select(rules => rules.Pipeline.PipelineId).Order());
+        Assert.All(cache.Current, rules => Assert.Equal("rule-a", Assert.Single(rules.Rules).Id));
+        await cache.StopAsync(CancellationToken.None);
     }
 
     [Fact]
@@ -33,11 +33,11 @@ public sealed class PipelineRuleSnapshotsTests
         var invalid = Rule("invalid");
         invalid.RunParams = [JsonSerializer.SerializeToElement(new { tenantId = "" })];
         var logger = new RecordingLogger();
-        using var snapshots = Snapshots(new FakeRuleRepository(_ => Load(Rule("valid"), invalid)), logger, RabbitMqPipeline("asd"));
+        using var cache = Cache(new FakeRuleRepository(_ => Load(Rule("valid"), invalid)), logger, RabbitMqPipeline("asd"));
 
-        await snapshots.StartAsync(CancellationToken.None);
+        await cache.StartAsync(CancellationToken.None);
 
-        Assert.Equal("valid", Assert.Single(Assert.Single(snapshots.Current).Rules).Id);
+        Assert.Equal("valid", Assert.Single(Assert.Single(cache.Current).Rules).Id);
         var rejected = Assert.Single(logger.Entries, entry => entry.EventId == 6012);
         Assert.Equal("Pipeline rule rejected; it will not be matched.", rejected.Message);
         Assert.Equal("invalid", rejected.Fields[TelemetryAttributeNames.PipelineRuleId]);
@@ -46,7 +46,7 @@ public sealed class PipelineRuleSnapshotsTests
         var loaded = Assert.Single(logger.Entries, entry => entry.EventId == 6010);
         Assert.Equal(1, loaded.Fields[TelemetryAttributeNames.RulesLoadedCount]);
         Assert.Equal(1, loaded.Fields[TelemetryAttributeNames.RulesRejectedCount]);
-        await snapshots.StopAsync(CancellationToken.None);
+        await cache.StopAsync(CancellationToken.None);
     }
 
     [Fact]
@@ -54,9 +54,9 @@ public sealed class PipelineRuleSnapshotsTests
     {
         var logger = new RecordingLogger();
         var failure = new RuleLoadException("search failed", new InvalidOperationException());
-        using var snapshots = Snapshots(new FakeRuleRepository(_ => throw failure), logger, RabbitMqPipeline("asd"));
+        using var cache = Cache(new FakeRuleRepository(_ => throw failure), logger, RabbitMqPipeline("asd"));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => snapshots.StartAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => cache.StartAsync(CancellationToken.None));
 
         var failed = Assert.Single(logger.Entries, entry => entry.EventId == 6013);
         Assert.Same(failure, failed.Exception);
@@ -68,9 +68,9 @@ public sealed class PipelineRuleSnapshotsTests
     {
         var invalid = Rule("invalid");
         invalid.MatchAll = false;
-        using var snapshots = Snapshots(new FakeRuleRepository(_ => Load(invalid)), RabbitMqPipeline("asd"));
+        using var cache = Cache(new FakeRuleRepository(_ => Load(invalid)), RabbitMqPipeline("asd"));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => snapshots.StartAsync(CancellationToken.None));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => cache.StartAsync(CancellationToken.None));
     }
 
     [Fact]
@@ -81,14 +81,14 @@ public sealed class PipelineRuleSnapshotsTests
             ? Load(Rule("first"))
             : throw new RuleLoadException("search failed", new InvalidOperationException()));
         var logger = new RecordingLogger();
-        using var snapshots = Snapshots(repository, logger, RabbitMqPipeline("asd"));
+        using var cache = Cache(repository, logger, RabbitMqPipeline("asd"));
 
-        await snapshots.StartAsync(CancellationToken.None);
+        await cache.StartAsync(CancellationToken.None);
         var failed = await WaitForLogAsync(logger, 6013);
-        await snapshots.StopAsync(CancellationToken.None);
+        await cache.StopAsync(CancellationToken.None);
 
         Assert.Equal(1, failed.Fields[TelemetryAttributeNames.RulesRetainedCount]);
-        Assert.Equal("first", Assert.Single(Assert.Single(snapshots.Current).Rules).Id);
+        Assert.Equal("first", Assert.Single(Assert.Single(cache.Current).Rules).Id);
     }
 
     // The refresh runs in the background after the configured one-second interval.
@@ -108,16 +108,16 @@ public sealed class PipelineRuleSnapshotsTests
         throw new TimeoutException($"No log with event {eventId} was written.");
     }
 
-    private static PipelineRuleSnapshots Snapshots(FakeRuleRepository repository, params ImagingPipeline.PipelineCatalog.PipelineDefinition[] pipelines) =>
-        Snapshots(repository, new RecordingLogger(), pipelines);
+    private static GatewayRuleCache Cache(FakeRuleRepository repository, params ImagingPipeline.PipelineCatalog.PipelineDefinition[] pipelines) =>
+        Cache(repository, new RecordingLogger(), pipelines);
 
-    private static PipelineRuleSnapshots Snapshots(
+    private static GatewayRuleCache Cache(
         FakeRuleRepository repository,
         RecordingLogger logger,
         params ImagingPipeline.PipelineCatalog.PipelineDefinition[] pipelines)
     {
         var catalog = CreateCatalog(pipelines);
-        return new PipelineRuleSnapshots(
+        return new GatewayRuleCache(
             catalog,
             catalog,
             new PipelineContractRegistry([new AsdPipelineContract()]),
@@ -158,7 +158,7 @@ public sealed class PipelineRuleSnapshotsTests
     private sealed record LogEntry(int EventId, string Message, Exception? Exception, IReadOnlyDictionary<string, object?> Fields);
 
     /// <summary>Records each log entry with the fields of the scopes open when it was written.</summary>
-    private sealed class RecordingLogger : ILogger<PipelineRuleSnapshots>
+    private sealed class RecordingLogger : ILogger<GatewayRuleCache>
     {
         private readonly AsyncLocal<ImmutableScope?> _scope = new();
         private readonly ConcurrentQueue<LogEntry> _entries = new();

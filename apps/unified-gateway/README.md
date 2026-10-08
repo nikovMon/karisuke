@@ -173,7 +173,7 @@ The old pipeline array format and nested `PipelineId` fields are rejected. Migra
 
 ## Rules
 
-`PipelineRuleSnapshots` holds the active rules of every enabled pipeline. Each pipeline's rules are read from the index its catalog entry names, as v2 documents, and prepared with `libs/rule-engine`; run parameters are checked against the pipeline's contract. A rule that fails is left out and logged with its ID and reason (up to 10 per load).
+`GatewayRuleCache` holds the active rules of every enabled pipeline. Each pipeline's rules are read from the index its catalog entry names, as v2 documents, and prepared with `libs/rule-engine`; run parameters are checked against the pipeline's contract. A rule that fails is left out and logged with its ID and reason (up to 10 per load).
 
 Startup fails unless every enabled pipeline loads. After that, rules reload every `RuleRefresh:IntervalSeconds` (default 60) plus up to `RuleRefresh:JitterSeconds` (default 5). Each pipeline reloads on its own: a failed reload, or one where every rule was rejected, keeps that pipeline's previous rules and leaves the others untouched. Logs carry `pipeline.id` and counts as fields; `unified_gateway.rules.loads` counts loads by pipeline and outcome. Elasticsearch connection settings come from the `Elasticsearch` section.
 
@@ -228,6 +228,6 @@ The host uses the same observability bootstrap as the regular gateway, with a di
 
 ## Later tickets
 
-The Rule Engine ticket owns Elasticsearch rule loading, validation of rule documents, matching and refreshable snapshots, with no spatial index. The rest of the Transport & Dispatch ticket covers input consumption, and acknowledgement, retry and dead-letter handling of source messages.
+The Rule Engine ticket owns Elasticsearch rule loading, validation of rule documents, matching and refreshable cache, with no spatial index. The rest of the Transport & Dispatch ticket covers input consumption, and acknowledgement, retry and dead-letter handling of source messages.
 
 Retry reuses the existing per-message mechanism of `libs/rabbitmq-client`: if any unit is retryable, the whole source message is retried and matched again, so units that were already delivered are sent again with the same dispatch ID. A per-pipeline record of delivered units, plugged in through `IDispatchDeliveryListener`, can later skip them.

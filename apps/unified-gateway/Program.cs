@@ -41,8 +41,8 @@ public sealed partial class Program
             .Bind(builder.Configuration.GetSection(RuleRefreshOptions.SectionName))
             .Validate(options => options.IsValid(), "RuleRefresh needs IntervalSeconds > 0 and JitterSeconds >= 0.")
             .ValidateOnStart();
-        builder.Services.AddSingleton<PipelineRuleSnapshots>();
-        builder.Services.AddHostedService(provider => provider.GetRequiredService<PipelineRuleSnapshots>());
+        builder.Services.AddSingleton<GatewayRuleCache>();
+        builder.Services.AddHostedService(provider => provider.GetRequiredService<GatewayRuleCache>());
 
         var app = builder.Build();
         var catalog = app.Services.GetRequiredService<IPipelineCatalog>();
