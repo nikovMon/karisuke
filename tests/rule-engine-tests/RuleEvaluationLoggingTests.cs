@@ -13,7 +13,7 @@ public sealed class RuleEvaluationLoggingTests
     public void LogsAStaticMessageWithMatchedRulesAndMissReasonsAsFields()
     {
         var otherSensor = Rule("other-sensor");
-        otherSensor.Sensors = [new SensorConfig { Name = "other-camera", RegistrationQualities = [RegistrationQuality.Accurate] }];
+        otherSensor.Match!.Sensors = [new SensorConfig { Name = "other-camera", RegistrationQualities = [RegistrationQuality.Accurate] }];
         var evaluation = new RuleMatcher(new FakeTimeProvider(Now))
             .Match(Image(), [ActiveRule(Rule("hit")), ActiveRule(otherSensor)]);
         var logger = new ScopeRecordingLogger();

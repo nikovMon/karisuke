@@ -51,7 +51,7 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
                 PointInTimeKeepAlive,
                 cancellationToken);
 
-            var rules = new List<RuleDto>();
+            var rules = new List<PipelineRuleDocument>();
             var rejectedSources = new List<RuleRejection>();
             var ids = new HashSet<string>(StringComparer.Ordinal);
             IReadOnlyList<JsonElement> searchAfter = [];
@@ -205,7 +205,7 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
 
     private static bool TryDeserializeRule(
         ElasticsearchSearchHit<RawRuleSource> hit,
-        out RuleDto rule,
+        out PipelineRuleDocument rule,
         out RuleRejection rejection)
     {
         rule = null!;
@@ -230,7 +230,7 @@ public sealed class ElasticsearchRuleRepository : IRuleRepository
 
         try
         {
-            rule = hit.Source.Value.Deserialize<RuleDto>() ??
+            rule = hit.Source.Value.Deserialize<PipelineRuleDocument>() ??
                 throw new JsonException("The deserialized rule source was null.");
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)

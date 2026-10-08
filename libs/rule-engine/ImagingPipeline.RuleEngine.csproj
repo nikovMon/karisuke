@@ -18,5 +18,6 @@
     <ProjectReference Include="..\elasticsearch-client\ElasticsearchClient.csproj" />
     <ProjectReference Include="..\geometry-utils\GeometryUtils.csproj" />
     <ProjectReference Include="..\observability\ImagingPipeline.Observability.csproj" />
+    <ProjectReference Include="..\pipeline-contracts\ImagingPipeline.PipelineContracts.csproj" />
   </ItemGroup>
 </Project>

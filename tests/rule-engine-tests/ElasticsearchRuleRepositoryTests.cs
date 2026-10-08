@@ -167,8 +167,7 @@ public sealed class ElasticsearchRuleRepositoryTests
                     1,
                     """
                     {
-                      "ruleName": "invalid",
-                      "algorithmName": ["Unknown"]
+                      "ruleName": 5
                     }
                     """),
                 Hit("valid-rule", 2)));
@@ -208,11 +207,10 @@ public sealed class ElasticsearchRuleRepositoryTests
         long shardDocument) =>
         new(
             id,
-            new RawRuleSource(JsonSerializer.SerializeToElement(new RuleDto
+            new RawRuleSource(JsonSerializer.SerializeToElement(new PipelineRuleDocument
             {
                 Id = id,
-                RuleName = id,
-                AlgorithmNames = [AlgorithmName.FindAir]
+                RuleName = id
             })),
             [JsonSerializer.SerializeToElement(shardDocument)]);
 
