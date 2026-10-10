@@ -4,9 +4,13 @@ using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Rules.Responses;
 using ImagingPipeline.Observability;
 using ImagingPipeline.PipelineCatalog;
-using ImagingPipeline.Rules.Api.Controllers;
+using ImagingPipeline.Rules.Api.Observability;
 using ImagingPipeline.Rules.Api.Tests.Fakes;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Abstractions;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
 
 namespace ImagingPipeline.Rules.Api.Tests;
@@ -47,12 +51,18 @@ public sealed class PipelinesApiTests
     [Fact]
     public void UnknownPipelineLogsStaticWarningWithThePipelineIdAsAField()
     {
-        var logger = new RecordingLogger<PipelinesController>();
-        var controller = new PipelinesController(new SinglePipelineCatalog(), logger);
+        var logger = new RecordingLogger<KnownPipelineFilter>();
+        var filter = new KnownPipelineFilter(new SinglePipelineCatalog(), logger);
+        var routeData = new RouteData { Values = { [KnownPipelineFilter.RouteKey] = "unknown" } };
+        var context = new ActionExecutingContext(
+            new ActionContext(new DefaultHttpContext(), routeData, new ActionDescriptor()),
+            [],
+            new Dictionary<string, object?>(),
+            controller: null!);
 
-        var result = controller.GetById("unknown");
+        filter.OnActionExecuting(context);
 
-        Assert.IsType<NotFoundResult>(result);
+        Assert.IsType<NotFoundResult>(context.Result);
         var log = Assert.Single(logger.Entries);
         Assert.Equal(5030, log.EventId.Id);
         Assert.Equal(LogLevel.Warning, log.Level);

@@ -97,6 +97,7 @@ public sealed partial class Program
             .Validate(options => options.IsValid(out _), "Rules Elasticsearch settings are invalid.")
             .ValidateOnStart();
         builder.Services.AddSingleton<RuleService>();
+        builder.Services.AddSingleton<PipelineRuleService>();
         builder.Services.AddPipelineContracts();
         builder.Services.AddPipelineCatalog(builder.Configuration);
         builder.Services.AddSingleton<IElasticsearchHealthProbe, ElasticsearchHealthProbe>();

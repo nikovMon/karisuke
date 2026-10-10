@@ -1,6 +1,6 @@
 using ImagingPipeline.Common.Dtos.Rules.Responses;
-using ImagingPipeline.Observability;
 using ImagingPipeline.PipelineCatalog;
+using ImagingPipeline.Rules.Api.Observability;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ImagingPipeline.Rules.Api.Controllers;
@@ -11,16 +11,15 @@ namespace ImagingPipeline.Rules.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("pipelines")]
+[TypeFilter(typeof(KnownPipelineFilter))]
 [Produces("application/json")]
 public sealed class PipelinesController : ControllerBase
 {
     private readonly IPipelineCatalog _catalog;
-    private readonly ILogger<PipelinesController> _logger;
 
-    public PipelinesController(IPipelineCatalog catalog, ILogger<PipelinesController> logger)
+    public PipelinesController(IPipelineCatalog catalog)
     {
         _catalog = catalog;
-        _logger = logger;
     }
 
     [HttpGet]
@@ -33,24 +32,8 @@ public sealed class PipelinesController : ControllerBase
     [HttpGet("{pipelineId}")]
     [ProducesResponseType(typeof(PipelineResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public IActionResult GetById(string pipelineId)
-    {
-        var pipeline = _catalog.GetAll().FirstOrDefault(pipeline => pipeline.PipelineId == pipelineId);
-        if (pipeline is null)
-        {
-            using (_logger.BeginScope(new KeyValuePair<string, object?>[]
-                   {
-                       new(TelemetryAttributeNames.PipelineId, pipelineId)
-                   }))
-            {
-                _logger.PipelineNotFound();
-            }
-
-            return NotFound();
-        }
-
-        return Ok(ToResponse(pipeline));
-    }
+    public IActionResult GetById(string pipelineId) =>
+        Ok(ToResponse(_catalog.GetRequired(pipelineId)));
 
     private static PipelineResponse ToResponse(PipelineDefinition pipeline) =>
         new(pipeline.PipelineId, pipeline.ContractId, pipeline.Enabled);

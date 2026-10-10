@@ -10,6 +10,11 @@ public sealed class RulesElasticsearchOptions
 
     public int MaxSearchSize { get; set; } = 1000;
 
+    internal string? ValidatePage(int from, int size) =>
+        from < 0 || size <= 0 || size > MaxSearchSize
+            ? $"from must be at least 0 and size must be between 1 and {MaxSearchSize}."
+            : null;
+
     internal bool IsValid(out string error)
     {
         if (string.IsNullOrWhiteSpace(Index))
