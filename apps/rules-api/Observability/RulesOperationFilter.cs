@@ -43,6 +43,12 @@ internal sealed class RulesOperationFilter : IAsyncActionFilter
             activity.AddPipelineContext(ruleId: id as string);
         }
 
+        if (activity?.IsAllDataRequested == true &&
+            context.RouteData.Values[KnownPipelineFilter.RouteKey] is string pipelineId)
+        {
+            activity.SetTag(TelemetryAttributeNames.PipelineId, pipelineId);
+        }
+
         try
         {
             var executed = await next();
@@ -103,7 +109,7 @@ internal sealed class RulesOperationFilter : IAsyncActionFilter
 
     internal static RulesOperation ResolveRequestOperation(HttpRequest request)
     {
-        var path = request.Path.Value ?? string.Empty;
+        var path = WithoutPipelinePrefix(request.Path.Value ?? string.Empty);
         if (HttpMethods.IsPost(request.Method))
         {
             return RulesOperation.Create;
@@ -147,6 +153,18 @@ internal sealed class RulesOperationFilter : IAsyncActionFilter
         return path.TrimEnd('/').Count(character => character == '/') > 1
             ? RulesOperation.GetById
             : RulesOperation.Search;
+    }
+
+    private static string WithoutPipelinePrefix(string path)
+    {
+        const string prefix = "/pipelines/";
+        if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return path;
+        }
+
+        var rulesStart = path.IndexOf('/', prefix.Length);
+        return rulesStart < 0 ? path : path[rulesStart..];
     }
 
     private static void RecordException(
@@ -231,7 +249,8 @@ internal sealed class RulesOperationFilter : IAsyncActionFilter
         ObjectResult { Value: BulkOperationResult bulk } => bulk.SuccessIds.Count,
         ObjectResult { Value: IReadOnlyCollection<RuleDto> rules } => rules.Count,
         ObjectResult { Value: IReadOnlyCollection<string> names } => names.Count,
-        ObjectResult { Value: RuleDto } => 1,
+        ObjectResult { Value: IReadOnlyCollection<PipelineRuleDocument> rules } => rules.Count,
+        ObjectResult { Value: RuleDto or PipelineRuleDocument } => 1,
         _ when statusCode == StatusCodes.Status204NoContent => 1,
         _ => 0
     };
