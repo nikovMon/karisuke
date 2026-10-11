@@ -35,6 +35,17 @@ public static class TelemetrySpanExtensions
         return activity;
     }
 
+    /// <summary>Tags the span with a bounded <see cref="TelemetryAttributeNames.PipelineOutcome"/> value.</summary>
+    public static Activity? SetTelemetryOutcome(this Activity? activity, TelemetryOutcome outcome)
+    {
+        if (activity?.IsAllDataRequested == true)
+        {
+            activity.SetTag(TelemetryAttributeNames.PipelineOutcome, outcome.Value());
+        }
+
+        return activity;
+    }
+
     public static Activity? SetTelemetrySuccess(this Activity? activity)
     {
         if (activity?.IsAllDataRequested == true)

@@ -1,10 +1,15 @@
 using System.Net;
 using System.Text.Json;
 using ImagingPipeline.PipelineCatalog;
+using ImagingPipeline.RabbitMqClient;
+using ImagingPipeline.RuleEngine.Loading;
+using ImagingPipeline.UnifiedGateway.Dispatch;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
 namespace ImagingPipeline.UnifiedGateway.Tests;
@@ -22,8 +27,8 @@ public sealed class UnifiedGatewayHostTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("Healthy", body.RootElement.GetProperty("status").GetString());
-        Assert.False(body.RootElement.GetProperty("dispatchActive").GetBoolean());
-        Assert.Equal(new[] { "catalog", "contracts" }, body.RootElement.GetProperty("capabilities")
+        Assert.True(body.RootElement.GetProperty("dispatchActive").GetBoolean());
+        Assert.Equal(new[] { "catalog", "contracts", "rules", "dispatch" }, body.RootElement.GetProperty("capabilities")
             .EnumerateArray().Select(capability => capability.GetString()));
         Assert.False(body.RootElement.TryGetProperty("retryWorkerEnabled", out _));
         var source = factory.Services.GetRequiredService<IRuleSourceResolver>().Resolve("asd");
@@ -112,14 +117,50 @@ public sealed class UnifiedGatewayHostTests
         Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
     }
 
+    [Fact]
+    public void DispatcherResolvesBothCatalogTransportsAndHttpDispatchDoesNotFollowRedirects()
+    {
+        using var factory = CreateFactory();
+        using var client = factory.CreateClient();
+
+        var dispatcher = factory.Services.GetRequiredService<PipelineDispatcher>();
+        var transports = factory.Services.GetServices<IDispatchTransport>().Select(transport => transport.Kind);
+        Assert.NotNull(dispatcher);
+        Assert.Equal([PipelineTransportKind.RabbitMq, PipelineTransportKind.Http], transports);
+
+        var handler = factory.Services.GetRequiredService<IHttpMessageHandlerFactory>()
+            .CreateHandler(HttpDispatchTransport.HttpClientName);
+        while (handler is DelegatingHandler delegating)
+        {
+            handler = delegating.InnerHandler!;
+        }
+
+        Assert.False(Assert.IsType<SocketsHttpHandler>(handler).AllowAutoRedirect);
+        Assert.Equal(Timeout.InfiniteTimeSpan, factory.Services.GetRequiredService<IHttpClientFactory>()
+            .CreateClient(HttpDispatchTransport.HttpClientName).Timeout);
+    }
+
     private static WebApplicationFactory<Program> CreateFactory(Dictionary<string, string?>? settings = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
             builder.UseSetting("Observability:Enabled", "false");
+            // Tests have no Elasticsearch or broker: every rule index is empty and nothing is consumed.
+            builder.ConfigureServices(services =>
+            {
+                services.RemoveAll<IRuleRepository>();
+                services.AddSingleton<IRuleRepository, EmptyRuleRepository>();
+                services.Remove(services.Single(service => service.ImplementationType == typeof(RabbitMqConsumerService)));
+            });
             if (settings is not null)
             {
                 builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(settings));
             }
         });
+
+    private sealed class EmptyRuleRepository : IRuleRepository
+    {
+        public Task<RuleLoadResult> GetActiveRulesAsync(string indexName, CancellationToken cancellationToken) =>
+            Task.FromResult(new RuleLoadResult([], []));
+    }
 }

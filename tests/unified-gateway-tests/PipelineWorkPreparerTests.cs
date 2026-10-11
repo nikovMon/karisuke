@@ -25,7 +25,7 @@ public sealed class PipelineWorkPreparerTests
         Assert.Empty(result.Errors);
         Assert.NotNull(result.Work);
         Assert.Equal("asd", result.Work.Pipeline.PipelineId);
-        Assert.Equal("rabbitmq", result.Work.Pipeline.Transport.Kind);
+        Assert.Equal(PipelineTransportKind.RabbitMq, result.Work.Pipeline.Transport.Kind);
         Assert.Equal("application/json", result.Work.Payload.ContentType);
         Assert.Equal("FindAir", result.Work.Payload.Attributes["algorithmName"]);
         Assert.Equal("tenant-a", result.Work.Payload.Attributes["tenantId"]);
@@ -47,7 +47,7 @@ public sealed class PipelineWorkPreparerTests
         var second = Definition("second", "asd", true) with
         {
             ExtraData = PipelineExtraData.Parse("""{"origin":"second"}"""),
-            Transport = new() { Kind = "http", Http = new() { Endpoint = "https://example.invalid/work" } }
+            Transport = new() { Kind = PipelineTransportKind.Http, Http = new() { Endpoint = "https://example.invalid/work" } }
         };
         var preparer = CreatePreparer([first, second], new AsdPipelineContract());
 
@@ -124,7 +124,7 @@ public sealed class PipelineWorkPreparerTests
             RulesIndex = "http-example-integ-pipeline-index",
             Transport = new PipelineTransportOptions
             {
-                Kind = "http",
+                Kind = PipelineTransportKind.Http,
                 Http = new HttpTransportOptions { Endpoint = "https://example.invalid/work" }
             }
         };
@@ -138,7 +138,7 @@ public sealed class PipelineWorkPreparerTests
         Assert.Equal(PipelinePreparationStatus.Prepared, asdResult.Status);
         Assert.NotNull(asdResult.Work);
         Assert.Equal("asd", asdResult.Work.Pipeline.ContractId);
-        Assert.Equal("rabbitmq", asdResult.Work.Pipeline.Transport.Kind);
+        Assert.Equal(PipelineTransportKind.RabbitMq, asdResult.Work.Pipeline.Transport.Kind);
         Assert.Equal("output", asdResult.Work.Pipeline.Transport.RabbitMq!.ConnectionRef);
         Assert.Equal("publisher", asdResult.Work.Pipeline.Transport.RabbitMq!.Output.QueueName);
         Assert.Null(asdResult.Work.Pipeline.Transport.Http);
@@ -149,7 +149,7 @@ public sealed class PipelineWorkPreparerTests
         Assert.Equal(PipelinePreparationStatus.Prepared, result.Status);
         Assert.NotNull(result.Work);
         Assert.Equal(contract.ContractId, result.Work.Pipeline.ContractId);
-        Assert.Equal("http", result.Work.Pipeline.Transport.Kind);
+        Assert.Equal(PipelineTransportKind.Http, result.Work.Pipeline.Transport.Kind);
         Assert.Equal("https://example.invalid/work", result.Work.Pipeline.Transport.Http!.Endpoint);
         Assert.Null(result.Work.Pipeline.Transport.RabbitMq);
         Assert.Equal("analysis", result.Work.Payload.Attributes["mode"]);
@@ -247,7 +247,7 @@ public sealed class PipelineWorkPreparerTests
         RulesIndex = $"{id}-pipeline-index",
         Transport = new PipelineTransportOptions
         {
-            Kind = "rabbitmq",
+            Kind = PipelineTransportKind.RabbitMq,
             RabbitMq = new RabbitMqTransportOptions
             {
                 ConnectionRef = "output",

@@ -17,7 +17,7 @@ public sealed class AlgoPreparationTests
         var context = OverlayDispatchContextFactory.Create("task-a", "rule-a", Json("""
             {"id":"image-a","photoTime":"2026-09-23T10:00:00","legId":"leg-a",
              "prevOverlayId":null,"nextOverlayId":"image-b"}
-            """));
+            """)) with { RuleLocationWkt = "POLYGON ((0 0, 2 0, 2 2, 0 0))" };
         var first = preparer.Prepare("algo-first", context, RuleParameters());
         var second = preparer.Prepare("algo-second", context, RuleParameters());
 
@@ -72,14 +72,13 @@ public sealed class AlgoPreparationTests
         {
             XUserName = $"{name}-user", Origin = $"{name}-origin", QueueType = $"{name}-queue", SaveDetections = save
         })),
-        Transport = new() { Kind = "http", Http = new() { Method = "PUT", Endpoint = $"https://{name}.example.invalid/mission/upsert/" } }
+        Transport = new() { Kind = PipelineTransportKind.Http, Http = new() { Method = "PUT", Endpoint = $"https://{name}.example.invalid/mission/upsert/" } }
     };
 
     private static JsonElement RuleParameters() => Json("""
         {"customer":"example-customer","profile_name":"example-profile","hebrew_rule_name":"Example",
          "algorithm_name":"example-algorithm","priority":1,"username":null,
-         "run_every_other_image":true,"should_check_in_vip":true,
-         "location_geojson":{"type":"Polygon","coordinates":[[[0,0],[2,0],[2,2],[0,0]]]}}
+         "run_every_other_image":true,"should_check_in_vip":true}
         """);
 
     private static JsonElement Json(string json)

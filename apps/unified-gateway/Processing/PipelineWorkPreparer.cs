@@ -31,7 +31,7 @@ public sealed class PipelineWorkPreparer(
         var started = Stopwatch.GetTimestamp();
         var outcome = "failed";
         using var activity = TelemetrySources.UnifiedGateway.StartActivity("unified_gateway.contract.prepare");
-        activity?.SetTag("pipeline.id", pipeline.PipelineId);
+        activity?.SetTag(TelemetryAttributeNames.PipelineId, pipeline.PipelineId);
         activity?.SetTag("pipeline.contract", pipeline.ContractId);
 
         try
@@ -73,7 +73,7 @@ public sealed class PipelineWorkPreparer(
         finally
         {
             activity?.SetTag("pipeline.outcome", outcome);
-            var tags = new TagList { { "pipeline.id", pipeline.PipelineId }, { "outcome", outcome } };
+            var tags = new TagList { { TelemetryAttributeNames.PipelineId, pipeline.PipelineId }, { "outcome", outcome } };
             Preparations.Add(1, tags);
             Duration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds, tags);
         }

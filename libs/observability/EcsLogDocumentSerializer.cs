@@ -50,7 +50,27 @@ internal static class EcsLogDocumentSerializer
             [TelemetryAttributeNames.SensorName] = TelemetryAttributeNames.SensorName,
             [TelemetryAttributeNames.TileId] = TelemetryAttributeNames.TileId,
             [TelemetryAttributeNames.TileIndex] = TelemetryAttributeNames.TileIndex,
-            [TelemetryAttributeNames.TileCount] = TelemetryAttributeNames.TileCount
+            [TelemetryAttributeNames.TileCount] = TelemetryAttributeNames.TileCount,
+            [TelemetryAttributeNames.PipelineId] = TelemetryAttributeNames.PipelineId,
+            [TelemetryAttributeNames.PipelineTransport] = TelemetryAttributeNames.PipelineTransport,
+            [TelemetryAttributeNames.PipelineOutcome] = TelemetryAttributeNames.PipelineOutcome,
+            // Not error.type: the exporter writes the exception class there.
+            [TelemetryAttributeNames.ErrorCategory] = TelemetryAttributeNames.ErrorCategory,
+            [TelemetryAttributeNames.RulesMatchedIds] = TelemetryAttributeNames.RulesMatchedIds,
+            [TelemetryAttributeNames.RulesMissedPhotoAgeIds] = TelemetryAttributeNames.RulesMissedPhotoAgeIds,
+            [TelemetryAttributeNames.RulesMissedPhotoAgeCount] = TelemetryAttributeNames.RulesMissedPhotoAgeCount,
+            [TelemetryAttributeNames.RulesMissedSensorIds] = TelemetryAttributeNames.RulesMissedSensorIds,
+            [TelemetryAttributeNames.RulesMissedSensorCount] = TelemetryAttributeNames.RulesMissedSensorCount,
+            [TelemetryAttributeNames.RulesMissedResolutionIds] = TelemetryAttributeNames.RulesMissedResolutionIds,
+            [TelemetryAttributeNames.RulesMissedResolutionCount] = TelemetryAttributeNames.RulesMissedResolutionCount,
+            [TelemetryAttributeNames.RulesMissedGeometryCount] = TelemetryAttributeNames.RulesMissedGeometryCount,
+            [TelemetryAttributeNames.RulesLoadedCount] = TelemetryAttributeNames.RulesLoadedCount,
+            [TelemetryAttributeNames.RulesRejectedCount] = TelemetryAttributeNames.RulesRejectedCount,
+            [TelemetryAttributeNames.RulesRetainedCount] = TelemetryAttributeNames.RulesRetainedCount,
+            [TelemetryAttributeNames.RuleRejectionReason] = TelemetryAttributeNames.RuleRejectionReason,
+            [TelemetryAttributeNames.ErrorCode] = TelemetryAttributeNames.ErrorCode,
+            [TelemetryAttributeNames.DispatchUnitCount] = TelemetryAttributeNames.DispatchUnitCount,
+            [TelemetryAttributeNames.DispatchFailedCount] = TelemetryAttributeNames.DispatchFailedCount
         };
 
     public static byte[] SerializeBatch(

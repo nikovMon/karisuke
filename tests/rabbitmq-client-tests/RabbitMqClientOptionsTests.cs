@@ -222,16 +222,22 @@ public sealed class RabbitMqClientOptionsTests
     }
 
     [Fact]
-    public void ConsumerValidationRejectsEmptyOutputQueue()
+    public void ConsumerValidationAllowsNoOutputQueue()
     {
         var options = new RabbitMqClientOptions
         {
             InputQueue = "input",
-            OutputQueue = ""
+            OutputQueue = "",
+            DeadLetterQueue = "dlq",
+            RetryExchange = "retry.exchange",
+            RetryExchangeType = RabbitMQ.Client.ExchangeType.Headers,
+            RetryRoutingKey = "retry",
+            MaxRetryAttempts = 1,
+            RetryQueues = [new RabbitMqRetryQueueOptions { RetryCount = 1, Queue = "retry.1", DelayMilliseconds = 1000 }]
         };
 
-        Assert.False(options.IsConsumerValid(out var error));
-        Assert.Equal("RabbitMq OutputQueue and DeadLetterQueue must not be empty for consumers.", error);
+        Assert.True(options.IsConsumerValid(out _));
+        Assert.False(options.HasOutput);
     }
 
     [Fact]
@@ -249,7 +255,7 @@ public sealed class RabbitMqClientOptionsTests
         };
 
         Assert.False(options.IsConsumerValid(out var error));
-        Assert.Equal("RabbitMq OutputQueue and DeadLetterQueue must not be empty for consumers.", error);
+        Assert.Equal("RabbitMq DeadLetterQueue must not be empty for consumers.", error);
     }
 
     [Fact]

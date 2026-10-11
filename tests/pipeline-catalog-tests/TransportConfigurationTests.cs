@@ -1,3 +1,4 @@
+using ImagingPipeline.PipelineCatalog;
 using ImagingPipeline.PipelineContracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -175,7 +176,7 @@ public sealed class TransportConfigurationTests
         {
             Transport = new()
             {
-                Kind = "rabbitmq", RabbitMq = new() { ConnectionRef = "output", Output = queue }
+                Kind = PipelineTransportKind.RabbitMq, RabbitMq = new() { ConnectionRef = "output", Output = queue }
             }
         };
         var http = Http(new() { ["X-Mode"] = "original" });
@@ -342,7 +343,7 @@ public sealed class TransportConfigurationTests
         PipelineId = id, Enabled = true, ContractId = "asd", RulesIndex = "rules",
         Transport = new()
         {
-            Kind = "rabbitmq", RabbitMq = new()
+            Kind = PipelineTransportKind.RabbitMq, RabbitMq = new()
             {
                 ConnectionRef = connectionRef, Output = new() { QueueName = "work" }
             }
@@ -354,7 +355,7 @@ public sealed class TransportConfigurationTests
         PipelineId = "http", Enabled = true, ContractId = "asd", RulesIndex = "rules",
         Transport = new()
         {
-            Kind = "http", Http = new()
+            Kind = PipelineTransportKind.Http, Http = new()
             {
                 Endpoint = "https://example.test/path?mode=one&return=%2Ffoo", Headers = headers,
                 TimeoutSeconds = timeoutSeconds

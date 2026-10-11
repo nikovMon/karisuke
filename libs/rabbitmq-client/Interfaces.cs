@@ -12,6 +12,18 @@ public interface IRabbitMqPublisher
     Task PublishToOutputAsync(RabbitMqMessageEnvelope message, CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// Publishes to a destination supplied per call, on that destination's own broker connection,
+/// independently of the <c>RabbitMq</c> configuration section. Message headers are sent as given.
+/// </summary>
+public interface IRabbitMqDestinationPublisher
+{
+    Task PublishAsync(
+        RabbitMqDestination destination,
+        RabbitMqMessageEnvelope message,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IRabbitMqConsumer
 {
     Task ConsumeAsync(IRabbitMqMessageHandler handler, CancellationToken cancellationToken = default);

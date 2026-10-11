@@ -31,7 +31,9 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
             cancellationToken);
 
     public Task PublishToOutputAsync(RabbitMqMessageEnvelope message, CancellationToken cancellationToken = default) =>
-        PublishCoreAsync(
+        !_options.HasOutput
+            ? throw new InvalidOperationException("RabbitMq OutputQueue is not configured, so handler outputs cannot be published.")
+            : PublishCoreAsync(
             _channels,
             _options.OutputExchange,
             _options.EffectiveOutputRoutingKey,
@@ -79,68 +81,43 @@ internal sealed class RabbitMqPublisher : IRabbitMqPublisher
         }
 
         var destination = RabbitMqTelemetryDimensions.Destination(_options, exchange, routingKey);
-        var started = TelemetryTiming.StartTimestamp();
-        var outcome = TelemetryOutcome.Success;
-        var error = TelemetryErrorCategory.None;
+        using var telemetry = RabbitMqSendTelemetry.Begin(destination, message.Body.LongLength, cancellationToken);
 
-        try
+        // A retry copy is the same message returning to the same service after the retry
+        // delay, so it keeps every inbound header the handler may depend on (for example the
+        // gateway's x-updated-fields). Everything else leaves through the outbound whitelist.
+        var headers = preserveHeaders
+            ? RabbitMqHeaders.Clone(message.Headers)
+            : FilterOutboundHeaders(message.Headers, _options.RetryCountHeader);
+        if (resetRetryCount)
         {
-            // A retry copy is the same message returning to the same service after the retry
-            // delay, so it keeps every inbound header the handler may depend on (for example the
-            // gateway's x-updated-fields). Everything else leaves through the outbound whitelist.
-            var headers = preserveHeaders
-                ? RabbitMqHeaders.Clone(message.Headers)
-                : FilterOutboundHeaders(message.Headers, _options.RetryCountHeader);
-            if (resetRetryCount)
-            {
-                ResetRetryCount(headers, _options.RetryCountHeader);
-            }
-            PipelineTimingHeaders.EnsureStarted(headers);
-            headers[FindAirMessageHeaders.ContractVersion] =
-                FindAirMessageHeaders.CurrentContractVersion;
+            ResetRetryCount(headers, _options.RetryCountHeader);
+        }
+        PipelineTimingHeaders.EnsureStarted(headers);
+        headers[FindAirMessageHeaders.ContractVersion] =
+            FindAirMessageHeaders.CurrentContractVersion;
 
-            var properties = new BasicProperties
-            {
-                MessageId = message.MessageId,
-                CorrelationId = message.CorrelationId,
-                ContentType = message.ContentType,
-                Persistent = true,
-                Headers = headers
-            };
+        var properties = new BasicProperties
+        {
+            MessageId = message.MessageId,
+            CorrelationId = message.CorrelationId,
+            ContentType = message.ContentType,
+            Persistent = true,
+            Headers = headers
+        };
 
-            await using var lease = await channels.LeaseAsync(cancellationToken);
-            // This clock measures only the current broker hop. Native RabbitMQ tracing injects
-            // trace context from the producer span during BasicPublishAsync.
-            MessagingTimingHeaders.StampPublished(headers);
-            await lease.Channel.BasicPublishAsync(
-                exchange: exchange,
-                routingKey: routingKey,
-                mandatory: true,
-                basicProperties: properties,
-                body: message.Body,
-                cancellationToken: cancellationToken);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            outcome = TelemetryOutcome.Cancelled;
-            error = TelemetryErrorCategory.Cancelled;
-            throw;
-        }
-        catch
-        {
-            outcome = TelemetryOutcome.Failure;
-            error = TelemetryErrorCategory.Publish;
-            throw;
-        }
-        finally
-        {
-            MessagingTelemetry.RecordSent(
-                destination,
-                message.Body.LongLength,
-                TelemetryTiming.ElapsedSeconds(started),
-                outcome,
-                error);
-        }
+        await using var lease = await channels.LeaseAsync(cancellationToken);
+        // This clock measures only the current broker hop. Native RabbitMQ tracing injects
+        // trace context from the producer span during BasicPublishAsync.
+        MessagingTimingHeaders.StampPublished(headers);
+        await lease.Channel.BasicPublishAsync(
+            exchange: exchange,
+            routingKey: routingKey,
+            mandatory: true,
+            basicProperties: properties,
+            body: message.Body,
+            cancellationToken: cancellationToken);
+        telemetry.Succeeded();
     }
 
     internal static Dictionary<string, object?> FilterOutboundHeaders(

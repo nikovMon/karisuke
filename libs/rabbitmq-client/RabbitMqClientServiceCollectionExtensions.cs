@@ -55,6 +55,27 @@ public static class RabbitMqClientServiceCollectionExtensions
         return services;
     }
 
+    /// <summary>
+    /// Registers <see cref="IRabbitMqDestinationPublisher"/>. Connections and destinations are supplied
+    /// per publish; only <c>PublisherChannelPoolSize</c> and <c>ReconnectDelaySeconds</c> are read from
+    /// the <c>RabbitMq</c> section, which may be absent.
+    /// </summary>
+    public static IServiceCollection AddRabbitMqDestinationPublisher(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        RabbitMqNativeTracing.Configure();
+
+        AddRabbitMqOptions(services, configuration)
+            .Validate(
+                options => options.PublisherChannelPoolSize >= 1 && options.ReconnectDelaySeconds >= 1,
+                "RabbitMq PublisherChannelPoolSize and ReconnectDelaySeconds must be greater than zero.")
+            .ValidateOnStart();
+
+        services.TryAddSingleton<IRabbitMqDestinationPublisher, RabbitMqDestinationPublisher>();
+        return services;
+    }
+
     private static bool HasInputCluster(IConfiguration configuration) =>
         configuration
             .GetSection(RabbitMqClientOptions.SectionName)

@@ -1,3 +1,4 @@
+using ImagingPipeline.PipelineCatalog;
 using System.Text.Json;
 using ImagingPipeline.PipelineContracts;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -48,7 +49,7 @@ public sealed class PipelineExtraDataTests
         Pipelines = new() { ["asd"] = new()
         {
             ContractId = "asd", Enabled = true, RulesIndex = "asd-integ-pipeline-index",
-            ExtraData = extra, Transport = new() { Kind = "http", Http = new() { Endpoint = "https://example.invalid/" } }
+            ExtraData = extra, Transport = new() { Kind = PipelineTransportKind.Http, Http = new() { Endpoint = "https://example.invalid/" } }
         } }
     };
 }

@@ -117,4 +117,28 @@ public static class TelemetryAttributeNames
     public const string DependencyName = "findair.dependency.name";
     public const string DependencyOperation = "findair.dependency.operation";
     public const string ProjectionMode = "findair.projection.mode";
+    public const string PipelineId = "pipeline.id";
+    public const string PipelineTransport = "pipeline.transport";
+
+    // Rule evaluation of one image for one pipeline. Rule IDs are listed for every reason except
+    // geometry, which usually covers most rules; counts show when a list was cut short in logs.
+    public const string RulesMatchedIds = "findair.rules.matched.ids";
+    public const string RulesMissedPhotoAgeIds = "findair.rules.missed.photo_age.ids";
+    public const string RulesMissedPhotoAgeCount = "findair.rules.missed.photo_age.count";
+    public const string RulesMissedSensorIds = "findair.rules.missed.sensor.ids";
+    public const string RulesMissedSensorCount = "findair.rules.missed.sensor.count";
+    public const string RulesMissedResolutionIds = "findair.rules.missed.resolution.ids";
+    public const string RulesMissedResolutionCount = "findair.rules.missed.resolution.count";
+    public const string RulesMissedGeometryCount = "findair.rules.missed.geometry.count";
+
+    // Loading one pipeline's rules.
+    public const string RulesLoadedCount = "findair.rules.loaded.count";
+    public const string RulesRejectedCount = "findair.rules.rejected.count";
+    public const string RulesRetainedCount = "findair.rules.retained.count";
+    public const string RuleRejectionReason = "findair.rule.rejection.reason";
+
+    // Handling one source message. error.code is a stable validation code, never the exception class.
+    public const string ErrorCode = "error.code";
+    public const string DispatchUnitCount = "findair.dispatch.units.count";
+    public const string DispatchFailedCount = "findair.dispatch.failed.count";
 }

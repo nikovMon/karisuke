@@ -14,6 +14,13 @@ public interface IPipelineContract
             ? []
             : [new("extraData", "Must be a JSON object when provided.")];
 
+    /// <summary>
+    /// Validates a rule's location (<c>match.locationWkt</c>, null when absent) for contracts that
+    /// use it. Checked when rules load, so a rule this contract cannot serve is rejected once
+    /// rather than on every message it matches.
+    /// </summary>
+    IReadOnlyList<ContractValidationError> ValidateRuleLocation(string? locationWkt) => [];
+
     /// <summary>Validates only the event fields used by this contract.</summary>
     IReadOnlyList<ContractValidationError> ValidateContext(PipelineDispatchContext context) => [];
 
@@ -51,6 +58,12 @@ public sealed record PipelineDispatchContext(
     public string? LegId { get; init; }
     public string? PrevOverlayId { get; init; }
     public string? NextOverlayId { get; init; }
+
+    /// <summary>
+    /// The matched rule's own location as WKT, for contracts that send the rule area rather than the
+    /// ROI (the image's intersection with it). Null when the rule has no location.
+    /// </summary>
+    public string? RuleLocationWkt { get; init; }
 
     /// <summary>
     /// The legacy Algo clock value from DateTime.Parse. Kept separately from the UTC timestamp

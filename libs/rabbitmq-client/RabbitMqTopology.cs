@@ -59,11 +59,31 @@ internal static class RabbitMqTopology
         RabbitMqClientOptions options,
         CancellationToken cancellationToken)
     {
+        if (!options.HasOutput)
+        {
+            return;
+        }
+
         await DeclareExchangeAsync(channel, options.OutputExchange, options.OutputExchangeType,
             options.OutputExchangeHeaders, cancellationToken);
         await DeclareQueueAsync(channel, options.OutputQueue, options.OutputQueueHeaders, cancellationToken);
         await BindQueueAsync(channel, options.OutputQueue, options.OutputExchange, options.EffectiveOutputRoutingKey,
             options.OutputBindingArguments, cancellationToken);
+    }
+
+    public static async Task DeclareDestinationAsync(
+        IChannel channel,
+        RabbitMqDestination destination,
+        CancellationToken cancellationToken)
+    {
+        await DeclareExchangeAsync(channel, destination.ExchangeName, destination.ExchangeType,
+            destination.ExchangeArguments, cancellationToken);
+        await DeclareQueueAsync(channel, destination.QueueName, destination.QueueArguments, cancellationToken);
+        if (destination.BindQueueToExchange)
+        {
+            await BindQueueAsync(channel, destination.QueueName, destination.ExchangeName, destination.RoutingKey,
+                destination.BindingArguments, cancellationToken);
+        }
     }
 
     private static Dictionary<string, object?> BuildInputQueueArguments(RabbitMqClientOptions options)
@@ -113,7 +133,7 @@ internal static class RabbitMqTopology
         IChannel channel,
         string exchange,
         string exchangeType,
-        IDictionary<string, object?> headers,
+        IReadOnlyDictionary<string, object?> headers,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(exchange))
@@ -133,7 +153,7 @@ internal static class RabbitMqTopology
     private static Task DeclareQueueAsync(
         IChannel channel,
         string queue,
-        IDictionary<string, object?> headers,
+        IReadOnlyDictionary<string, object?> headers,
         CancellationToken cancellationToken)
     {
         return channel.QueueDeclareAsync(
@@ -145,7 +165,7 @@ internal static class RabbitMqTopology
             cancellationToken: cancellationToken);
     }
 
-    private static Dictionary<string, object?>? NormalizeArguments(IDictionary<string, object?> arguments)
+    private static Dictionary<string, object?>? NormalizeArguments(IReadOnlyDictionary<string, object?> arguments)
     {
         if (arguments.Count == 0)
         {
@@ -160,7 +180,7 @@ internal static class RabbitMqTopology
         string queue,
         string exchange,
         string routingKey,
-        IDictionary<string, object?> arguments,
+        IReadOnlyDictionary<string, object?> arguments,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(exchange))
