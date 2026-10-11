@@ -75,15 +75,20 @@ tracking, so a message that matches no binding fails publication and the input
 is not acknowledged as successfully processed.
 
 Baggage and arbitrary incoming business headers are not forwarded. The shared
-publisher filters headers case-insensitively before every publish, so callers
-cannot bypass this contract accidentally. Message bodies, URLs, credentials,
-WKT, coordinate arrays, and customer metadata are never copied into headers.
+publisher filters headers case-insensitively before every output and input
+publish, so callers cannot bypass this contract accidentally. Retry republishes
+are the exception: a retry copy returns to the same service, so it keeps all of
+the retried message's inbound headers (for example the Gateway's
+x-updated-fields) instead of being reduced to the allowlist. Message bodies,
+URLs, credentials, WKT, coordinate arrays, and customer metadata are never
+copied into headers.
 
 Gateway attaches algorithm names for the matched rule. TB Publisher and TB
 Consumer refresh algorithmName from their validated payloads. Tile Builder
 must preserve the received allowlisted headers unchanged. Retry routing keeps
-the start time, increments the retry count, and refreshes trace and publish
-time. RabbitMQ may add broker-owned x-death headers during dead-lettering.
+the start time and the other inbound headers, increments the retry count, and
+refreshes trace and publish time. RabbitMQ may add broker-owned x-death headers
+during dead-lettering.
 
 Message ID remains useful independently of traceparent: it identifies one
 delivery for retry, duplicate, and broker investigation. Trace ID correlates

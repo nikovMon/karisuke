@@ -194,7 +194,9 @@ Retry settings:
 
 - Retryable failures are republished after the client increments the
   `RetryCountHeader` header, which defaults to `retry-count`. The message body
-  is not changed.
+  is not changed, and the retry copy keeps every inbound header of the retried
+  message because it returns to the same handler. Output and input publishes
+  still keep only the application header allowlist.
 - When `RetryQueues` is configured, `RetryExchangeType` must be `headers`.
   The client publishes the retry message once to `RetryExchange`; RabbitMQ
   routes it to the retry queue whose binding matches `RetryCountHeader`.
