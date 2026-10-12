@@ -647,6 +647,40 @@ Status codes:
 - `404 Not Found` when the id does not exist.
 - `503 Service Unavailable` when Elasticsearch access fails.
 
+## Rule Audit
+
+Every v2 rule change appends one record to `Elasticsearch:AuditIndex` (default `rules-audit`), shared by all pipelines:
+
+```json
+{
+  "pipelineId": "asd",
+  "ruleId": "6f1c...",
+  "changeType": "created | updated | activated | deactivated | deleted",
+  "previousState": { },
+  "newState": { },
+  "changedFields": ["match.sensors"],
+  "changedBy": null,
+  "changedAt": "2026-10-12T10:00:00+00:00",
+  "reason": null,
+  "requestId": "<trace id>"
+}
+```
+
+- The states are full rule snapshots. A creation has no `previousState` and a deletion has no `newState`.
+- `changedFields` and `changeType` come from comparing the stored rule before and after, not from what the request sent. `activated` and `deactivated` are used when `isActive` is the only change; any other change is `updated`. An update that changes nothing writes no record.
+- `requestId` is the HTTP request's `TraceIdentifier`.
+- `changedBy` and `reason` stay null until the API authenticates its callers.
+- Records are written after the rule is saved. A failed write logs warning 5039 and does not fail the request.
+
+Different pipelines' `runParams` can give the same field different types, so the audit index should store the states without indexing them:
+
+```json
+{ "mappings": { "properties": {
+  "previousState": { "type": "object", "enabled": false },
+  "newState": { "type": "object", "enabled": false }
+} } }
+```
+
 ## Elasticsearch Behavior
 
 The repository stores each rule in the configured rules index using Elasticsearch's metadata `_id` as the document id. The metadata ID is added to API responses but excluded from `_source`. Duplicate checks use the exact `ruleName.keyword` value.

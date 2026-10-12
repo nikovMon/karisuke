@@ -16,6 +16,8 @@ internal sealed class InMemoryIndexStore : IElasticsearchDocumentClient
 
     public HashSet<string> FailingSaveIds { get; } = new(StringComparer.Ordinal);
 
+    public HashSet<string> FailingIndexes { get; } = new(StringComparer.Ordinal);
+
     public void Add<TDocument>(string indexName, string id, TDocument document) =>
         Index(indexName)[id] = JsonSerializer.SerializeToNode(document)!.AsObject();
 
@@ -74,7 +76,7 @@ internal sealed class InMemoryIndexStore : IElasticsearchDocumentClient
         where TDocument : class
     {
         CallCount++;
-        if (id is not null && FailingSaveIds.Contains(id))
+        if ((id is not null && FailingSaveIds.Contains(id)) || FailingIndexes.Contains(indexName))
         {
             throw new ElasticsearchClientException("Simulated save failure.");
         }
@@ -96,6 +98,9 @@ internal sealed class InMemoryIndexStore : IElasticsearchDocumentClient
         CallCount++;
         return Task.FromResult(Index(indexName).Remove(id));
     }
+
+    public IReadOnlyList<TDocument> All<TDocument>(string indexName) =>
+        Index(indexName).Values.Select(source => source.Deserialize<TDocument>()!).ToArray();
 
     public JsonObject? Stored(string indexName, string id) =>
         Index(indexName).TryGetValue(id, out var source) ? source : null;

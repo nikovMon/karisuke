@@ -25,6 +25,7 @@ public sealed class PipelineRuleService
     private readonly IPipelineCatalog _catalog;
     private readonly IRuleSourceResolver _ruleSources;
     private readonly IPipelineContractRegistry _contracts;
+    private readonly RuleAuditWriter _audit;
     private readonly RulesElasticsearchOptions _options;
     private readonly ILogger<PipelineRuleService> _logger;
 
@@ -33,6 +34,7 @@ public sealed class PipelineRuleService
         IPipelineCatalog catalog,
         IRuleSourceResolver ruleSources,
         IPipelineContractRegistry contracts,
+        RuleAuditWriter audit,
         IOptions<RulesElasticsearchOptions> options,
         ILogger<PipelineRuleService> logger)
     {
@@ -40,6 +42,7 @@ public sealed class PipelineRuleService
         _catalog = catalog;
         _ruleSources = ruleSources;
         _contracts = contracts;
+        _audit = audit;
         _options = options.Value;
         _logger = logger;
     }
@@ -101,6 +104,14 @@ public sealed class PipelineRuleService
 
         await Index(pipelineId).SaveAsync(rule.Id, rule, waitForRefresh: true, cancellationToken);
         _logger.PipelineRuleCreated();
+        await _audit.RecordAsync(new RuleAuditRecord
+        {
+            PipelineId = pipelineId,
+            RuleId = rule.Id,
+            ChangeType = RuleChangeType.Created,
+            NewState = Snapshot(rule),
+            ChangedAt = rule.CreationTime
+        });
         return RuleOperationResult<PipelineRuleDocument>.Success(rule);
     }
 
@@ -109,7 +120,7 @@ public sealed class PipelineRuleService
         string id,
         UpdatePipelineRuleRequest request,
         CancellationToken cancellationToken = default) =>
-        UpdateRuleAsync(pipelineId, id, request.ProvidedFields, Apply(request), inBulk: false, cancellationToken);
+        UpdateRuleAsync(pipelineId, id, Apply(request), inBulk: false, cancellationToken);
 
     public Task<RuleOperationResult<PipelineRuleDocument>> ChangeActivityAsync(
         string pipelineId,
@@ -141,7 +152,7 @@ public sealed class PipelineRuleService
         }
 
         return await ForEachRuleAsync(pipelineId, "bulk_update", uniqueIds, id => UpdateRuleAsync(
-            pipelineId, id, request.ProvidedFields, Apply(request), inBulk: true, cancellationToken));
+            pipelineId, id, Apply(request), inBulk: true, cancellationToken));
     }
 
     public Task<RuleOperationResult<BulkOperationResult>> AddSensorsAsync(
@@ -164,24 +175,34 @@ public sealed class PipelineRuleService
         CancellationToken cancellationToken = default)
     {
         using var logScope = BeginLogScope(pipelineId, id);
-        if (!await Index(pipelineId).DeleteAsync<PipelineRuleDocument>(id, waitForRefresh: true, cancellationToken))
+        var index = Index(pipelineId);
+        var document = await index.GetAsync<PipelineRuleDocument>(id, cancellationToken);
+        if (document is null || !await index.DeleteAsync<PipelineRuleDocument>(id, waitForRefresh: true, cancellationToken))
         {
             _logger.PipelineRuleNotFound();
             return RuleOperationResult.NotFound($"Rule '{id}' was not found.");
         }
 
         _logger.PipelineRuleDeleted();
+        await _audit.RecordAsync(new RuleAuditRecord
+        {
+            PipelineId = pipelineId,
+            RuleId = id,
+            ChangeType = RuleChangeType.Deleted,
+            PreviousState = Snapshot(HydrateId(document)),
+            ChangedAt = DateTimeOffset.UtcNow
+        });
         return RuleOperationResult.Success();
     }
 
     /// <summary>
     /// Loads the rule, applies <paramref name="change"/>, validates and saves it. A change can refuse
-    /// a rule by returning the reason; a change that leaves the rule as it was saves nothing.
+    /// a rule by returning the reason; a change that leaves the rule as it was saves nothing. What
+    /// changed is taken from the stored rule before and after, not from what the request sent.
     /// </summary>
     private async Task<RuleOperationResult<PipelineRuleDocument>> UpdateRuleAsync(
         string pipelineId,
         string id,
-        IReadOnlyCollection<string> changedFields,
         Func<PipelineRuleDocument, string?> change,
         bool inBulk,
         CancellationToken cancellationToken)
@@ -200,14 +221,15 @@ public sealed class PipelineRuleService
         }
 
         var rule = HydrateId(document);
-        var before = JsonSerializer.SerializeToElement(rule);
+        var before = Snapshot(rule);
         if (change(rule) is { } refusal)
         {
             LogValidationFailed([refusal]);
             return RuleOperationResult<PipelineRuleDocument>.ValidationFailed(refusal);
         }
 
-        if (JsonElement.DeepEquals(before, JsonSerializer.SerializeToElement(rule)))
+        var changedFields = ChangedFields(before, Snapshot(rule));
+        if (changedFields.Count == 0)
         {
             return RuleOperationResult<PipelineRuleDocument>.Success(rule);
         }
@@ -229,13 +251,76 @@ public sealed class PipelineRuleService
         await index.SaveAsync(id, rule, waitForRefresh: nameChanged, cancellationToken);
         using (_logger.BeginScope(new KeyValuePair<string, object?>[]
                {
-                   new(TelemetryAttributeNames.RuleChangedFields, changedFields.Order(StringComparer.Ordinal).ToArray())
+                   new(TelemetryAttributeNames.RuleChangedFields, changedFields)
                }))
         {
             _logger.PipelineRuleUpdated();
         }
 
+        await _audit.RecordAsync(new RuleAuditRecord
+        {
+            PipelineId = pipelineId,
+            RuleId = id,
+            ChangeType = ChangeType(changedFields, rule),
+            PreviousState = before,
+            NewState = Snapshot(rule),
+            ChangedFields = changedFields,
+            ChangedAt = rule.UpdateTime
+        });
         return RuleOperationResult<PipelineRuleDocument>.Success(rule);
+    }
+
+    private static RuleChangeType ChangeType(IReadOnlyList<string> changedFields, PipelineRuleDocument rule) =>
+        !changedFields.SequenceEqual([PipelineRuleFields.IsActive]) ? RuleChangeType.Updated
+        : rule.IsActive ? RuleChangeType.Activated
+        : RuleChangeType.Deactivated;
+
+    /// <summary>
+    /// The fields that differ between two snapshots, as top-level names or <c>match.*</c> paths.
+    /// Timestamps and the derived <c>match.location</c> are maintained by the server and left out.
+    /// </summary>
+    private static IReadOnlyList<string> ChangedFields(JsonElement before, JsonElement after)
+    {
+        var changed = new List<string>();
+        foreach (var name in PropertyNames(before).Union(PropertyNames(after)))
+        {
+            if (name is PipelineRuleFields.CreationTime or PipelineRuleFields.UpdateTime)
+            {
+                continue;
+            }
+
+            if (name == PipelineRuleFields.Match)
+            {
+                var beforeMatch = Property(before, name);
+                var afterMatch = Property(after, name);
+                changed.AddRange(PropertyNames(beforeMatch).Union(PropertyNames(afterMatch))
+                    .Where(field => field != PipelineRuleFields.Location && !Same(Property(beforeMatch, field), Property(afterMatch, field)))
+                    .Select(field => $"{PipelineRuleFields.Match}.{field}"));
+            }
+            else if (!Same(Property(before, name), Property(after, name)))
+            {
+                changed.Add(name);
+            }
+        }
+
+        return changed.Order(StringComparer.Ordinal).ToArray();
+    }
+
+    private static IEnumerable<string> PropertyNames(JsonElement? element) =>
+        element is { ValueKind: JsonValueKind.Object } value ? value.EnumerateObject().Select(property => property.Name) : [];
+
+    private static JsonElement? Property(JsonElement? element, string name) =>
+        element is { ValueKind: JsonValueKind.Object } value && value.TryGetProperty(name, out var property) ? property : null;
+
+    private static bool Same(JsonElement? before, JsonElement? after) =>
+        before is null ? after is null : after is not null && JsonElement.DeepEquals(before.Value, after.Value);
+
+    /// <summary>The rule as stored, without its ID, which the audit record carries on its own.</summary>
+    private static JsonElement Snapshot(PipelineRuleDocument rule)
+    {
+        var snapshot = JsonSerializer.SerializeToNode(rule)!.AsObject();
+        snapshot.Remove("_id");
+        return JsonSerializer.SerializeToElement(snapshot);
     }
 
     private static Func<PipelineRuleDocument, string?> Apply(UpdatePipelineRuleRequest request) => rule =>
@@ -261,7 +346,6 @@ public sealed class PipelineRuleService
         return await ForEachRuleAsync(pipelineId, add ? "add_sensors" : "remove_sensors", uniqueIds, id => UpdateRuleAsync(
             pipelineId,
             id,
-            [PipelineRuleFields.MatchSensors],
             rule => add ? AddSensor(rule, request) : RemoveSensor(rule, request),
             inBulk: true,
             cancellationToken));
