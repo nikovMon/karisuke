@@ -71,7 +71,7 @@ public sealed class RuleSnapshotBuilderTests
             rejection =>
             {
                 Assert.Equal("bad-geometry", rejection.RuleId);
-                Assert.NotNull(rejection.Exception);
+                Assert.Contains("match.locationWkt", rejection.Reason, StringComparison.Ordinal);
             },
             rejection => Assert.Equal("<null>", rejection.RuleId));
     }
