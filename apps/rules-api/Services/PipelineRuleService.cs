@@ -96,47 +96,12 @@ public sealed class PipelineRuleService
         return RuleOperationResult<PipelineRuleDocument>.Success(rule);
     }
 
-    public async Task<RuleOperationResult<PipelineRuleDocument>> UpdateAsync(
+    public Task<RuleOperationResult<PipelineRuleDocument>> UpdateAsync(
         string pipelineId,
         string id,
         UpdatePipelineRuleRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        using var logScope = BeginLogScope(pipelineId, id);
-        var rule = await GetByIdAsync(pipelineId, id, cancellationToken);
-        if (rule is null)
-        {
-            _logger.PipelineRuleNotFound();
-            return RuleOperationResult<PipelineRuleDocument>.NotFound($"Rule '{id}' was not found.");
-        }
-
-        var nameChanged = request.ProvidedFields.Contains("ruleName") &&
-                          !string.Equals(rule.RuleName, request.RuleName, StringComparison.Ordinal);
-        request.ApplyTo(rule);
-        rule.UpdateTime = DateTimeOffset.UtcNow;
-
-        // A rule that no longer passes validation, e.g. after a contract change, must still be switchable off.
-        var onlyDeactivates = !rule.IsActive && request.ProvidedFields.SequenceEqual(["isActive"]);
-        if (!onlyDeactivates)
-        {
-            var failure = await ValidateAsync(pipelineId, rule, nameChanged, cancellationToken);
-            if (failure is not null)
-            {
-                return failure;
-            }
-        }
-
-        await Index(pipelineId).SaveAsync(id, rule, cancellationToken);
-        using (_logger.BeginScope(new KeyValuePair<string, object?>[]
-               {
-                   new(TelemetryAttributeNames.RuleChangedFields, request.ProvidedFields.Order(StringComparer.Ordinal).ToArray())
-               }))
-        {
-            _logger.PipelineRuleUpdated();
-        }
-
-        return RuleOperationResult<PipelineRuleDocument>.Success(rule);
-    }
+        CancellationToken cancellationToken = default) =>
+        UpdateAsync(pipelineId, id, request, Index(pipelineId), cancellationToken);
 
     public Task<RuleOperationResult<PipelineRuleDocument>> ChangeActivityAsync(
         string pipelineId,
@@ -144,6 +109,45 @@ public sealed class PipelineRuleService
         bool isActive,
         CancellationToken cancellationToken = default) =>
         UpdateAsync(pipelineId, id, new UpdatePipelineRuleRequest { IsActive = isActive }, cancellationToken);
+
+    /// <summary>
+    /// Applies one update to each rule; each is validated and saved on its own. Setting one name on
+    /// several rules is rejected up front.
+    /// </summary>
+    public async Task<RuleOperationResult<BulkOperationResult>> UpdateBulkAsync(
+        string pipelineId,
+        IReadOnlyCollection<string> ids,
+        UpdatePipelineRuleRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var errors = RuleValidation.ValidateIds(ids);
+        if (errors.Count > 0)
+        {
+            return RuleOperationResult<BulkOperationResult>.ValidationFailed(string.Join(" | ", errors));
+        }
+
+        if (request.ProvidedFields.Contains("ruleName") && ids.Count > 1)
+        {
+            return RuleOperationResult<BulkOperationResult>.Conflict("Cannot set the same ruleName on multiple rules.");
+        }
+
+        var index = BulkIndex(pipelineId, ids);
+        return await ForEachRuleAsync(ids, id => UpdateAsync(pipelineId, id, request, index, cancellationToken));
+    }
+
+    public Task<RuleOperationResult<BulkOperationResult>> AddSensorsAsync(
+        string pipelineId,
+        IReadOnlyCollection<string> ids,
+        RuleSensorUpdateRequest request,
+        CancellationToken cancellationToken = default) =>
+        MutateSensorsAsync(pipelineId, ids, request, add: true, cancellationToken);
+
+    public Task<RuleOperationResult<BulkOperationResult>> RemoveSensorsAsync(
+        string pipelineId,
+        IReadOnlyCollection<string> ids,
+        RuleSensorUpdateRequest request,
+        CancellationToken cancellationToken = default) =>
+        MutateSensorsAsync(pipelineId, ids, request, add: false, cancellationToken);
 
     public async Task<RuleOperationResult> DeleteAsync(
         string pipelineId,
@@ -159,6 +163,148 @@ public sealed class PipelineRuleService
 
         _logger.PipelineRuleDeleted();
         return RuleOperationResult.Success();
+    }
+
+    private Task<RuleOperationResult<PipelineRuleDocument>> UpdateAsync(
+        string pipelineId,
+        string id,
+        UpdatePipelineRuleRequest request,
+        RuleIndex index,
+        CancellationToken cancellationToken) =>
+        UpdateAsync(pipelineId, id, request.ProvidedFields, rule =>
+        {
+            request.ApplyTo(rule);
+            return null;
+        }, index, cancellationToken);
+
+    /// <summary>
+    /// Loads the rule, applies <paramref name="change"/>, validates and saves it. A change can refuse
+    /// a rule by returning the reason.
+    /// </summary>
+    private async Task<RuleOperationResult<PipelineRuleDocument>> UpdateAsync(
+        string pipelineId,
+        string id,
+        IReadOnlyCollection<string> changedFields,
+        Func<PipelineRuleDocument, string?> change,
+        RuleIndex index,
+        CancellationToken cancellationToken)
+    {
+        using var logScope = BeginLogScope(pipelineId, id);
+        var document = await index.GetAsync<PipelineRuleDocument>(id, cancellationToken);
+        if (document is null)
+        {
+            _logger.PipelineRuleNotFound();
+            return RuleOperationResult<PipelineRuleDocument>.NotFound($"Rule '{id}' was not found.");
+        }
+
+        var rule = HydrateId(document);
+        var previousName = rule.RuleName;
+        if (change(rule) is { } refusal)
+        {
+            LogValidationFailed([refusal]);
+            return RuleOperationResult<PipelineRuleDocument>.ValidationFailed(refusal);
+        }
+
+        rule.UpdateTime = DateTimeOffset.UtcNow;
+
+        // A rule that no longer passes validation, e.g. after a contract change, must still be switchable off.
+        var onlyDeactivates = !rule.IsActive && changedFields.SequenceEqual(["isActive"]);
+        if (!onlyDeactivates)
+        {
+            var nameChanged = !string.Equals(previousName, rule.RuleName, StringComparison.Ordinal);
+            var failure = await ValidateAsync(pipelineId, rule, nameChanged, cancellationToken);
+            if (failure is not null)
+            {
+                return failure;
+            }
+        }
+
+        await index.SaveAsync(id, rule, cancellationToken);
+        using (_logger.BeginScope(new KeyValuePair<string, object?>[]
+               {
+                   new(TelemetryAttributeNames.RuleChangedFields, changedFields.Order(StringComparer.Ordinal).ToArray())
+               }))
+        {
+            _logger.PipelineRuleUpdated();
+        }
+
+        return RuleOperationResult<PipelineRuleDocument>.Success(rule);
+    }
+
+    private async Task<RuleOperationResult<BulkOperationResult>> MutateSensorsAsync(
+        string pipelineId,
+        IReadOnlyCollection<string> ids,
+        RuleSensorUpdateRequest request,
+        bool add,
+        CancellationToken cancellationToken)
+    {
+        var errors = RuleValidation.ValidateIds(ids).Concat(RuleValidation.ValidateSensorRequest(request)).ToArray();
+        if (errors.Length > 0)
+        {
+            return RuleOperationResult<BulkOperationResult>.ValidationFailed(string.Join(" | ", errors));
+        }
+
+        var index = BulkIndex(pipelineId, ids);
+        return await ForEachRuleAsync(ids, id => UpdateAsync(
+            pipelineId,
+            id,
+            ["match.sensors"],
+            rule => add ? AddSensor(rule, request) : RemoveSensor(rule, request),
+            index,
+            cancellationToken));
+    }
+
+    private static string? AddSensor(PipelineRuleDocument rule, RuleSensorUpdateRequest request)
+    {
+        rule.Match ??= new RuleMatchConditions();
+        rule.Match.Sensors ??= [];
+        RuleSensors.Add(rule.Match.Sensors, request);
+        return null;
+    }
+
+    private static string? RemoveSensor(PipelineRuleDocument rule, RuleSensorUpdateRequest request)
+    {
+        if (rule.Match?.Sensors is not { } sensors)
+        {
+            return null;
+        }
+
+        RuleSensors.Remove(sensors, request);
+        return sensors.Count == 0
+            ? "Removing the rule's last sensor would let it match every sensor; send match.sensors as null in a PATCH to do that on purpose."
+            : null;
+    }
+
+    private static async Task<RuleOperationResult<BulkOperationResult>> ForEachRuleAsync(
+        IReadOnlyCollection<string> ids,
+        Func<string, Task<RuleOperationResult<PipelineRuleDocument>>> update)
+    {
+        var result = new BulkOperationResult();
+        foreach (var id in ids)
+        {
+            var updated = await update(id);
+            if (updated.Status == RuleOperationStatus.Success)
+            {
+                result.SuccessIds.Add(id);
+            }
+            else
+            {
+                result.FailedIds.Add(new BulkOperationFailure(id, updated.Error ?? "Rule update failed"));
+            }
+        }
+
+        return result.ToOperationResult();
+    }
+
+    private void LogValidationFailed(IReadOnlyList<string> errors)
+    {
+        using (_logger.BeginScope(new KeyValuePair<string, object?>[]
+               {
+                   new(TelemetryAttributeNames.RuleValidationErrors, errors.ToArray())
+               }))
+        {
+            _logger.PipelineRuleValidationFailed();
+        }
     }
 
     /// <summary>
@@ -179,14 +325,7 @@ public sealed class PipelineRuleService
         var validation = PipelineRuleValidator.Validate(rule, Contract(pipelineId));
         if (!validation.IsValid)
         {
-            using (_logger.BeginScope(new KeyValuePair<string, object?>[]
-                   {
-                       new(TelemetryAttributeNames.RuleValidationErrors, validation.Errors.ToArray())
-                   }))
-            {
-                _logger.PipelineRuleValidationFailed();
-            }
-
+            LogValidationFailed(validation.Errors);
             return RuleOperationResult<PipelineRuleDocument>.ValidationFailed(string.Join(" | ", validation.Errors));
         }
 
@@ -214,6 +353,11 @@ public sealed class PipelineRuleService
 
     private RuleIndex Index(string pipelineId) =>
         new(_client, _ruleSources.Resolve(pipelineId).IndexName, waitForRefresh: true);
+
+    // Waiting for a refresh per rule would make a large bulk request slow. Only a single-rule
+    // request can rename a rule, which is what needs the refresh.
+    private RuleIndex BulkIndex(string pipelineId, IReadOnlyCollection<string> ids) =>
+        new(_client, _ruleSources.Resolve(pipelineId).IndexName, waitForRefresh: ids.Count == 1);
 
     private IPipelineContract Contract(string pipelineId) =>
         _contracts.GetRequired(_catalog.GetRequired(pipelineId).ContractId);

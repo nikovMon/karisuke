@@ -1,5 +1,6 @@
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Common.Dtos.Rules.Requests;
+using ImagingPipeline.Common.Dtos.Rules.Responses;
 using ImagingPipeline.Rules.Api.Configuration;
 using ImagingPipeline.Rules.Api.Observability;
 using ImagingPipeline.Rules.Api.Services;
@@ -102,6 +103,43 @@ public sealed class PipelineRulesController : ControllerBase
         [FromBody] UpdatePipelineRuleRequest request,
         CancellationToken cancellationToken = default) =>
         this.ToActionResult(await _service.UpdateAsync(pipelineId, id, request, cancellationToken));
+
+    [HttpPatch("bulk")]
+    [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status207MultiStatus)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> UpdateBulk(
+        [FromRoute] string pipelineId,
+        [FromQuery] string ids,
+        [FromBody] UpdatePipelineRuleRequest request,
+        CancellationToken cancellationToken = default) =>
+        this.ToActionResult(await _service.UpdateBulkAsync(pipelineId, RuleIdsQuery.Parse(ids), request, cancellationToken));
+
+    [HttpPatch("sensors/add")]
+    [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status207MultiStatus)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> AddSensors(
+        [FromRoute] string pipelineId,
+        [FromQuery] string ids,
+        [FromBody] RuleSensorUpdateRequest request,
+        CancellationToken cancellationToken = default) =>
+        this.ToActionResult(await _service.AddSensorsAsync(pipelineId, RuleIdsQuery.Parse(ids), request, cancellationToken));
+
+    [HttpPatch("sensors/remove")]
+    [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status207MultiStatus)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(BulkOperationResult), StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> RemoveSensors(
+        [FromRoute] string pipelineId,
+        [FromQuery] string ids,
+        [FromBody] RuleSensorUpdateRequest request,
+        CancellationToken cancellationToken = default) =>
+        this.ToActionResult(await _service.RemoveSensorsAsync(pipelineId, RuleIdsQuery.Parse(ids), request, cancellationToken));
 
     [HttpPatch("{id}/activity")]
     [ProducesResponseType(typeof(PipelineRuleDocument), StatusCodes.Status200OK)]
