@@ -40,6 +40,8 @@ internal static class EcsLogDocumentSerializer
             ["messaging.message.conversation_id"] = "messaging.message.conversation_id",
             ["messaging.destination.name"] = "messaging.destination.name",
             [TelemetryAttributeNames.RetryAttempt] = TelemetryAttributeNames.RetryAttempt,
+            [TelemetryAttributeNames.RetryMaxAttempts] = TelemetryAttributeNames.RetryMaxAttempts,
+            [TelemetryAttributeNames.DeadLetterReason] = TelemetryAttributeNames.DeadLetterReason,
             [TelemetryAttributeNames.PipelineTaskId] = TelemetryAttributeNames.PipelineTaskId,
             [TelemetryAttributeNames.PipelineRequestId] = TelemetryAttributeNames.PipelineRequestId,
             [TelemetryAttributeNames.PipelineImageId] = TelemetryAttributeNames.PipelineImageId,

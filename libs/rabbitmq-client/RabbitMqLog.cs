@@ -24,32 +24,22 @@ internal static partial class RabbitMqLog
     [LoggerMessage(102, LogLevel.Information, "RabbitMQ consumer stopping for {Destination}")]
     public static partial void ConsumerStopping(ILogger logger, string destination);
 
-    [LoggerMessage(103, LogLevel.Error, "RabbitMQ handler failed for message {MessageId}")]
-    public static partial void HandlerFailed(ILogger logger, Exception exception, string messageId);
+    // Message details for 103 and 105-107 travel in the log scope, not in the message.
+    [LoggerMessage(103, LogLevel.Error, "RabbitMQ handler failed for a message.")]
+    public static partial void HandlerFailed(ILogger logger, Exception exception);
 
     [LoggerMessage(104, LogLevel.Error, "RabbitMQ batch handler failed for {MessageCount} messages")]
     public static partial void BatchHandlerFailed(ILogger logger, Exception exception, int messageCount);
 
-    [LoggerMessage(105, LogLevel.Warning,
-        "RabbitMQ message {MessageId} scheduled for retry {RetryAttempt}/{MaxRetryAttempts} through {RetryExchange}")]
-    public static partial void RetryScheduled(
-        ILogger logger,
-        string messageId,
-        int retryAttempt,
-        int maxRetryAttempts,
-        string retryExchange);
+    [LoggerMessage(105, LogLevel.Warning, "RabbitMQ message scheduled for retry.")]
+    public static partial void RetryScheduled(ILogger logger);
 
-    [LoggerMessage(106, LogLevel.Warning,
-        "RabbitMQ message {MessageId} was rejected for dead-letter routing to {DeadLetterQueue}; reason: {Reason}")]
-    public static partial void DeadLettered(
-        ILogger logger,
-        string messageId,
-        string deadLetterQueue,
-        string reason);
+    [LoggerMessage(106, LogLevel.Warning, "RabbitMQ message rejected for dead-letter routing.")]
+    public static partial void DeadLettered(ILogger logger);
 
     [LoggerMessage(107, LogLevel.Error,
-        "RabbitMQ completion routing failed for message {MessageId}; the consumer channel will close and the broker will requeue the unacknowledged delivery")]
-    public static partial void CompletionFailed(ILogger logger, Exception exception, string messageId);
+        "RabbitMQ completion routing failed; the consumer channel will close and the broker will requeue the unacknowledged delivery.")]
+    public static partial void CompletionFailed(ILogger logger, Exception exception);
 
     [LoggerMessage(108, LogLevel.Information,
         "Connected RabbitMQ {ConnectionRole} connection to {Host}:{Port} vhost {VirtualHost}")]
