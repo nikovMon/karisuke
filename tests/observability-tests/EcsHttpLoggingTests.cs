@@ -166,7 +166,7 @@ public sealed class EcsHttpLoggingTests
             [logEvent],
             CreateResource(),
             new EcsLogDataStreamOptions("findair", "production")));
-        var rules = json.RootElement[0].GetProperty("findair").GetProperty("rules");
+        var rules = json.RootElement[0].GetProperty("unified_gateway").GetProperty("rules");
 
         Assert.Equal("rule-a", rules.GetProperty("matched").GetProperty("ids")[0].GetString());
         Assert.Equal("rule-b", rules.GetProperty("missed").GetProperty("sensor").GetProperty("ids")[0].GetString());

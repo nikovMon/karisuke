@@ -122,20 +122,20 @@ public static class TelemetryAttributeNames
 
     // Rule evaluation of one image for one pipeline. Rule IDs are listed for every reason except
     // geometry, which usually covers most rules; counts show when a list was cut short in logs.
-    public const string RulesMatchedIds = "findair.rules.matched.ids";
-    public const string RulesMissedPhotoAgeIds = "findair.rules.missed.photo_age.ids";
-    public const string RulesMissedPhotoAgeCount = "findair.rules.missed.photo_age.count";
-    public const string RulesMissedSensorIds = "findair.rules.missed.sensor.ids";
-    public const string RulesMissedSensorCount = "findair.rules.missed.sensor.count";
-    public const string RulesMissedResolutionIds = "findair.rules.missed.resolution.ids";
-    public const string RulesMissedResolutionCount = "findair.rules.missed.resolution.count";
-    public const string RulesMissedGeometryCount = "findair.rules.missed.geometry.count";
+    public const string RulesMatchedIds = "unified_gateway.rules.matched.ids";
+    public const string RulesMissedPhotoAgeIds = "unified_gateway.rules.missed.photo_age.ids";
+    public const string RulesMissedPhotoAgeCount = "unified_gateway.rules.missed.photo_age.count";
+    public const string RulesMissedSensorIds = "unified_gateway.rules.missed.sensor.ids";
+    public const string RulesMissedSensorCount = "unified_gateway.rules.missed.sensor.count";
+    public const string RulesMissedResolutionIds = "unified_gateway.rules.missed.resolution.ids";
+    public const string RulesMissedResolutionCount = "unified_gateway.rules.missed.resolution.count";
+    public const string RulesMissedGeometryCount = "unified_gateway.rules.missed.geometry.count";
 
     // Loading one pipeline's rules.
-    public const string RulesLoadedCount = "findair.rules.loaded.count";
-    public const string RulesRejectedCount = "findair.rules.rejected.count";
-    public const string RulesRetainedCount = "findair.rules.retained.count";
-    public const string RuleRejectionReason = "findair.rule.rejection.reason";
+    public const string RulesLoadedCount = "unified_gateway.rules.loaded.count";
+    public const string RulesRejectedCount = "unified_gateway.rules.rejected.count";
+    public const string RulesRetainedCount = "unified_gateway.rules.retained.count";
+    public const string RuleRejectionReason = "unified_gateway.rule.rejection.reason";
 
     // Writing one rule through the Rules API.
     public const string RuleChangedFields = "unified_gateway.rule.changed_fields";
@@ -151,6 +151,6 @@ public static class TelemetryAttributeNames
 
     // Handling one source message. error.code is a stable validation code, never the exception class.
     public const string ErrorCode = "error.code";
-    public const string DispatchUnitCount = "findair.dispatch.units.count";
-    public const string DispatchFailedCount = "findair.dispatch.failed.count";
+    public const string DispatchUnitCount = "unified_gateway.dispatch.units.count";
+    public const string DispatchFailedCount = "unified_gateway.dispatch.failed.count";
 }
