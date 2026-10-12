@@ -23,9 +23,7 @@ public sealed partial class Program
             instrumentAspNetCore: true);
         builder.ConfigureImagingPipelinePrometheusListener();
 
-        builder.Services.AddSingleton<IPipelineContract, AsdPipelineContract>();
-        builder.Services.AddSingleton<IPipelineContract, AlgoPipelineContract>();
-        builder.Services.AddSingleton<IPipelineContractRegistry, PipelineContractRegistry>();
+        builder.Services.AddPipelineContracts();
         builder.Services.AddPipelineCatalog(builder.Configuration);
         builder.Services.AddSingleton<PipelineWorkPreparer>();
         builder.Services.AddRabbitMqDestinationPublisher(builder.Configuration);
