@@ -181,7 +181,7 @@ Return one v2 rule, or `404 Not Found`.
 
 ### POST /pipelines/{pipelineId}/rules
 
-Creates a v2 rule from `ruleName`, `description`, `isActive` (default `true`), `matchAll`, `match` and `runParams`. The server sets the ID, `schemaVersion` and timestamps, and derives `match.location` from `match.locationWkt`. The rule is checked with the same validator the gateway uses when it loads rules: the document rules, then the pipeline contract's run parameters and location requirement. Returns `201 Created`, `400 Bad Request` with the validation errors, or `409 Conflict` when the name is already used in this pipeline. Writes wait for the index refresh, so a request made right after sees the change.
+Creates a v2 rule from `ruleName`, `description`, `isActive` (default `true`), `matchAll`, `match` and `runParams`. The server sets the ID, `schemaVersion` and timestamps, and derives `match.location` from `match.locationWkt`. The rule is checked with the same validator the gateway uses when it loads rules: the document rules, then the pipeline contract's run parameters and location requirement. Returns `201 Created`, `400 Bad Request` with the validation errors, or `409 Conflict` when the name is already used in this pipeline. Creates, deletes and renames wait for the index refresh, so the next request's name check sees them. An update that changes nothing is not saved.
 
 ### PATCH /pipelines/{pipelineId}/rules/{id}
 
@@ -191,11 +191,26 @@ Partial update. Only the fields sent change; a field sent as `null` is cleared. 
 
 Body `{ "isActive": true|false }`. Activation is validated like any other update. Deactivation is not, so a rule that stopped passing validation, for example after a contract change, can still be switched off.
 
+### PATCH /pipelines/{pipelineId}/rules/bulk?ids=a,b
+
+Applies one partial update, in the same shape as `PATCH /pipelines/{pipelineId}/rules/{id}`, to each listed rule. Each rule is validated and saved on its own. Returns `200 OK` when all succeed, `207 Multi-Status` when some fail and `422 Unprocessable Entity` when all fail, with `successIds` and `failedIds` (each with a reason). Setting `ruleName` on more than one rule returns `409 Conflict`. Duplicate IDs are applied once, and more than `Elasticsearch:MaxBulkSize` IDs (default 500) returns `400 Bad Request`. A rule that cannot be saved is listed in `failedIds` while the others are still saved.
+
+### PATCH /pipelines/{pipelineId}/rules/sensors/add?ids=a,b
+
+### PATCH /pipelines/{pipelineId}/rules/sensors/remove?ids=a,b
+
+Body `{ "sensorName": "...", "registrationQualities": [...], "gridTypes": [...] }`, the same as the v1 routes. Add merges the values into the sensor in `match.sensors`, creating it when missing. Remove takes the values out and drops a sensor left with none. Results are reported per rule, as in bulk update. Two cases fail for that rule instead of changing what it matches:
+
+- Removing a rule's last sensor, which would make it match every sensor. To do that on purpose, send `match.sensors` as `null` in a PATCH.
+- Adding a sensor to a `matchAll` rule, which cannot have conditions.
+
+Adding a sensor to a rule with no sensor condition limits it to that sensor.
+
 ### DELETE /pipelines/{pipelineId}/rules/{id}
 
 Deletes the rule permanently. Returns `204 No Content` or `404 Not Found`.
 
-Rule writes log events 5031–5036 with `pipeline.id`, `findair.rule.id` and, where relevant, `findair.rule.changed_fields` or `findair.rule.validation.errors` as fields.
+Rule writes log events 5031–5037 with `pipeline.id`, `findair.rule.id` and, where relevant, `unified_gateway.rule.changed_fields` or `unified_gateway.rule.validation.errors` as fields. Bulk requests skip per-rule not-found warnings and log one summary (5038) with the operation, requested, succeeded and failed counts, and up to 10 failed IDs.
 
 Every `/pipelines/{pipelineId}/...` route answers `404 Not Found` for a pipeline that is not in the catalog, without querying Elasticsearch, and logs event 5030 with `pipeline.id` as a field.
 

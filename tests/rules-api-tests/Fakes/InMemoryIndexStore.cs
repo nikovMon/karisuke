@@ -14,6 +14,8 @@ internal sealed class InMemoryIndexStore : IElasticsearchDocumentClient
 
     public int CallCount { get; private set; }
 
+    public HashSet<string> FailingSaveIds { get; } = new(StringComparer.Ordinal);
+
     public void Add<TDocument>(string indexName, string id, TDocument document) =>
         Index(indexName)[id] = JsonSerializer.SerializeToNode(document)!.AsObject();
 
@@ -72,6 +74,11 @@ internal sealed class InMemoryIndexStore : IElasticsearchDocumentClient
         where TDocument : class
     {
         CallCount++;
+        if (id is not null && FailingSaveIds.Contains(id))
+        {
+            throw new ElasticsearchClientException("Simulated save failure.");
+        }
+
         var documentId = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString() : id;
         var source = JsonSerializer.SerializeToNode(document)!.AsObject();
         source.Remove("_id");

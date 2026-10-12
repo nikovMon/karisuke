@@ -22,7 +22,7 @@ public sealed class RuleService : IRuleService
         IOptions<RulesElasticsearchOptions> options,
         ILogger<RuleService> logger)
     {
-        _index = new RuleIndex(client, options.Value.Index, waitForRefresh: false);
+        _index = new RuleIndex(client, options.Value.Index);
         _logger = logger;
     }
 
@@ -227,7 +227,7 @@ public sealed class RuleService : IRuleService
         }
 
         LogBulkOutcome("bulk_update", ids.Count, result);
-        return BuildBulkOperationResult(result);
+        return result.ToOperationResult();
     }
 
     public async Task<RuleOperationResult> DeleteAsync(
@@ -236,7 +236,7 @@ public sealed class RuleService : IRuleService
     {
         _logger.RuleOperationStarting("delete", id);
 
-        var deleted = await _index.DeleteAsync<RuleDto>(id, cancellationToken);
+        var deleted = await _index.DeleteAsync<RuleDto>(id, waitForRefresh: false, cancellationToken);
         if (deleted)
         {
             _logger.RuleDeleted("delete", id);
@@ -315,11 +315,11 @@ public sealed class RuleService : IRuleService
 
             if (add)
             {
-                AddSensorValues(rule, request);
+                RuleSensors.Add(rule.Sensors, request);
             }
             else
             {
-                RemoveSensorValues(rule, request);
+                RuleSensors.Remove(rule.Sensors, request);
             }
 
             rule.UpdateTime = DateTimeOffset.UtcNow;
@@ -329,31 +329,18 @@ public sealed class RuleService : IRuleService
         }
 
         LogBulkOutcome(operation, ids.Count, result);
-        return BuildBulkOperationResult(result);
+        return result.ToOperationResult();
     }
 
     private async Task SaveAsync(RuleDto rule, CancellationToken cancellationToken)
     {
-        rule.Id = await _index.SaveAsync(rule.Id, rule, cancellationToken);
+        rule.Id = await _index.SaveAsync(rule.Id, rule, waitForRefresh: false, cancellationToken);
     }
 
     private static RuleDto HydrateId(ElasticsearchDocument<RuleDto> document)
     {
         document.Source.Id = document.Id;
         return document.Source;
-    }
-
-    private static RuleOperationResult<BulkOperationResult> BuildBulkOperationResult(
-        BulkOperationResult result)
-    {
-        if (result.FailedIds.Count == 0)
-        {
-            return RuleOperationResult<BulkOperationResult>.Success(result);
-        }
-
-        return result.SuccessIds.Count == 0
-            ? RuleOperationResult<BulkOperationResult>.AllFailed(result)
-            : RuleOperationResult<BulkOperationResult>.PartialSuccess(result);
     }
 
     private static void ApplyUpdate(RuleDto rule, UpdateRuleRequest request)
@@ -383,70 +370,6 @@ public sealed class RuleService : IRuleService
 
         rule.UpdateTime = DateTimeOffset.UtcNow;
         NormalizeRuleCollections(rule);
-    }
-
-    private static void AddSensorValues(RuleDto rule, RuleSensorUpdateRequest request)
-    {
-        var sensor = rule.Sensors.FirstOrDefault(s =>
-            string.Equals(s.Name, request.SensorName, StringComparison.Ordinal));
-
-        if (sensor is null)
-        {
-            sensor = new SensorConfig { Name = request.SensorName };
-            rule.Sensors.Add(sensor);
-        }
-
-        if (request.RegistrationQualities is not null)
-        {
-            foreach (var value in request.RegistrationQualities)
-            {
-                if (!sensor.RegistrationQualities.Contains(value))
-                {
-                    sensor.RegistrationQualities.Add(value);
-                }
-            }
-        }
-
-        if (request.GridTypes is not null)
-        {
-            foreach (var value in request.GridTypes)
-            {
-                if (!sensor.GridTypes.Contains(value, StringComparer.Ordinal))
-                {
-                    sensor.GridTypes.Add(value);
-                }
-            }
-        }
-    }
-
-    private static void RemoveSensorValues(RuleDto rule, RuleSensorUpdateRequest request)
-    {
-        var sensor = rule.Sensors.FirstOrDefault(s =>
-            string.Equals(s.Name, request.SensorName, StringComparison.Ordinal));
-
-        if (sensor is null)
-        {
-            return;
-        }
-
-        if (request.RegistrationQualities is not null)
-        {
-            sensor.RegistrationQualities.RemoveAll(value => request.RegistrationQualities.Contains(value));
-        }
-
-        if (request.GridTypes is not null)
-        {
-            sensor.GridTypes.RemoveAll(value =>
-                request.GridTypes.Contains(value, StringComparer.Ordinal));
-        }
-
-        // Remove the sensor entry entirely when both criteria lists are empty.
-        // An empty entry would mean "match all" for this sensor, which is unlikely
-        // to be the intent after explicitly removing all filter values.
-        if (sensor.RegistrationQualities.Count == 0 && sensor.GridTypes.Count == 0)
-        {
-            rule.Sensors.Remove(sensor);
-        }
     }
 
     private static void NormalizeRuleCollections(RuleDto rule)

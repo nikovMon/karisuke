@@ -114,7 +114,7 @@ public sealed class RulesController : ControllerBase
         [FromBody] UpdateRuleRequest request,
         CancellationToken cancellationToken = default)
     {
-        var result = await _service.UpdateBulkAsync(ParseIds(ids), request, cancellationToken);
+        var result = await _service.UpdateBulkAsync(RuleIdsQuery.Parse(ids), request, cancellationToken);
         return this.ToActionResult(result);
     }
 
@@ -142,7 +142,7 @@ public sealed class RulesController : ControllerBase
         [FromBody] RuleSensorUpdateRequest request,
         CancellationToken cancellationToken = default)
     {
-        var result = await _service.AddSensorsAsync(ParseIds(ids), request, cancellationToken);
+        var result = await _service.AddSensorsAsync(RuleIdsQuery.Parse(ids), request, cancellationToken);
         return this.ToActionResult(result);
     }
 
@@ -156,7 +156,7 @@ public sealed class RulesController : ControllerBase
         [FromBody] RuleSensorUpdateRequest request,
         CancellationToken cancellationToken = default)
     {
-        var result = await _service.RemoveSensorsAsync(ParseIds(ids), request, cancellationToken);
+        var result = await _service.RemoveSensorsAsync(RuleIdsQuery.Parse(ids), request, cancellationToken);
         return this.ToActionResult(result);
     }
 
@@ -171,9 +171,4 @@ public sealed class RulesController : ControllerBase
         var result = await _service.DeleteAsync(id, cancellationToken);
         return this.ToActionResult(result);
     }
-
-    private static IReadOnlyList<string> ParseIds(string? ids) =>
-        string.IsNullOrWhiteSpace(ids)
-            ? []
-            : ids.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 }

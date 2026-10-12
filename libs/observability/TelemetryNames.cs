@@ -138,8 +138,15 @@ public static class TelemetryAttributeNames
     public const string RuleRejectionReason = "findair.rule.rejection.reason";
 
     // Writing one rule through the Rules API.
-    public const string RuleChangedFields = "findair.rule.changed_fields";
-    public const string RuleValidationErrors = "findair.rule.validation.errors";
+    public const string RuleChangedFields = "unified_gateway.rule.changed_fields";
+    public const string RuleValidationErrors = "unified_gateway.rule.validation.errors";
+
+    // One bulk rule request. Failed IDs are capped in logs; the failed count is exact.
+    public const string RulesOperation = "unified_gateway.rules.operation";
+    public const string RulesRequestedCount = "unified_gateway.rules.requested.count";
+    public const string RulesSucceededCount = "unified_gateway.rules.succeeded.count";
+    public const string RulesFailedCount = "unified_gateway.rules.failed.count";
+    public const string RulesFailedIds = "unified_gateway.rules.failed.ids";
 
     // Handling one source message. error.code is a stable validation code, never the exception class.
     public const string ErrorCode = "error.code";

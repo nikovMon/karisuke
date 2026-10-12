@@ -5,10 +5,10 @@ namespace ImagingPipeline.Rules.Api.Services;
 
 /// <summary>
 /// Elasticsearch access to one rules index, shared by the v1 and the pipeline-scoped rule services.
-/// With <paramref name="waitForRefresh"/>, a write returns only once searches see it, so the next
-/// request's name check finds it. Client failures surface as <see cref="RulePersistenceException"/>.
+/// A write with <c>waitForRefresh</c> returns only once searches see it, so the next request's name
+/// check finds it. Client failures surface as <see cref="RulePersistenceException"/>.
 /// </summary>
-internal sealed class RuleIndex(IElasticsearchDocumentClient client, string name, bool waitForRefresh)
+internal sealed class RuleIndex(IElasticsearchDocumentClient client, string name)
 {
     private const string RuleNameKeywordField = "ruleName.keyword";
     private const string IsActiveField = "isActive";
@@ -62,7 +62,7 @@ internal sealed class RuleIndex(IElasticsearchDocumentClient client, string name
         return documents.Count > 0;
     }
 
-    public Task<string> SaveAsync<TRule>(string? id, TRule rule, CancellationToken cancellationToken)
+    public Task<string> SaveAsync<TRule>(string? id, TRule rule, bool waitForRefresh, CancellationToken cancellationToken)
         where TRule : class =>
         ExecuteAsync(
             () => client.IndexAsync(
@@ -74,7 +74,7 @@ internal sealed class RuleIndex(IElasticsearchDocumentClient client, string name
                 cancellationToken),
             $"save rule '{id}'");
 
-    public Task<bool> DeleteAsync<TRule>(string id, CancellationToken cancellationToken)
+    public Task<bool> DeleteAsync<TRule>(string id, bool waitForRefresh, CancellationToken cancellationToken)
         where TRule : class =>
         ExecuteAsync(
             () => client.DeleteAsync<TRule>(
