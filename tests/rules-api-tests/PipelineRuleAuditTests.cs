@@ -72,6 +72,33 @@ public sealed class PipelineRuleAuditTests : IDisposable
     }
 
     [Fact]
+    public async Task ChangedFieldsAndChangeTypeComeFromWhatActuallyChanged()
+    {
+        var id = await CreateAsync();
+
+        await _client.PatchAsJsonAsync(
+            $"/pipelines/asd/rules/{id}",
+            new { ruleName = "first", isActive = false, match = new { locationWkt = "POLYGON ((0 0, 2 0, 2 2, 0 2, 0 0))" } });
+
+        var record = Records()[1];
+        Assert.Equal(["isActive", "match.locationWkt"], record.ChangedFields);
+        Assert.Equal(RuleChangeType.Updated, record.ChangeType);
+        Assert.False(string.IsNullOrEmpty(record.RequestId));
+    }
+
+    [Fact]
+    public async Task ResendingUnchangedFieldsWithADeactivationIsADeactivation()
+    {
+        var id = await CreateAsync();
+
+        await _client.PatchAsJsonAsync($"/pipelines/asd/rules/{id}", new { ruleName = "first", isActive = false });
+
+        var record = Records()[1];
+        Assert.Equal(RuleChangeType.Deactivated, record.ChangeType);
+        Assert.Equal(["isActive"], record.ChangedFields);
+    }
+
+    [Fact]
     public async Task AFailedAuditWriteDoesNotFailTheChange()
     {
         _store.FailingIndexes.Add(AuditIndex);

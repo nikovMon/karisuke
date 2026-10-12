@@ -38,7 +38,7 @@ public sealed class RuleAuditRecord
     [JsonPropertyName("reason")]
     public string? Reason { get; set; }
 
-    /// <summary>The trace ID of the request that made the change.</summary>
+    /// <summary>The ID of the HTTP request that made the change.</summary>
     [JsonPropertyName("requestId")]
     public string? RequestId { get; set; }
 }
@@ -60,4 +60,18 @@ public enum RuleChangeType
 
     [JsonStringEnumMemberName("deleted")]
     Deleted = 5
+}
+
+public static class RuleChangeTypeExtensions
+{
+    /// <summary>The value stored in audit records, such as <c>deactivated</c>.</summary>
+    public static string Value(this RuleChangeType changeType) => changeType switch
+    {
+        RuleChangeType.Created => "created",
+        RuleChangeType.Updated => "updated",
+        RuleChangeType.Activated => "activated",
+        RuleChangeType.Deactivated => "deactivated",
+        RuleChangeType.Deleted => "deleted",
+        _ => throw new ArgumentOutOfRangeException(nameof(changeType), changeType, null)
+    };
 }

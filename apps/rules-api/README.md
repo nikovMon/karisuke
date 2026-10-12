@@ -667,7 +667,8 @@ Every v2 rule change appends one record to `Elasticsearch:AuditIndex` (default `
 ```
 
 - The states are full rule snapshots. A creation has no `previousState` and a deletion has no `newState`.
-- `activated` and `deactivated` are used when `isActive` is the only change; any other change is `updated`. An update that changes nothing writes no record.
+- `changedFields` and `changeType` come from comparing the stored rule before and after, not from what the request sent. `activated` and `deactivated` are used when `isActive` is the only change; any other change is `updated`. An update that changes nothing writes no record.
+- `requestId` is the HTTP request's `TraceIdentifier`.
 - `changedBy` and `reason` stay null until the API authenticates its callers.
 - Records are written after the rule is saved. A failed write logs warning 5039 and does not fail the request.
 

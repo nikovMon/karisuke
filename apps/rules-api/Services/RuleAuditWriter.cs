@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.ElasticsearchClient;
 using ImagingPipeline.Observability;
@@ -15,22 +14,25 @@ namespace ImagingPipeline.Rules.Api.Services;
 public sealed class RuleAuditWriter
 {
     private readonly IElasticsearchDocumentClient _client;
+    private readonly IHttpContextAccessor _httpContext;
     private readonly string _indexName;
     private readonly ILogger<RuleAuditWriter> _logger;
 
     public RuleAuditWriter(
         IElasticsearchDocumentClient client,
+        IHttpContextAccessor httpContext,
         IOptions<RulesElasticsearchOptions> options,
         ILogger<RuleAuditWriter> logger)
     {
         _client = client;
+        _httpContext = httpContext;
         _indexName = options.Value.AuditIndex;
         _logger = logger;
     }
 
     public async Task RecordAsync(RuleAuditRecord record)
     {
-        record.RequestId ??= Activity.Current?.TraceId.ToHexString();
+        record.RequestId ??= _httpContext.HttpContext?.TraceIdentifier;
         try
         {
             await _client.IndexAsync(
@@ -47,7 +49,7 @@ public sealed class RuleAuditWriter
                    {
                        new(TelemetryAttributeNames.PipelineId, record.PipelineId),
                        new(TelemetryAttributeNames.PipelineRuleId, record.RuleId),
-                       new(TelemetryAttributeNames.RuleChangeType, record.ChangeType.ToString())
+                       new(TelemetryAttributeNames.RuleChangeType, record.ChangeType.Value())
                    }))
             {
                 _logger.RuleAuditWriteFailed(exception);
