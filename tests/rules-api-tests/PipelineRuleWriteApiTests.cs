@@ -138,6 +138,26 @@ public sealed class PipelineRuleWriteApiTests
     }
 
     [Fact]
+    public async Task RuleThatNoLongerValidatesCanStillBeDeactivatedButNotReactivated()
+    {
+        _store.Add(AsdIndex, "stale", new PipelineRuleDocument
+        {
+            RuleName = "stale",
+            MatchAll = true,
+            RunParams = [JsonSerializer.SerializeToElement(new { tenantId = " " })]
+        });
+        using var factory = new RulesApiFactory(_store);
+        using var client = factory.CreateClient();
+
+        var deactivated = await client.PatchAsJsonAsync("/pipelines/asd/rules/stale/activity", new { isActive = false });
+        var reactivated = await client.PatchAsJsonAsync("/pipelines/asd/rules/stale/activity", new { isActive = true });
+
+        Assert.Equal(HttpStatusCode.OK, deactivated.StatusCode);
+        Assert.False(_store.Stored(AsdIndex, "stale")!["isActive"]!.GetValue<bool>());
+        Assert.Equal(HttpStatusCode.BadRequest, reactivated.StatusCode);
+    }
+
+    [Fact]
     public async Task WritesToAnUnknownRuleAreNotFound()
     {
         using var factory = new RulesApiFactory(_store);

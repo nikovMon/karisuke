@@ -22,7 +22,7 @@ public sealed class RuleService : IRuleService
         IOptions<RulesElasticsearchOptions> options,
         ILogger<RuleService> logger)
     {
-        _index = new RuleIndex(client, options.Value.Index);
+        _index = new RuleIndex(client, options.Value.Index, waitForRefresh: false);
         _logger = logger;
     }
 

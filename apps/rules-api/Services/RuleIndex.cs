@@ -5,9 +5,10 @@ namespace ImagingPipeline.Rules.Api.Services;
 
 /// <summary>
 /// Elasticsearch access to one rules index, shared by the v1 and the pipeline-scoped rule services.
-/// Client failures surface as <see cref="RulePersistenceException"/>.
+/// With <paramref name="waitForRefresh"/>, a write returns only once searches see it, so the next
+/// request's name check finds it. Client failures surface as <see cref="RulePersistenceException"/>.
 /// </summary>
-internal sealed class RuleIndex(IElasticsearchDocumentClient client, string name)
+internal sealed class RuleIndex(IElasticsearchDocumentClient client, string name, bool waitForRefresh)
 {
     private const string RuleNameKeywordField = "ruleName.keyword";
     private const string IsActiveField = "isActive";
@@ -68,7 +69,7 @@ internal sealed class RuleIndex(IElasticsearchDocumentClient client, string name
                 name,
                 id,
                 rule,
-                waitForRefresh: false,
+                waitForRefresh,
                 allowGeneratedId: true,
                 cancellationToken),
             $"save rule '{id}'");
@@ -79,7 +80,7 @@ internal sealed class RuleIndex(IElasticsearchDocumentClient client, string name
             () => client.DeleteAsync<TRule>(
                 name,
                 id,
-                waitForRefresh: false,
+                waitForRefresh,
                 cancellationToken),
             $"delete rule '{id}'");
 

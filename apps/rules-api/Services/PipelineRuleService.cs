@@ -4,7 +4,7 @@ using ImagingPipeline.Common.Dtos.Rules.Responses;
 using ImagingPipeline.ElasticsearchClient;
 using ImagingPipeline.PipelineCatalog;
 using ImagingPipeline.PipelineContracts;
-using ImagingPipeline.Rules.Api.Observability;
+using ImagingPipeline.Observability;
 using ImagingPipeline.RuleEngine.Rules;
 
 namespace ImagingPipeline.Rules.Api.Services;
@@ -18,17 +18,20 @@ public sealed class PipelineRuleService
 {
     private readonly IElasticsearchDocumentClient _client;
     private readonly IPipelineCatalog _catalog;
+    private readonly IRuleSourceResolver _ruleSources;
     private readonly IPipelineContractRegistry _contracts;
     private readonly ILogger<PipelineRuleService> _logger;
 
     public PipelineRuleService(
         IElasticsearchDocumentClient client,
         IPipelineCatalog catalog,
+        IRuleSourceResolver ruleSources,
         IPipelineContractRegistry contracts,
         ILogger<PipelineRuleService> logger)
     {
         _client = client;
         _catalog = catalog;
+        _ruleSources = ruleSources;
         _contracts = contracts;
         _logger = logger;
     }
@@ -77,18 +80,19 @@ public sealed class PipelineRuleService
         CreatePipelineRuleRequest request,
         CancellationToken cancellationToken = default)
     {
-        using var telemetry = PipelineRuleWriteTelemetry.Begin(pipelineId, ruleId: null, _logger);
         var rule = request.ToDocument();
+        rule.Id = Guid.NewGuid().ToString("N");
         rule.CreationTime = rule.UpdateTime = DateTimeOffset.UtcNow;
+        using var logScope = BeginLogScope(pipelineId, rule.Id);
 
-        var failure = await ValidateAsync(pipelineId, rule, checkName: true, telemetry, cancellationToken);
+        var failure = await ValidateAsync(pipelineId, rule, checkName: true, cancellationToken);
         if (failure is not null)
         {
             return failure;
         }
 
-        rule.Id = await Index(pipelineId).SaveAsync<PipelineRuleDocument>(null, rule, cancellationToken);
-        telemetry.Created(rule.Id);
+        await Index(pipelineId).SaveAsync(rule.Id, rule, cancellationToken);
+        _logger.PipelineRuleCreated();
         return RuleOperationResult<PipelineRuleDocument>.Success(rule);
     }
 
@@ -98,11 +102,11 @@ public sealed class PipelineRuleService
         UpdatePipelineRuleRequest request,
         CancellationToken cancellationToken = default)
     {
-        using var telemetry = PipelineRuleWriteTelemetry.Begin(pipelineId, id, _logger);
+        using var logScope = BeginLogScope(pipelineId, id);
         var rule = await GetByIdAsync(pipelineId, id, cancellationToken);
         if (rule is null)
         {
-            telemetry.NotFound();
+            _logger.PipelineRuleNotFound();
             return RuleOperationResult<PipelineRuleDocument>.NotFound($"Rule '{id}' was not found.");
         }
 
@@ -111,14 +115,26 @@ public sealed class PipelineRuleService
         request.ApplyTo(rule);
         rule.UpdateTime = DateTimeOffset.UtcNow;
 
-        var failure = await ValidateAsync(pipelineId, rule, nameChanged, telemetry, cancellationToken);
-        if (failure is not null)
+        // A rule that no longer passes validation, e.g. after a contract change, must still be switchable off.
+        var onlyDeactivates = !rule.IsActive && request.ProvidedFields.SequenceEqual(["isActive"]);
+        if (!onlyDeactivates)
         {
-            return failure;
+            var failure = await ValidateAsync(pipelineId, rule, nameChanged, cancellationToken);
+            if (failure is not null)
+            {
+                return failure;
+            }
         }
 
         await Index(pipelineId).SaveAsync(id, rule, cancellationToken);
-        telemetry.Updated(request.ProvidedFields);
+        using (_logger.BeginScope(new KeyValuePair<string, object?>[]
+               {
+                   new(TelemetryAttributeNames.RuleChangedFields, request.ProvidedFields.Order(StringComparer.Ordinal).ToArray())
+               }))
+        {
+            _logger.PipelineRuleUpdated();
+        }
+
         return RuleOperationResult<PipelineRuleDocument>.Success(rule);
     }
 
@@ -134,14 +150,14 @@ public sealed class PipelineRuleService
         string id,
         CancellationToken cancellationToken = default)
     {
-        using var telemetry = PipelineRuleWriteTelemetry.Begin(pipelineId, id, _logger);
+        using var logScope = BeginLogScope(pipelineId, id);
         if (!await Index(pipelineId).DeleteAsync<PipelineRuleDocument>(id, cancellationToken))
         {
-            telemetry.NotFound();
+            _logger.PipelineRuleNotFound();
             return RuleOperationResult.NotFound($"Rule '{id}' was not found.");
         }
 
-        telemetry.Deleted();
+        _logger.PipelineRuleDeleted();
         return RuleOperationResult.Success();
     }
 
@@ -153,7 +169,6 @@ public sealed class PipelineRuleService
         string pipelineId,
         PipelineRuleDocument rule,
         bool checkName,
-        PipelineRuleWriteTelemetry telemetry,
         CancellationToken cancellationToken)
     {
         if (rule.Match is not null)
@@ -164,7 +179,14 @@ public sealed class PipelineRuleService
         var validation = PipelineRuleValidator.Validate(rule, Contract(pipelineId));
         if (!validation.IsValid)
         {
-            telemetry.ValidationFailed(validation.Errors);
+            using (_logger.BeginScope(new KeyValuePair<string, object?>[]
+                   {
+                       new(TelemetryAttributeNames.RuleValidationErrors, validation.Errors.ToArray())
+                   }))
+            {
+                _logger.PipelineRuleValidationFailed();
+            }
+
             return RuleOperationResult<PipelineRuleDocument>.ValidationFailed(string.Join(" | ", validation.Errors));
         }
 
@@ -176,15 +198,22 @@ public sealed class PipelineRuleService
         if (checkName &&
             await Index(pipelineId).ExistsByNameAsync<PipelineRuleDocument>(rule.RuleName, rule.Id, cancellationToken))
         {
-            telemetry.NameConflict();
+            _logger.PipelineRuleNameConflict();
             return RuleOperationResult<PipelineRuleDocument>.Conflict($"Rule with ruleName '{rule.RuleName}' already exists.");
         }
 
         return null;
     }
 
+    private IDisposable? BeginLogScope(string pipelineId, string ruleId) =>
+        _logger.BeginScope(new KeyValuePair<string, object?>[]
+        {
+            new(TelemetryAttributeNames.PipelineId, pipelineId),
+            new(TelemetryAttributeNames.PipelineRuleId, ruleId)
+        });
+
     private RuleIndex Index(string pipelineId) =>
-        new(_client, _catalog.GetRequired(pipelineId).RulesIndex);
+        new(_client, _ruleSources.Resolve(pipelineId).IndexName, waitForRefresh: true);
 
     private IPipelineContract Contract(string pipelineId) =>
         _contracts.GetRequired(_catalog.GetRequired(pipelineId).ContractId);

@@ -181,7 +181,7 @@ Return one v2 rule, or `404 Not Found`.
 
 ### POST /pipelines/{pipelineId}/rules
 
-Creates a v2 rule from `ruleName`, `description`, `isActive` (default `true`), `matchAll`, `match` and `runParams`. The server sets the ID, `schemaVersion` and timestamps, and derives `match.location` from `match.locationWkt`. The rule is checked with the same validator the gateway uses when it loads rules: the document rules, then the pipeline contract's run parameters and location requirement. Returns `201 Created`, `400 Bad Request` with the validation errors, or `409 Conflict` when the name is already used in this pipeline.
+Creates a v2 rule from `ruleName`, `description`, `isActive` (default `true`), `matchAll`, `match` and `runParams`. The server sets the ID, `schemaVersion` and timestamps, and derives `match.location` from `match.locationWkt`. The rule is checked with the same validator the gateway uses when it loads rules: the document rules, then the pipeline contract's run parameters and location requirement. Returns `201 Created`, `400 Bad Request` with the validation errors, or `409 Conflict` when the name is already used in this pipeline. Writes wait for the index refresh, so a request made right after sees the change.
 
 ### PATCH /pipelines/{pipelineId}/rules/{id}
 
@@ -189,7 +189,7 @@ Partial update. Only the fields sent change; a field sent as `null` is cleared. 
 
 ### PATCH /pipelines/{pipelineId}/rules/{id}/activity
 
-Body `{ "isActive": true|false }`. Validated like any other update.
+Body `{ "isActive": true|false }`. Activation is validated like any other update. Deactivation is not, so a rule that stopped passing validation, for example after a contract change, can still be switched off.
 
 ### DELETE /pipelines/{pipelineId}/rules/{id}
 
