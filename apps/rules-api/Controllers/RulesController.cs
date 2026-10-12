@@ -85,7 +85,7 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _service.CreateAsync(request, cancellationToken);
-        return ToResultWithBody(result, createdAtId: result.Value?.Id);
+        return this.ToActionResult(result, rule => CreatedAtAction(nameof(GetById), new { id = rule.Id }, rule));
     }
 
     // Update routes
@@ -100,7 +100,7 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _service.UpdateAsync(id, request, cancellationToken);
-        return ToResultWithBody(result);
+        return this.ToActionResult(result);
     }
 
     [HttpPatch("bulk")]
@@ -115,7 +115,7 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _service.UpdateBulkAsync(ParseIds(ids), request, cancellationToken);
-        return ToResultWithBody(result);
+        return this.ToActionResult(result);
     }
 
     [HttpPatch("{id}/activity")]
@@ -128,7 +128,7 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _service.ChangeActivityAsync(id, request, cancellationToken);
-        return ToResultWithBody(result);
+        return this.ToActionResult(result);
     }
 
     // Sensor routes
@@ -143,7 +143,7 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _service.AddSensorsAsync(ParseIds(ids), request, cancellationToken);
-        return ToResultWithBody(result);
+        return this.ToActionResult(result);
     }
 
     [HttpPatch("sensors/remove")]
@@ -157,7 +157,7 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _service.RemoveSensorsAsync(ParseIds(ids), request, cancellationToken);
-        return ToResultWithBody(result);
+        return this.ToActionResult(result);
     }
 
     // Delete route
@@ -169,36 +169,7 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var result = await _service.DeleteAsync(id, cancellationToken);
-        return result.Status == RuleOperationStatus.Success ? NoContent() : ToResultWithoutBody(result);
-    }
-
-    private IActionResult ToResultWithBody<T>(RuleOperationResult<T> result, string? createdAtId = null)
-    {
-        return result.Status switch
-        {
-            RuleOperationStatus.Success when createdAtId is not null =>
-                CreatedAtAction(nameof(GetById), new { id = createdAtId }, result.Value),
-            RuleOperationStatus.Success => Ok(result.Value),
-            RuleOperationStatus.PartialSuccess =>
-                StatusCode(StatusCodes.Status207MultiStatus, result.Value),
-            RuleOperationStatus.AllFailed => UnprocessableEntity(result.Value),
-            RuleOperationStatus.ValidationFailed => BadRequest(new { error = result.Error }),
-            RuleOperationStatus.NotFound => NotFound(new { error = result.Error }),
-            RuleOperationStatus.Conflict => Conflict(new { error = result.Error }),
-            _ => StatusCode(StatusCodes.Status500InternalServerError)
-        };
-    }
-
-    private IActionResult ToResultWithoutBody(RuleOperationResult result)
-    {
-        return result.Status switch
-        {
-            RuleOperationStatus.Success => Ok(),
-            RuleOperationStatus.ValidationFailed => BadRequest(new { error = result.Error }),
-            RuleOperationStatus.NotFound => NotFound(new { error = result.Error }),
-            RuleOperationStatus.Conflict => Conflict(new { error = result.Error }),
-            _ => StatusCode(StatusCodes.Status500InternalServerError)
-        };
+        return this.ToActionResult(result);
     }
 
     private static IReadOnlyList<string> ParseIds(string? ids) =>

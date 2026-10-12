@@ -69,14 +69,29 @@ internal sealed class InMemoryIndexStore : IElasticsearchDocumentClient
         bool waitForRefresh = true,
         bool allowGeneratedId = false,
         CancellationToken cancellationToken = default)
-        where TDocument : class => throw new NotSupportedException();
+        where TDocument : class
+    {
+        CallCount++;
+        var documentId = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString() : id;
+        var source = JsonSerializer.SerializeToNode(document)!.AsObject();
+        source.Remove("_id");
+        Index(indexName)[documentId] = source;
+        return Task.FromResult(documentId);
+    }
 
     public Task<bool> DeleteAsync<TDocument>(
         string indexName,
         string id,
         bool waitForRefresh = true,
         CancellationToken cancellationToken = default)
-        where TDocument : class => throw new NotSupportedException();
+        where TDocument : class
+    {
+        CallCount++;
+        return Task.FromResult(Index(indexName).Remove(id));
+    }
+
+    public JsonObject? Stored(string indexName, string id) =>
+        Index(indexName).TryGetValue(id, out var source) ? source : null;
 
     private Dictionary<string, JsonObject> Index(string indexName)
     {

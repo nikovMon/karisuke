@@ -105,6 +105,25 @@ internal static partial class RulesApiLog
     [LoggerMessage(5030, LogLevel.Warning, "Requested pipeline is not configured.")]
     public static partial void PipelineNotFound(this ILogger logger);
 
+    // Pipeline rule writes. Pipeline ID, rule ID and details travel in the log scope.
+    [LoggerMessage(5031, LogLevel.Information, "Pipeline rule created.")]
+    public static partial void PipelineRuleCreated(this ILogger logger);
+
+    [LoggerMessage(5032, LogLevel.Information, "Pipeline rule updated.")]
+    public static partial void PipelineRuleUpdated(this ILogger logger);
+
+    [LoggerMessage(5033, LogLevel.Information, "Pipeline rule deleted.")]
+    public static partial void PipelineRuleDeleted(this ILogger logger);
+
+    [LoggerMessage(5034, LogLevel.Warning, "Pipeline rule failed validation.")]
+    public static partial void PipelineRuleValidationFailed(this ILogger logger);
+
+    [LoggerMessage(5035, LogLevel.Warning, "Pipeline rule was not found.")]
+    public static partial void PipelineRuleNotFound(this ILogger logger);
+
+    [LoggerMessage(5036, LogLevel.Warning, "Pipeline rule name is already in use.")]
+    public static partial void PipelineRuleNameConflict(this ILogger logger);
+
     [LoggerMessage(5050, LogLevel.Warning, "Elasticsearch health probe returned an invalid response. HttpStatusCode: {HttpStatusCode}; FailureType: {FailureType}")]
     public static partial void ElasticsearchHealthInvalidResponse(
         this ILogger logger,

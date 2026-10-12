@@ -10,6 +10,7 @@ COPY libs/pipeline-catalog/ImagingPipeline.PipelineCatalog.csproj libs/pipeline-
 COPY libs/rabbitmq-configuration/ImagingPipeline.RabbitMqConfiguration.csproj libs/rabbitmq-configuration/
 COPY libs/pipeline-contracts/ImagingPipeline.PipelineContracts.csproj libs/pipeline-contracts/
 COPY libs/geometry-utils/GeometryUtils.csproj libs/geometry-utils/
+COPY libs/rule-engine/ImagingPipeline.RuleEngine.csproj libs/rule-engine/
 RUN dotnet restore apps/rules-api/ImagingPipeline.Rules.Api.csproj
 
 COPY . .

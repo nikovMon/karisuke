@@ -1,4 +1,5 @@
 using ImagingPipeline.Common.Dtos.Rules.Models;
+using ImagingPipeline.Common.Dtos.Rules.Requests;
 using ImagingPipeline.Rules.Api.Configuration;
 using ImagingPipeline.Rules.Api.Observability;
 using ImagingPipeline.Rules.Api.Services;
@@ -75,4 +76,50 @@ public sealed class PipelineRulesController : ControllerBase
         var rule = await _service.GetByNameAsync(pipelineId, ruleName, cancellationToken);
         return rule is null ? NotFound() : Ok(rule);
     }
+
+    [HttpPost]
+    [ProducesResponseType(typeof(PipelineRuleDocument), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Create(
+        [FromRoute] string pipelineId,
+        [FromBody] CreatePipelineRuleRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _service.CreateAsync(pipelineId, request, cancellationToken);
+        return this.ToActionResult(result, rule => CreatedAtAction(nameof(GetById), new { pipelineId, id = rule.Id }, rule));
+    }
+
+    [HttpPatch("{id}")]
+    [ProducesResponseType(typeof(PipelineRuleDocument), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Update(
+        [FromRoute] string pipelineId,
+        [FromRoute] string id,
+        [FromBody] UpdatePipelineRuleRequest request,
+        CancellationToken cancellationToken = default) =>
+        this.ToActionResult(await _service.UpdateAsync(pipelineId, id, request, cancellationToken));
+
+    [HttpPatch("{id}/activity")]
+    [ProducesResponseType(typeof(PipelineRuleDocument), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ChangeActivity(
+        [FromRoute] string pipelineId,
+        [FromRoute] string id,
+        [FromBody] ChangeRuleActivationStatusRequest request,
+        CancellationToken cancellationToken = default) =>
+        this.ToActionResult(await _service.ChangeActivityAsync(pipelineId, id, request.IsActive!.Value, cancellationToken));
+
+    [HttpDelete("{id}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Delete(
+        [FromRoute] string pipelineId,
+        [FromRoute] string id,
+        CancellationToken cancellationToken = default) =>
+        this.ToActionResult(await _service.DeleteAsync(pipelineId, id, cancellationToken));
 }
