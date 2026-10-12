@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Diagnostics.CodeAnalysis;
 using ImagingPipeline.PipelineContracts;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -44,9 +45,21 @@ public sealed class PipelineCatalog : IPipelineCatalog, IRuleSourceResolver, IRa
     public PipelineDefinition GetRequired(string pipelineId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pipelineId);
-        return _byId.TryGetValue(pipelineId, out var pipeline)
-            ? Clone(pipeline)
+        return TryGet(pipelineId, out var pipeline)
+            ? pipeline
             : throw new KeyNotFoundException($"Pipeline '{pipelineId}' is not configured.");
+    }
+
+    public bool TryGet(string pipelineId, [NotNullWhen(true)] out PipelineDefinition? pipeline)
+    {
+        if (pipelineId is null || !_byId.TryGetValue(pipelineId, out var configured))
+        {
+            pipeline = null;
+            return false;
+        }
+
+        pipeline = Clone(configured);
+        return true;
     }
 
     public RuleSource Resolve(string pipelineId)

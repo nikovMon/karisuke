@@ -38,12 +38,9 @@ public sealed class RulesController : ControllerBase
         CancellationToken cancellationToken = default)
     {
         var searchSize = size ?? _options.DefaultSearchSize;
-        if (from < 0 || searchSize <= 0 || searchSize > _options.MaxSearchSize)
+        if (_options.ValidatePage(from, searchSize) is { } error)
         {
-            return BadRequest(new
-            {
-                error = $"from must be at least 0 and size must be between 1 and {_options.MaxSearchSize}."
-            });
+            return BadRequest(new { error });
         }
 
         if (getNameOnly)

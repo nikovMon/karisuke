@@ -25,6 +25,9 @@ public sealed class KeyedPipelineConfigurationTests
         Assert.Equal("ASD_main", Assert.Single(catalog.GetAll()).PipelineId);
         Assert.Equal("ASD_main", catalog.GetRequired("ASD_main").PipelineId);
         Assert.Throws<KeyNotFoundException>(() => catalog.GetRequired("asd_main"));
+        Assert.True(catalog.TryGet("ASD_main", out var found));
+        Assert.Equal("ASD_main", found.PipelineId);
+        Assert.False(catalog.TryGet("asd_main", out _));
         Assert.Equal(new RuleSource("rules", "ASD_main"),
             host.Services.GetRequiredService<IRuleSourceResolver>().Resolve("ASD_main"));
         await host.StopAsync();

@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace ImagingPipeline.PipelineCatalog;
 
 public interface IPipelineCatalog
@@ -5,6 +7,7 @@ public interface IPipelineCatalog
     IReadOnlyList<PipelineDefinition> GetAll();
     IReadOnlyList<PipelineDefinition> GetEnabled();
     PipelineDefinition GetRequired(string pipelineId);
+    bool TryGet(string pipelineId, [NotNullWhen(true)] out PipelineDefinition? pipeline);
 }
 
 public interface IRuleSourceResolver

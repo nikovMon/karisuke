@@ -169,6 +169,18 @@ Lists every configured pipeline, enabled or not, ordered by ID. Transport settin
 
 Returns one pipeline in the same shape, or `404 Not Found` when the ID is not in the catalog.
 
+### GET /pipelines/{pipelineId}/rules
+
+Lists the pipeline's v2 rules (`PipelineRuleDocument`) from the index the catalog names for it. Accepts the same `getNameOnly`, `isActive`, `from` and `size` query parameters as `GET /rules`.
+
+### GET /pipelines/{pipelineId}/rules/{id}
+
+### GET /pipelines/{pipelineId}/rules/name/{ruleName}
+
+Return one v2 rule, or `404 Not Found`.
+
+Every `/pipelines/{pipelineId}/...` route answers `404 Not Found` for a pipeline that is not in the catalog, without querying Elasticsearch, and logs event 5030 with `pipeline.id` as a field.
+
 ### GET /health
 
 Checks whether the API process can connect to Elasticsearch.
