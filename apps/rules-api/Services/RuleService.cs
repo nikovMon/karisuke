@@ -22,7 +22,7 @@ public sealed class RuleService : IRuleService
         IOptions<RulesElasticsearchOptions> options,
         ILogger<RuleService> logger)
     {
-        _index = new RuleIndex(client, options.Value.Index, waitForRefresh: false);
+        _index = new RuleIndex(client, options.Value.Index);
         _logger = logger;
     }
 
@@ -236,7 +236,7 @@ public sealed class RuleService : IRuleService
     {
         _logger.RuleOperationStarting("delete", id);
 
-        var deleted = await _index.DeleteAsync<RuleDto>(id, cancellationToken);
+        var deleted = await _index.DeleteAsync<RuleDto>(id, waitForRefresh: false, cancellationToken);
         if (deleted)
         {
             _logger.RuleDeleted("delete", id);
@@ -334,7 +334,7 @@ public sealed class RuleService : IRuleService
 
     private async Task SaveAsync(RuleDto rule, CancellationToken cancellationToken)
     {
-        rule.Id = await _index.SaveAsync(rule.Id, rule, cancellationToken);
+        rule.Id = await _index.SaveAsync(rule.Id, rule, waitForRefresh: false, cancellationToken);
     }
 
     private static RuleDto HydrateId(ElasticsearchDocument<RuleDto> document)

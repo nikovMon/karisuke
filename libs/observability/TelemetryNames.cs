@@ -141,6 +141,13 @@ public static class TelemetryAttributeNames
     public const string RuleChangedFields = "findair.rule.changed_fields";
     public const string RuleValidationErrors = "findair.rule.validation.errors";
 
+    // One bulk rule request. Failed IDs are capped in logs; the failed count is exact.
+    public const string RulesOperation = "findair.rules.operation";
+    public const string RulesRequestedCount = "findair.rules.requested.count";
+    public const string RulesSucceededCount = "findair.rules.succeeded.count";
+    public const string RulesFailedCount = "findair.rules.failed.count";
+    public const string RulesFailedIds = "findair.rules.failed.ids";
+
     // Handling one source message. error.code is a stable validation code, never the exception class.
     public const string ErrorCode = "error.code";
     public const string DispatchUnitCount = "findair.dispatch.units.count";

@@ -10,6 +10,9 @@ public sealed class RulesElasticsearchOptions
 
     public int MaxSearchSize { get; set; } = 1000;
 
+    /// <summary>Most rule IDs one bulk request may change.</summary>
+    public int MaxBulkSize { get; set; } = 500;
+
     internal string? ValidatePage(int from, int size) =>
         from < 0 || size <= 0 || size > MaxSearchSize
             ? $"from must be at least 0 and size must be between 1 and {MaxSearchSize}."
@@ -32,6 +35,12 @@ public sealed class RulesElasticsearchOptions
         if (MaxSearchSize < DefaultSearchSize)
         {
             error = "Rules Elasticsearch MaxSearchSize must be greater than or equal to DefaultSearchSize.";
+            return false;
+        }
+
+        if (MaxBulkSize <= 0)
+        {
+            error = "Rules Elasticsearch MaxBulkSize must be greater than 0.";
             return false;
         }
 

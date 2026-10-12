@@ -4,6 +4,7 @@ using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Common.Dtos.Rules.Responses;
 using ImagingPipeline.Rules.Api.Tests.Fakes;
+using Microsoft.AspNetCore.Hosting;
 
 namespace ImagingPipeline.Rules.Api.Tests;
 
@@ -121,6 +122,59 @@ public sealed class PipelineRuleBulkApiTests : IDisposable
         var failure = Assert.Single((await response.Content.ReadFromJsonAsync<BulkOperationResult>())!.FailedIds);
         Assert.Contains("last sensor", failure.Reason, StringComparison.Ordinal);
         Assert.Single(Stored("a").Match!.Sensors!);
+    }
+
+    [Fact]
+    public async Task ARuleThatCannotBeSavedIsReportedWhileTheOthersAreSaved()
+    {
+        _store.Add(AsdIndex, "a", Rule("a"));
+        _store.Add(AsdIndex, "b", Rule("b"));
+        _store.FailingSaveIds.Add("a");
+        using var client = CreateClient();
+
+        var response = await client.PatchAsJsonAsync("/pipelines/asd/rules/bulk?ids=a,b", new { isActive = false });
+
+        Assert.Equal(HttpStatusCode.MultiStatus, response.StatusCode);
+        var result = await response.Content.ReadFromJsonAsync<BulkOperationResult>();
+        Assert.Equal(["b"], result!.SuccessIds);
+        Assert.Equal("a", Assert.Single(result.FailedIds).Id);
+    }
+
+    [Fact]
+    public async Task DuplicateIdsAreUpdatedOnce()
+    {
+        _store.Add(AsdIndex, "a", Rule("a"));
+        using var client = CreateClient();
+
+        var response = await client.PatchAsJsonAsync("/pipelines/asd/rules/bulk?ids=a,a", new { isActive = false });
+
+        Assert.Equal(["a"], (await response.Content.ReadFromJsonAsync<BulkOperationResult>())!.SuccessIds);
+    }
+
+    [Fact]
+    public async Task TooManyIdsAreRejected()
+    {
+        using var factory = _factory.WithWebHostBuilder(builder => builder.UseSetting("Elasticsearch:MaxBulkSize", "1"));
+        using var client = factory.CreateClient();
+
+        var response = await client.PatchAsJsonAsync("/pipelines/asd/rules/bulk?ids=a,b", new { isActive = false });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(0, _store.CallCount);
+    }
+
+    [Fact]
+    public async Task AChangeThatChangesNothingIsNotSaved()
+    {
+        _store.Add(AsdIndex, "a", Rule("a"));
+        using var client = CreateClient();
+
+        var response = await client.PatchAsJsonAsync(
+            "/pipelines/asd/rules/sensors/add?ids=a",
+            new { sensorName = "camera", registrationQualities = new[] { "Accurate" } });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(default, Stored("a").UpdateTime);
     }
 
     [Theory]

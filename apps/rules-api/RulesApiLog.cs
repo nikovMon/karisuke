@@ -124,6 +124,12 @@ internal static partial class RulesApiLog
     [LoggerMessage(5036, LogLevel.Warning, "Pipeline rule name is already in use.")]
     public static partial void PipelineRuleNameConflict(this ILogger logger);
 
+    [LoggerMessage(5037, LogLevel.Warning, "Pipeline rule could not be saved during a bulk request.")]
+    public static partial void PipelineRuleBulkItemFailed(this ILogger logger, Exception exception);
+
+    [LoggerMessage(5038, LogLevel.Information, "Pipeline rule bulk request completed.")]
+    public static partial void PipelineRuleBulkCompleted(this ILogger logger);
+
     [LoggerMessage(5050, LogLevel.Warning, "Elasticsearch health probe returned an invalid response. HttpStatusCode: {HttpStatusCode}; FailureType: {FailureType}")]
     public static partial void ElasticsearchHealthInvalidResponse(
         this ILogger logger,
