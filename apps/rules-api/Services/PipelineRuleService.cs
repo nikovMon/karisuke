@@ -271,7 +271,7 @@ public sealed class PipelineRuleService
     }
 
     private static RuleChangeType ChangeType(IReadOnlyList<string> changedFields, PipelineRuleDocument rule) =>
-        !changedFields.SequenceEqual(["isActive"]) ? RuleChangeType.Updated
+        !changedFields.SequenceEqual([PipelineRuleFields.IsActive]) ? RuleChangeType.Updated
         : rule.IsActive ? RuleChangeType.Activated
         : RuleChangeType.Deactivated;
 
@@ -284,18 +284,18 @@ public sealed class PipelineRuleService
         var changed = new List<string>();
         foreach (var name in PropertyNames(before).Union(PropertyNames(after)))
         {
-            if (name is "creationTime" or "updateTime")
+            if (name is PipelineRuleFields.CreationTime or PipelineRuleFields.UpdateTime)
             {
                 continue;
             }
 
-            if (name == "match")
+            if (name == PipelineRuleFields.Match)
             {
                 var beforeMatch = Property(before, name);
                 var afterMatch = Property(after, name);
                 changed.AddRange(PropertyNames(beforeMatch).Union(PropertyNames(afterMatch))
-                    .Where(field => field != "location" && !Same(Property(beforeMatch, field), Property(afterMatch, field)))
-                    .Select(field => $"match.{field}"));
+                    .Where(field => field != PipelineRuleFields.Location && !Same(Property(beforeMatch, field), Property(afterMatch, field)))
+                    .Select(field => $"{PipelineRuleFields.Match}.{field}"));
             }
             else if (!Same(Property(before, name), Property(after, name)))
             {
