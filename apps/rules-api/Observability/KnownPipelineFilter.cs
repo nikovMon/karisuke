@@ -24,7 +24,7 @@ public sealed class KnownPipelineFilter : IActionFilter
     public void OnActionExecuting(ActionExecutingContext context)
     {
         if (context.RouteData.Values[RouteKey] is not string pipelineId ||
-            _catalog.GetAll().Any(pipeline => pipeline.PipelineId == pipelineId))
+            _catalog.TryGet(pipelineId, out _))
         {
             return;
         }

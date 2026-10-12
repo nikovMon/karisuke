@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -78,5 +79,11 @@ public sealed class PipelinesApiTests
         public IReadOnlyList<PipelineDefinition> GetAll() => [Pipeline];
         public IReadOnlyList<PipelineDefinition> GetEnabled() => [Pipeline];
         public PipelineDefinition GetRequired(string pipelineId) => Pipeline;
+
+        public bool TryGet(string pipelineId, [NotNullWhen(true)] out PipelineDefinition? pipeline)
+        {
+            pipeline = pipelineId == Pipeline.PipelineId ? Pipeline : null;
+            return pipeline is not null;
+        }
     }
 }
