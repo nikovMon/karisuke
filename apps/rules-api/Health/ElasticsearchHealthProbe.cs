@@ -37,9 +37,14 @@ public sealed class ElasticsearchHealthProbe : IElasticsearchHealthProbe
 
             if (Interlocked.Exchange(ref _isUnhealthy, 1) == 0)
             {
-                _logger.ElasticsearchHealthInvalidResponse(
-                    response.ApiCall?.HttpStatusCode,
-                    response.OriginalException?.GetType().Name);
+                using (_logger.BeginScope(new KeyValuePair<string, object?>[]
+                       {
+                           new(TelemetryAttributeNames.HttpResponseStatusCode, response.ApiCall?.HttpStatusCode),
+                           new(TelemetryAttributeNames.ElasticsearchFailureType, response.OriginalException?.GetType().Name)
+                       }))
+                {
+                    _logger.ElasticsearchHealthInvalidResponse();
+                }
             }
 
             return false;

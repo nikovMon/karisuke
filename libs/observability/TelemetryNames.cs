@@ -120,6 +120,19 @@ public static class TelemetryAttributeNames
     public const string PipelineId = "pipeline.id";
     public const string PipelineTransport = "pipeline.transport";
 
+    // An HTTP request handled by a service, in ECS names.
+    public const string HttpRequestMethod = "http.request.method";
+    public const string HttpRoute = "http.route";
+    public const string HttpResponseStatusCode = "http.response.status_code";
+
+    // A request body that failed model binding. Field names are capped in logs; the counts are exact.
+    public const string RequestInvalidFieldNames = "unified_gateway.request.invalid_field_names";
+    public const string RequestInvalidFieldCount = "unified_gateway.request.invalid_field_count";
+    public const string RequestErrorCount = "unified_gateway.request.error_count";
+
+    // An Elasticsearch call that failed without an exception, by the client's failure type.
+    public const string ElasticsearchFailureType = "unified_gateway.elasticsearch.failure_type";
+
     // Rule evaluation of one image for one pipeline. Rule IDs are listed for every reason except
     // geometry, which usually covers most rules; counts show when a list was cut short in logs.
     public const string RulesMatchedIds = "unified_gateway.rules.matched.ids";

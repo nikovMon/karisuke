@@ -27,8 +27,8 @@ public sealed class ElasticsearchHealthProbeTests
         Assert.False(isHealthy);
         var entry = Assert.Single(logger.Entries, item => item.Level == LoggingLogLevel.Warning);
         Assert.Equal(LoggingLogLevel.Warning, entry.Level);
-        Assert.Contains("invalid response", entry.Message, StringComparison.Ordinal);
-        Assert.Equal(503, entry.Properties["HttpStatusCode"]);
+        Assert.Equal("Elasticsearch health probe returned an invalid response.", entry.Message);
+        Assert.Equal(503, Assert.Single(logger.Scopes)[TelemetryAttributeNames.HttpResponseStatusCode]);
     }
 
     [Fact]
