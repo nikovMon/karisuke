@@ -137,6 +137,10 @@ public static class TelemetryAttributeNames
     public const string RulesRetainedCount = "findair.rules.retained.count";
     public const string RuleRejectionReason = "findair.rule.rejection.reason";
 
+    // Writing one rule through the Rules API.
+    public const string RuleChangedFields = "findair.rule.changed_fields";
+    public const string RuleValidationErrors = "findair.rule.validation.errors";
+
     // Handling one source message. error.code is a stable validation code, never the exception class.
     public const string ErrorCode = "error.code";
     public const string DispatchUnitCount = "findair.dispatch.units.count";

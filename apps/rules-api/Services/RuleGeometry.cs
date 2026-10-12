@@ -1,4 +1,5 @@
 using System.Text.Json;
+using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
 
 namespace ImagingPipeline.Rules.Api.Services;
@@ -27,9 +28,7 @@ internal static class RuleGeometry
                 return false;
             }
 
-            var json = new GeoJsonWriter().Write(geometry);
-            using var doc = JsonDocument.Parse(json);
-            geoJson = doc.RootElement.Clone();
+            geoJson = ToGeoJson(geometry);
             error = null;
             return true;
         }
@@ -38,5 +37,11 @@ internal static class RuleGeometry
             error = "locationWkt must contain valid WKT.";
             return false;
         }
+    }
+
+    public static JsonElement ToGeoJson(Geometry geometry)
+    {
+        using var document = JsonDocument.Parse(new GeoJsonWriter().Write(geometry));
+        return document.RootElement.Clone();
     }
 }

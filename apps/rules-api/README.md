@@ -179,6 +179,24 @@ Lists the pipeline's v2 rules (`PipelineRuleDocument`) from the index the catalo
 
 Return one v2 rule, or `404 Not Found`.
 
+### POST /pipelines/{pipelineId}/rules
+
+Creates a v2 rule from `ruleName`, `description`, `isActive` (default `true`), `matchAll`, `match` and `runParams`. The server sets the ID, `schemaVersion` and timestamps, and derives `match.location` from `match.locationWkt`. The rule is checked with the same validator the gateway uses when it loads rules: the document rules, then the pipeline contract's run parameters and location requirement. Returns `201 Created`, `400 Bad Request` with the validation errors, or `409 Conflict` when the name is already used in this pipeline.
+
+### PATCH /pipelines/{pipelineId}/rules/{id}
+
+Partial update. Only the fields sent change; a field sent as `null` is cleared. Fields inside `match` are patched one by one, so `{ "match": { "maxPhotoAgeDays": 7 } }` keeps the other conditions, and `{ "match": null }` removes them all. The updated rule must pass the same validation as on create.
+
+### PATCH /pipelines/{pipelineId}/rules/{id}/activity
+
+Body `{ "isActive": true|false }`. Validated like any other update.
+
+### DELETE /pipelines/{pipelineId}/rules/{id}
+
+Deletes the rule permanently. Returns `204 No Content` or `404 Not Found`.
+
+Rule writes log events 5031–5036 with `pipeline.id`, `findair.rule.id` and, where relevant, `findair.rule.changed_fields` or `findair.rule.validation.errors` as fields.
+
 Every `/pipelines/{pipelineId}/...` route answers `404 Not Found` for a pipeline that is not in the catalog, without querying Elasticsearch, and logs event 5030 with `pipeline.id` as a field.
 
 ### GET /health
