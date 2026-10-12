@@ -17,54 +17,54 @@ public sealed class UpdatePipelineRuleRequest
     [JsonIgnore]
     public IReadOnlyCollection<string> ProvidedFields => Match is null
         ? _providedFields
-        : _providedFields.Concat(Match.ProvidedFields.Select(name => $"match.{name}")).ToArray();
+        : _providedFields.Concat(Match.ProvidedFields.Select(name => $"{PipelineRuleFields.Match}.{name}")).ToArray();
 
-    [JsonPropertyName("ruleName")]
+    [JsonPropertyName(PipelineRuleFields.RuleName)]
     public string? RuleName
     {
         get;
         set
         {
             field = value;
-            _providedFields.Add("ruleName");
+            _providedFields.Add(PipelineRuleFields.RuleName);
         }
     }
 
-    [JsonPropertyName("description")]
+    [JsonPropertyName(PipelineRuleFields.Description)]
     public string? Description
     {
         get;
         set
         {
             field = value;
-            _providedFields.Add("description");
+            _providedFields.Add(PipelineRuleFields.Description);
         }
     }
 
-    [JsonPropertyName("isActive")]
+    [JsonPropertyName(PipelineRuleFields.IsActive)]
     public bool? IsActive
     {
         get;
         set
         {
             field = value;
-            _providedFields.Add("isActive");
+            _providedFields.Add(PipelineRuleFields.IsActive);
         }
     }
 
-    [JsonPropertyName("matchAll")]
+    [JsonPropertyName(PipelineRuleFields.MatchAll)]
     public bool? MatchAll
     {
         get;
         set
         {
             field = value;
-            _providedFields.Add("matchAll");
+            _providedFields.Add(PipelineRuleFields.MatchAll);
         }
     }
 
     /// <summary>Sent as null, removes every condition.</summary>
-    [JsonPropertyName("match")]
+    [JsonPropertyName(PipelineRuleFields.Match)]
     public RuleMatchConditionsPatch? Match
     {
         get;
@@ -73,46 +73,46 @@ public sealed class UpdatePipelineRuleRequest
             field = value;
             if (value is null)
             {
-                _providedFields.Add("match");
+                _providedFields.Add(PipelineRuleFields.Match);
             }
         }
     }
 
-    [JsonPropertyName("runParams")]
+    [JsonPropertyName(PipelineRuleFields.RunParams)]
     public List<JsonElement>? RunParams
     {
         get;
         set
         {
             field = value;
-            _providedFields.Add("runParams");
+            _providedFields.Add(PipelineRuleFields.RunParams);
         }
     }
 
     public void ApplyTo(PipelineRuleDocument rule)
     {
         ArgumentNullException.ThrowIfNull(rule);
-        if (_providedFields.Contains("ruleName"))
+        if (_providedFields.Contains(PipelineRuleFields.RuleName))
         {
             rule.RuleName = RuleName ?? string.Empty;
         }
 
-        if (_providedFields.Contains("description"))
+        if (_providedFields.Contains(PipelineRuleFields.Description))
         {
             rule.Description = Description;
         }
 
-        if (_providedFields.Contains("isActive"))
+        if (_providedFields.Contains(PipelineRuleFields.IsActive))
         {
             rule.IsActive = IsActive.GetValueOrDefault();
         }
 
-        if (_providedFields.Contains("matchAll"))
+        if (_providedFields.Contains(PipelineRuleFields.MatchAll))
         {
             rule.MatchAll = MatchAll.GetValueOrDefault();
         }
 
-        if (_providedFields.Contains("match"))
+        if (_providedFields.Contains(PipelineRuleFields.Match))
         {
             rule.Match = null;
         }
@@ -122,7 +122,7 @@ public sealed class UpdatePipelineRuleRequest
             Match.ApplyTo(rule.Match);
         }
 
-        if (_providedFields.Contains("runParams"))
+        if (_providedFields.Contains(PipelineRuleFields.RunParams))
         {
             rule.RunParams = RunParams;
         }
@@ -137,68 +137,68 @@ public sealed class RuleMatchConditionsPatch
     [JsonIgnore]
     public IReadOnlyCollection<string> ProvidedFields => _providedFields;
 
-    [JsonPropertyName("sensors")]
+    [JsonPropertyName(PipelineRuleFields.Sensors)]
     public List<SensorConfig>? Sensors
     {
         get;
         set
         {
             field = value;
-            _providedFields.Add("sensors");
+            _providedFields.Add(PipelineRuleFields.Sensors);
         }
     }
 
-    [JsonPropertyName("resolution")]
+    [JsonPropertyName(PipelineRuleFields.Resolution)]
     public ResolutionRange? Resolution
     {
         get;
         set
         {
             field = value;
-            _providedFields.Add("resolution");
+            _providedFields.Add(PipelineRuleFields.Resolution);
         }
     }
 
-    [JsonPropertyName("locationWkt")]
+    [JsonPropertyName(PipelineRuleFields.LocationWkt)]
     public string? LocationWkt
     {
         get;
         set
         {
             field = value;
-            _providedFields.Add("locationWkt");
+            _providedFields.Add(PipelineRuleFields.LocationWkt);
         }
     }
 
-    [JsonPropertyName("maxPhotoAgeDays")]
+    [JsonPropertyName(PipelineRuleFields.MaxPhotoAgeDays)]
     public int? MaxPhotoAgeDays
     {
         get;
         set
         {
             field = value;
-            _providedFields.Add("maxPhotoAgeDays");
+            _providedFields.Add(PipelineRuleFields.MaxPhotoAgeDays);
         }
     }
 
     internal void ApplyTo(RuleMatchConditions match)
     {
-        if (_providedFields.Contains("sensors"))
+        if (_providedFields.Contains(PipelineRuleFields.Sensors))
         {
             match.Sensors = Sensors;
         }
 
-        if (_providedFields.Contains("resolution"))
+        if (_providedFields.Contains(PipelineRuleFields.Resolution))
         {
             match.Resolution = Resolution;
         }
 
-        if (_providedFields.Contains("locationWkt"))
+        if (_providedFields.Contains(PipelineRuleFields.LocationWkt))
         {
             match.LocationWkt = LocationWkt;
         }
 
-        if (_providedFields.Contains("maxPhotoAgeDays"))
+        if (_providedFields.Contains(PipelineRuleFields.MaxPhotoAgeDays))
         {
             match.MaxPhotoAgeDays = MaxPhotoAgeDays;
         }

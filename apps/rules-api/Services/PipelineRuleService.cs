@@ -135,7 +135,7 @@ public sealed class PipelineRuleService
             return RuleOperationResult<BulkOperationResult>.ValidationFailed(string.Join(" | ", errors));
         }
 
-        if (request.ProvidedFields.Contains("ruleName") && uniqueIds.Length > 1)
+        if (request.ProvidedFields.Contains(PipelineRuleFields.RuleName) && uniqueIds.Length > 1)
         {
             return RuleOperationResult<BulkOperationResult>.Conflict("Cannot set the same ruleName on multiple rules.");
         }
@@ -213,10 +213,10 @@ public sealed class PipelineRuleService
         }
 
         rule.UpdateTime = DateTimeOffset.UtcNow;
-        var nameChanged = !string.Equals(before.GetProperty("ruleName").GetString(), rule.RuleName, StringComparison.Ordinal);
+        var nameChanged = !string.Equals(before.GetProperty(PipelineRuleFields.RuleName).GetString(), rule.RuleName, StringComparison.Ordinal);
 
         // A rule that no longer passes validation, e.g. after a contract change, must still be switchable off.
-        var onlyDeactivates = !rule.IsActive && changedFields.SequenceEqual(["isActive"]);
+        var onlyDeactivates = !rule.IsActive && changedFields.SequenceEqual([PipelineRuleFields.IsActive]);
         if (!onlyDeactivates)
         {
             var failure = await ValidateAsync(pipelineId, rule, nameChanged, cancellationToken);
@@ -261,7 +261,7 @@ public sealed class PipelineRuleService
         return await ForEachRuleAsync(pipelineId, add ? "add_sensors" : "remove_sensors", uniqueIds, id => UpdateRuleAsync(
             pipelineId,
             id,
-            ["match.sensors"],
+            [PipelineRuleFields.MatchSensors],
             rule => add ? AddSensor(rule, request) : RemoveSensor(rule, request),
             inBulk: true,
             cancellationToken));

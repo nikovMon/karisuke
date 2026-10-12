@@ -210,7 +210,7 @@ Adding a sensor to a rule with no sensor condition limits it to that sensor.
 
 Deletes the rule permanently. Returns `204 No Content` or `404 Not Found`.
 
-Rule writes log events 5031–5037 with `pipeline.id`, `findair.rule.id` and, where relevant, `findair.rule.changed_fields` or `findair.rule.validation.errors` as fields. Bulk requests skip per-rule not-found warnings and log one summary (5038) with the operation, requested, succeeded and failed counts, and up to 10 failed IDs.
+Rule writes log events 5031–5037 with `pipeline.id`, `findair.rule.id` and, where relevant, `unified_gateway.rule.changed_fields` or `unified_gateway.rule.validation.errors` as fields. Bulk requests skip per-rule not-found warnings and log one summary (5038) with the operation, requested, succeeded and failed counts, and up to 10 failed IDs.
 
 Every `/pipelines/{pipelineId}/...` route answers `404 Not Found` for a pipeline that is not in the catalog, without querying Elasticsearch, and logs event 5030 with `pipeline.id` as a field.
 
