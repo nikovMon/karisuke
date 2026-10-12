@@ -6,6 +6,9 @@ public sealed class RulesElasticsearchOptions
 
     public string Index { get; set; } = "rules";
 
+    /// <summary>Append-only index of v2 rule changes, shared by all pipelines.</summary>
+    public string AuditIndex { get; set; } = "rules-audit";
+
     public int DefaultSearchSize { get; set; } = 100;
 
     public int MaxSearchSize { get; set; } = 1000;
@@ -23,6 +26,12 @@ public sealed class RulesElasticsearchOptions
         if (string.IsNullOrWhiteSpace(Index))
         {
             error = "Rules Elasticsearch Index must not be empty.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(AuditIndex))
+        {
+            error = "Rules Elasticsearch AuditIndex must not be empty.";
             return false;
         }
 

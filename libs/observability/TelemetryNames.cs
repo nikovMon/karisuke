@@ -140,6 +140,7 @@ public static class TelemetryAttributeNames
     // Writing one rule through the Rules API.
     public const string RuleChangedFields = "unified_gateway.rule.changed_fields";
     public const string RuleValidationErrors = "unified_gateway.rule.validation.errors";
+    public const string RuleChangeType = "unified_gateway.rule.change_type";
 
     // One bulk rule request. Failed IDs are capped in logs; the failed count is exact.
     public const string RulesOperation = "unified_gateway.rules.operation";

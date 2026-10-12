@@ -70,6 +70,7 @@ internal static class EcsLogDocumentSerializer
             [TelemetryAttributeNames.RuleRejectionReason] = TelemetryAttributeNames.RuleRejectionReason,
             [TelemetryAttributeNames.RuleChangedFields] = TelemetryAttributeNames.RuleChangedFields,
             [TelemetryAttributeNames.RuleValidationErrors] = TelemetryAttributeNames.RuleValidationErrors,
+            [TelemetryAttributeNames.RuleChangeType] = TelemetryAttributeNames.RuleChangeType,
             [TelemetryAttributeNames.RulesOperation] = TelemetryAttributeNames.RulesOperation,
             [TelemetryAttributeNames.RulesRequestedCount] = TelemetryAttributeNames.RulesRequestedCount,
             [TelemetryAttributeNames.RulesSucceededCount] = TelemetryAttributeNames.RulesSucceededCount,
