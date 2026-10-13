@@ -13,7 +13,7 @@ public sealed class RegistrationQualityApiContractTests
     [InlineData("99")]
     public async Task SensorEndpointRejectsNonExactAndNumericRegistrationQualities(string jsonValue)
     {
-        using var factory = new RulesApiFactory(new InMemoryRuleRepository());
+        using var factory = new RulesApiFactory(new InMemoryIndexStore());
         using var client = factory.CreateClient();
         using var body = new StringContent(
             $$"""{"sensorName":"camera","values":[{{jsonValue}}]}""",
@@ -21,7 +21,7 @@ public sealed class RegistrationQualityApiContractTests
             "application/json");
 
         var response = await client.PatchAsync(
-            "/rules/sensors/add?ids=missing",
+            "/pipelines/asd/rules/sensors/add?ids=missing",
             body);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);

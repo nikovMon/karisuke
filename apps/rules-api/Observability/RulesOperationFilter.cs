@@ -247,10 +247,9 @@ internal sealed class RulesOperationFilter : IAsyncActionFilter
     private static long GetDocumentCount(IActionResult? result, int statusCode) => result switch
     {
         ObjectResult { Value: BulkOperationResult bulk } => bulk.SuccessIds.Count,
-        ObjectResult { Value: IReadOnlyCollection<RuleDto> rules } => rules.Count,
         ObjectResult { Value: IReadOnlyCollection<string> names } => names.Count,
         ObjectResult { Value: IReadOnlyCollection<PipelineRuleDocument> rules } => rules.Count,
-        ObjectResult { Value: RuleDto or PipelineRuleDocument } => 1,
+        ObjectResult { Value: PipelineRuleDocument } => 1,
         _ when statusCode == StatusCodes.Status204NoContent => 1,
         _ => 0
     };

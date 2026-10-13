@@ -94,7 +94,6 @@ public sealed class Program
             .Bind(builder.Configuration.GetSection(RulesElasticsearchOptions.SectionName))
             .Validate(options => options.IsValid(out _), "Rules Elasticsearch settings are invalid.")
             .ValidateOnStart();
-        builder.Services.AddSingleton<RuleService>();
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddSingleton<RuleAuditWriter>();
         builder.Services.AddSingleton<PipelineRuleService>();
