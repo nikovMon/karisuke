@@ -59,4 +59,18 @@ public sealed class RuleValidationTests
         Assert.Contains("registrationQualities values must be unique.", duplicateErrors);
         Assert.Contains("At least one of registrationQualities or gridTypes must be provided with values.", noValueErrors);
     }
+
+    [Fact]
+    public void ValidateSensorRequestRejectsEmptyListsAndBadGridTypes()
+    {
+        var emptyLists = new RuleSensorUpdateRequest { SensorName = "camera", RegistrationQualities = [], GridTypes = [] };
+        var badGridTypes = new RuleSensorUpdateRequest { SensorName = "camera", GridTypes = ["grid-a", "grid-a", " "] };
+
+        var emptyListErrors = RuleValidation.ValidateSensorRequest(emptyLists);
+        var gridTypeErrors = RuleValidation.ValidateSensorRequest(badGridTypes);
+
+        Assert.Contains("At least one of registrationQualities or gridTypes must be provided with values.", emptyListErrors);
+        Assert.Contains("gridTypes values must be unique.", gridTypeErrors);
+        Assert.Contains("gridTypes values must be non-empty strings.", gridTypeErrors);
+    }
 }

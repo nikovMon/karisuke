@@ -51,7 +51,7 @@ public sealed class Program
                 var totalErrorsCount = context.ModelState.Values
                     .Sum(value => value.Errors.Count);
 
-                var operation = RulesOperationFilter.ResolveRequestOperation(context.HttpContext.Request);
+                var operation = RulesOperationFilter.ResolveActionOperation(context.ActionDescriptor.RouteValues["action"]);
                 RulesTelemetry.RecordValidationFailure(operation);
                 if (Activity.Current?.IsAllDataRequested == true)
                 {
