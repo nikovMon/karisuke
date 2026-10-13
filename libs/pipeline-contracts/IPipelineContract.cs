@@ -24,6 +24,10 @@ public interface IPipelineContract
     /// <summary>Validates only the event fields used by this contract.</summary>
     IReadOnlyList<ContractValidationError> ValidateContext(PipelineDispatchContext context) => [];
 
+    /// <summary>Validates event fields used by the selected run, including conditional payload fields.</summary>
+    IReadOnlyList<ContractValidationError> ValidateContext(PipelineDispatchContext context, JsonElement runParams) =>
+        ValidateContext(context);
+
     /// <summary>
     /// Builds the downstream payload from event data, selected rule parameters and per-pipeline
     /// settings. Each contract defines how ExtraData contributes to its payload.
@@ -55,6 +59,9 @@ public sealed record PipelineDispatchContext(
     string GridType,
     string GridUri)
 {
+    /// <summary>Projection errors for pipeline-specific fields, checked only by contracts that use them.</summary>
+    public IReadOnlyList<ContractValidationError> InputFieldErrors { get; init; } = [];
+
     public string? LegId { get; init; }
     public string? PrevOverlayId { get; init; }
     public string? NextOverlayId { get; init; }

@@ -165,6 +165,24 @@ public sealed class RabbitMqDestinationPublisherTests
     }
 
     [Fact]
+    public async Task VirtualHostOverridesUseSeparateConnectionsWithTheSameConnectionName()
+    {
+        var connections = new FakeConnections();
+        await using var publisher = CreatePublisher(connections);
+        var overridden = AsdBroker with { VirtualHost = "/pipeline" };
+
+        await publisher.PublishAsync(Queue("output"), Message("dispatch-1"));
+        await publisher.PublishAsync(Queue("output") with { Connection = overridden }, Message("dispatch-2"));
+        await publisher.PublishAsync(Queue("output"), Message("dispatch-3"));
+
+        Assert.Equal(2, connections.Count);
+        Assert.Equal(AsdBroker, connections[0].Connection);
+        Assert.Equal(overridden, connections[1].Connection);
+        Assert.Equal(2, connections[0].Channel.Invocations.Count(call => call.Method.Name == nameof(IChannel.BasicPublishAsync)));
+        Assert.Single(connections[1].Channel.Invocations, call => call.Method.Name == nameof(IChannel.BasicPublishAsync));
+    }
+
+    [Fact]
     public async Task DisposeAsyncDisposesCreatedConnectionManagersAndRejectsLaterPublishes()
     {
         var connections = new FakeConnections();

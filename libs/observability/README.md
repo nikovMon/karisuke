@@ -101,6 +101,13 @@ A complete configuration has the following shape:
 }
 ```
 
+`Observability:Logs:PreserveStructuredConsoleValues` defaults to `false`, preserving
+the existing JSON console format for other services. The unified gateway enables
+it so rule ID lists and AMQP UTF-8 header values remain typed JSON arrays and strings
+instead of CLR type names such as `System.String[]`. Its console records retain
+the usual `Message`, `State`, and `Scopes` fields. Logstash ECS logging already
+preserves these values and is unaffected by this option.
+
 Environment variables use the normal .NET double-underscore mapping. Examples:
 
 ```text

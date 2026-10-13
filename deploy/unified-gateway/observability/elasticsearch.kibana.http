@@ -1,0 +1,48 @@
+# Run selected requests in Kibana Dev Tools against your logging cluster.
+# These examples follow the repository's Elasticsearch 8.15 FindAir setup.
+# They have not been executed. Existing components are reused, not modified.
+# Run all four GET requests first. If a component is missing, adapt the
+# template to your installed FindAir setup before running the PUT requests.
+
+GET _component_template/logs@mappings
+
+GET _component_template/logs@settings
+
+GET _component_template/ecs@mappings
+
+GET _component_template/findair_logs_lifecycle
+
+# New template. New streams inherit the retention settings currently defined
+# by the shared findair_logs_lifecycle component.
+PUT _index_template/unified_gateway_logs
+{
+  "index_patterns": ["logs-unified_gateway-*"],
+  "data_stream": {},
+  "priority": 250,
+  "composed_of": [
+    "logs@mappings",
+    "logs@settings",
+    "ecs@mappings",
+    "findair_logs_lifecycle"
+  ],
+  "_meta": {
+    "description": "Unified gateway logs using existing FindAir ECS and lifecycle components"
+  }
+}
+
+# Inspect the resolved mappings and lifecycle before creating the streams.
+POST _index_template/_simulate_index/logs-unified_gateway-development
+
+POST _index_template/_simulate_index/logs-unified_gateway-integration
+
+POST _index_template/_simulate_index/logs-unified_gateway-production
+
+PUT _data_stream/logs-unified_gateway-development
+
+PUT _data_stream/logs-unified_gateway-integration
+
+PUT _data_stream/logs-unified_gateway-production
+
+GET _data_stream/logs-unified_gateway-*
+
+GET _data_stream/logs-unified_gateway-*/_lifecycle

@@ -2,6 +2,12 @@
 
 Pure validation and payload construction for the gateway and future service consumers. This library performs no rule matching, spatial indexing, geometry intersections, network calls, or message delivery.
 
+The unified gateway uses **FindAir** (`FindAirPipelineContract`) and **DeepWisdom** (`DeepWisdomPipelineContract`). Both accept arbitrary ExtraData objects and preserve every key and JSON value under `extraData` in the outgoing body. DeepWisdom's named settings are optional; supplied values also populate the corresponding existing top-level fields. There is no required ExtraData field schema for these contracts. Empty/omitted objects add no extra property.
+
+`AsdPipelineContract`/`asd` and `AlgoPipelineContract`/`algo` remain compatibility registrations for existing hosts. In particular, `algo` retains its strict settings validation and legacy wire format described below. Existing service configurations need not change.
+
+Projection records type errors for pipeline-specific metadata in `PipelineDispatchContext.InputFieldErrors`. `ValidateContext(context, runParams)` checks only fields consumed by that run: FindAir checks its image metadata, while DeepWisdom checks relationship fields when `run_every_other_image` is true. The gateway's separate common input parser protects rule matching without modifying the legacy shared gateway DTO.
+
 `PipelineContractRegistry` resolves explicitly registered contract IDs using ordinal comparison. Unknown IDs fail resolution. The gateway registers `AsdPipelineContract` as `asd` and `AlgoPipelineContract` as `algo`. Pipeline contracts use unversioned IDs.
 
 One ASD run-parameter object describes one tenant dispatch:

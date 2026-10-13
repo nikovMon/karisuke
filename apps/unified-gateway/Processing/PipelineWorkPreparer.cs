@@ -46,7 +46,7 @@ public sealed class PipelineWorkPreparer(
             var contract = contracts.GetRequired(pipeline.ContractId);
             var errors = contract.ValidateRunParams(runParams)
                 .Concat(contract.ValidateExtraData(pipeline.ExtraData.Value))
-                .Concat(contract.ValidateContext(context)).ToArray();
+                .Concat(contract.ValidateContext(context, runParams)).ToArray();
             if (errors.Length > 0)
             {
                 outcome = "invalid";

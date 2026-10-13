@@ -41,6 +41,49 @@ public sealed class HttpDispatchTransportTests
         Assert.Equal([unit.DispatchId], request.Headers["Idempotency-Key"]);
     }
 
+    [Fact]
+    public async Task ContentHeadersAreSentOnTheRequestBodyAndContractAttributesTakePrecedence()
+    {
+        var pipeline = HttpPipeline("algo", new HttpTransportOptions
+        {
+            Endpoint = "https://algo.invalid/work",
+            Headers = new()
+            {
+                ["Content-Language"] = "he-IL",
+                ["Content-MD5"] = "CY9rzUYh03PK3k6DJie09g==",
+                ["X-Configured"] = "configured"
+            }
+        });
+        var handler = new StubHandler(HttpStatusCode.OK);
+        var unit = Unit(pipeline, payload: Payload(new Dictionary<string, string> { ["content-language"] = "en-US" }));
+
+        var outcome = await CreateTransport(handler, pipeline).SendAsync(unit, CancellationToken.None);
+
+        Assert.Equal(DispatchStatus.Delivered, outcome.Status);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(["en-US"], request.ContentHeaders["Content-Language"]);
+        Assert.Equal(["CY9rzUYh03PK3k6DJie09g=="], request.ContentHeaders["Content-MD5"]);
+        Assert.Equal(["configured"], request.Headers["X-Configured"]);
+        Assert.False(request.Headers.ContainsKey("Content-Language"));
+        Assert.Equal("application/json", request.ContentType);
+    }
+
+    [Fact]
+    public async Task UnusableContractHeaderRejectsTheDispatchInsteadOfSilentlyDroppingTheHeader()
+    {
+        var pipeline = HttpPipeline("algo");
+        var handler = new StubHandler(HttpStatusCode.OK);
+        var unit = Unit(pipeline, payload: Payload(new Dictionary<string, string> { ["invalid name"] = "private-value" }));
+
+        var outcome = await CreateTransport(handler, pipeline).SendAsync(unit, CancellationToken.None);
+
+        Assert.Equal(DispatchStatus.Rejected, outcome.Status);
+        Assert.Equal(TelemetryErrorCategory.Validation, outcome.Error);
+        Assert.NotNull(outcome.Exception);
+        Assert.DoesNotContain("private-value", outcome.Exception.Message, StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.OK, DispatchStatus.Delivered, TelemetryErrorCategory.None)]
     [InlineData(HttpStatusCode.Created, DispatchStatus.Delivered, TelemetryErrorCategory.None)]
@@ -137,7 +180,8 @@ public sealed class HttpDispatchTransportTests
         string Uri,
         string Body,
         string? ContentType,
-        Dictionary<string, string[]> Headers);
+        Dictionary<string, string[]> Headers,
+        Dictionary<string, string[]> ContentHeaders);
 
     private sealed class StubHandler(HttpStatusCode statusCode) : HttpMessageHandler
     {
@@ -164,7 +208,8 @@ public sealed class HttpDispatchTransportTests
                 request.RequestUri!.ToString(),
                 await request.Content!.ReadAsStringAsync(cancellationToken),
                 request.Content.Headers.ContentType?.MediaType,
-                request.Headers.ToDictionary(header => header.Key, header => header.Value.ToArray(), StringComparer.OrdinalIgnoreCase)));
+                request.Headers.ToDictionary(header => header.Key, header => header.Value.ToArray(), StringComparer.OrdinalIgnoreCase),
+                request.Content.Headers.ToDictionary(header => header.Key, header => header.Value.ToArray(), StringComparer.OrdinalIgnoreCase)));
             return new HttpResponseMessage(statusCode);
         }
     }

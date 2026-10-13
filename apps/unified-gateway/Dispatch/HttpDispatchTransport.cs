@@ -58,6 +58,10 @@ public sealed class HttpDispatchTransport : IDispatchTransport
         {
             return DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Connection, ex);
         }
+        catch (InvalidDispatchHeaderException ex)
+        {
+            return DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Validation, exception: ex);
+        }
     }
 
     internal static HttpRequestMessage CreateRequest(DispatchUnit unit, HttpTransportOptions endpoint)
@@ -67,21 +71,36 @@ public sealed class HttpDispatchTransport : IDispatchTransport
         content.Headers.ContentType = MediaTypeHeaderValue.Parse(payload.ContentType);
         var request = new HttpRequestMessage(new HttpMethod(endpoint.Method), endpoint.Endpoint) { Content = content };
 
-        // Configured headers first; the contract's attributes and the idempotency key win on a name clash.
-        foreach (var header in endpoint.Headers)
-        {
-            request.Headers.TryAddWithoutValidation(header.Key, header.Value);
-        }
-
+        // Resolve precedence before choosing the correct request or content header collection.
+        var headers = new Dictionary<string, string>(endpoint.Headers, StringComparer.OrdinalIgnoreCase);
         foreach (var attribute in payload.Attributes)
         {
-            request.Headers.Remove(attribute.Key);
-            request.Headers.TryAddWithoutValidation(attribute.Key, attribute.Value);
+            headers[attribute.Key] = attribute.Value;
         }
+        headers[IdempotencyKeyHeader] = unit.DispatchId;
 
-        request.Headers.Remove(IdempotencyKeyHeader);
-        request.Headers.TryAddWithoutValidation(IdempotencyKeyHeader, unit.DispatchId);
-        return request;
+        try
+        {
+            foreach (var header in headers)
+            {
+                if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value) &&
+                    !content.Headers.TryAddWithoutValidation(header.Key, header.Value))
+                {
+                    throw new InvalidDispatchHeaderException();
+                }
+            }
+            return request;
+        }
+        catch
+        {
+            request.Dispose();
+            throw;
+        }
+    }
+
+    private sealed class InvalidDispatchHeaderException()
+        : Exception("An HTTP dispatch header could not be added to the request or its content.")
+    {
     }
 
     internal static DispatchOutcome Classify(DispatchUnit unit, HttpStatusCode statusCode)

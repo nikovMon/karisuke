@@ -143,6 +143,50 @@ public sealed class EcsHttpLoggingTests
     }
 
     [Fact]
+    public async Task Serializer_PreservesUnicodeHeaderArraysAndNumericGatewayFields()
+    {
+        var options = CreateOptions();
+        var buffer = new EcsLogBuffer(options);
+        using var provider = new EcsHttpLoggerProvider(buffer, options);
+        provider.SetScopeProvider(new LoggerExternalScopeProvider());
+        var logger = provider.CreateLogger("ImagingPipeline.UnifiedGateway.Source");
+        const string imageId = "תמונה-🌍";
+        const string sensorName = "מצלמה-צפון";
+        using var activity = new Activity("process").Start();
+        using var imageScope = logger.BeginTelemetryScope(new TelemetryLogContext(
+            MessageId: "source-1", ImageId: imageId, SensorName: sensorName));
+        using var scope = logger.BeginScope(new Dictionary<string, object?>
+        {
+            [TelemetryAttributeNames.PipelineId] = "DeepWisdom",
+            [TelemetryAttributeNames.RulesMatchedIds] = new[] { "כלל-א", "rule-b" },
+            [TelemetryAttributeNames.DispatchUnitCount] = 2,
+            [TelemetryAttributeNames.DispatchFailedCount] = 0,
+            [TelemetryAttributeNames.FilterReason] = "duplicate_run",
+            ["UpdatedFields"] = new object[] { Encoding.UTF8.GetBytes("gridType"), Encoding.UTF8.GetBytes("שם") }
+        });
+        logger.LogDebug("Source message filtered.");
+
+        var logEvent = await buffer.ReadAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
+        Assert.NotNull(logEvent);
+        using var json = JsonDocument.Parse(EcsLogDocumentSerializer.SerializeBatch(
+            [logEvent], CreateResource(), new EcsLogDataStreamOptions("unified_gateway", "integration")));
+        var document = json.RootElement[0];
+        Assert.Equal(imageId, document.GetProperty("findair").GetProperty("image").GetProperty("id").GetString());
+        Assert.Equal(sensorName, document.GetProperty("findair").GetProperty("sensor").GetProperty("name").GetString());
+        Assert.Equal(activity.TraceId.ToHexString(), document.GetProperty("trace").GetProperty("id").GetString());
+        Assert.Equal(activity.SpanId.ToHexString(), document.GetProperty("span").GetProperty("id").GetString());
+        var gateway = document.GetProperty("unified_gateway");
+        Assert.Equal("כלל-א", gateway.GetProperty("rules").GetProperty("matched").GetProperty("ids")[0].GetString());
+        Assert.Equal(2, gateway.GetProperty("dispatch").GetProperty("units").GetProperty("count").GetInt32());
+        Assert.Equal(0, gateway.GetProperty("dispatch").GetProperty("failed").GetProperty("count").GetInt32());
+        Assert.Equal("duplicate_run", gateway.GetProperty("filter").GetProperty("reason").GetString());
+        var updatedFields = document.GetProperty("labels").GetProperty("updated_fields");
+        Assert.Equal(JsonValueKind.Array, updatedFields.ValueKind);
+        Assert.Equal("gridType", updatedFields[0].GetString());
+        Assert.Equal("שם", updatedFields[1].GetString());
+    }
+
+    [Fact]
     public async Task Serializer_MapsRuleEvaluationFieldsOutsideLabels()
     {
         var options = CreateOptions();

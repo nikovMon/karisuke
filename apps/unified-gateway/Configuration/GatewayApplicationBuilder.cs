@@ -4,6 +4,8 @@ namespace ImagingPipeline.UnifiedGateway.Configuration;
 
 public static class GatewayApplicationBuilder
 {
+    public const string DefaultCatalogFileName = "unified-gateway.pipelinecatalog.json";
+
     public static WebApplicationBuilder Create(string[] args, WebApplicationOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(args);
@@ -16,7 +18,7 @@ public static class GatewayApplicationBuilder
             WebRootPath = options?.WebRootPath
         });
 
-        builder.Configuration.AddPipelineCatalogFileAsBase(builder.Environment.ContentRootPath);
+        builder.Configuration.AddPipelineCatalogFileAsBase(builder.Environment.ContentRootPath, DefaultCatalogFileName);
         return builder;
     }
 }

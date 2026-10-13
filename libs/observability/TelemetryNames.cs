@@ -153,4 +153,5 @@ public static class TelemetryAttributeNames
     public const string ErrorCode = "error.code";
     public const string DispatchUnitCount = "unified_gateway.dispatch.units.count";
     public const string DispatchFailedCount = "unified_gateway.dispatch.failed.count";
+    public const string FilterReason = "unified_gateway.filter.reason";
 }

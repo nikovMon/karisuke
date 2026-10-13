@@ -1,0 +1,25 @@
+# Logstash 8.5.3. Merge these entries into /usr/share/logstash/config/pipelines.yml.
+# Retain existing pipelines. Start normally: -f/-e cause pipelines.yml to be ignored.
+# Mount pipeline files at the paths below and persist /usr/share/logstash/data.
+
+- pipeline.id: unified-gateway-integration
+  path.config: /usr/share/logstash/pipeline/unified-gateway-integration.conf
+  pipeline.ecs_compatibility: v8
+  pipeline.workers: 2
+  pipeline.batch.size: 125
+  pipeline.batch.delay: 50
+  queue.type: persisted
+  queue.max_bytes: 1gb
+  queue.checkpoint.writes: 1024
+  dead_letter_queue.enable: true
+
+- pipeline.id: unified-gateway-development
+  path.config: /usr/share/logstash/pipeline/unified-gateway-development.conf
+  pipeline.ecs_compatibility: v8
+  pipeline.workers: 2
+  pipeline.batch.size: 125
+  pipeline.batch.delay: 50
+  queue.type: persisted
+  queue.max_bytes: 1gb
+  queue.checkpoint.writes: 1024
+  dead_letter_queue.enable: true

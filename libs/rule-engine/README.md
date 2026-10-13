@@ -2,7 +2,7 @@
 
 Matches incoming image updates against rules. Shared by the unified gateway and, later, the Rules API.
 
-- `Input/` parses and validates an incoming update (`GatewayInputMessageParser`). An invalid message throws `InvalidInputMessageException` with a stable error code; it should be dead-lettered.
+- `Input/` validates common image identity and matching fields (`GatewayInputMessageParser`). Pipeline-specific metadata is optional here and its original values are validated during contract preparation. The parser uses its own DTO so the legacy gateway's input contract is unchanged. An invalid common field throws `InvalidInputMessageException` with a stable error code; it should be dead-lettered.
 - `Loading/` reads every active rule from one Elasticsearch index (`ElasticsearchRuleRepository`). The index is a parameter, so one repository serves every pipeline. Unreadable documents are reported in the result; a failed read throws `RuleLoadException`, which is retryable.
 - `Rules/` prepares one pipeline's loaded rules for matching (`RuleSnapshotBuilder`) and matches an image against them (`RuleMatcher`). Each rule is checked against the document rules and its run parameters against the pipeline's contract, the same checks the Rules API runs on write. Invalid rules are rejected one by one with a reason. `RuleSnapshot.AllRulesRejected` flags a load that returned rules but none usable, so callers can keep their previous snapshot instead of routing nothing.
 

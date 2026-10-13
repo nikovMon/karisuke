@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 2,
+  "ruleName": "Example DeepWisdom rule",
+  "description": "Illustrative location and algorithm; replace with your real values.",
+  "isActive": true,
+  "matchAll": false,
+  "match": {
+    "maxPhotoAgeDays": 2,
+    "locationWkt": "POLYGON ((0 0, 2 0, 2 2, 0 2, 0 0))"
+  },
+  "runParams": [
+    {
+      "customer": "customer-example",
+      "profile_name": null,
+      "hebrew_rule_name": "Example mission",
+      "algorithm_name": "example-algorithm",
+      "priority": 1,
+      "username": null,
+      "run_every_other_image": false,
+      "should_check_in_vip": false
+    }
+  ],
+  "createdBy": "deployment-example",
+  "updatedBy": "deployment-example",
+  "creationTime": "2026-10-12T00:00:00Z",
+  "updateTime": "2026-10-12T00:00:00Z"
+}

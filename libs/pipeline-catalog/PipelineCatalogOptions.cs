@@ -51,6 +51,8 @@ public sealed record PipelineTransportOptions
 public sealed record RabbitMqTransportOptions
 {
     public string ConnectionRef { get; init; } = string.Empty;
+    /// <summary>Overrides the named connection's virtual host for this pipeline; null inherits it.</summary>
+    public string? VirtualHost { get; init; }
     public RabbitMqQueueOptions Output { get; init; } = new();
 }
 

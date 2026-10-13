@@ -52,6 +52,38 @@ public sealed class GatewayInputMessageParserTests
         Assert.Equal("gateway.invalid_geometry", exception.ErrorCode);
     }
 
+    [Theory]
+    [InlineData("imageUrl")]
+    [InlineData("width")]
+    [InlineData("height")]
+    [InlineData("sensorType")]
+    [InlineData("gridURI")]
+    [InlineData("areaOfInterest")]
+    [InlineData("legId")]
+    public void PipelineSpecificFieldsDoNotPreventSharedMatching(string field)
+    {
+        var missing = GatewayInputMessageParser.Parse(Body(json => json.Remove(field)));
+        var malformed = GatewayInputMessageParser.Parse(Body(json => json[field] = new JsonObject { ["unexpected"] = true }));
+
+        Assert.Equal("image-1", missing.ImageId);
+        Assert.Equal("image-1", malformed.ImageId);
+        Assert.Equal("grid-a", malformed.GridType);
+    }
+
+    [Theory]
+    [InlineData("id")]
+    [InlineData("sensorName")]
+    [InlineData("registrationQuality")]
+    [InlineData("bestResolution")]
+    [InlineData("photoTime")]
+    [InlineData("gridType")]
+    [InlineData("roiFootprint")]
+    public void SharedMatchingFieldsRemainRequired(string field)
+    {
+        Assert.Throws<InvalidInputMessageException>(() =>
+            GatewayInputMessageParser.Parse(Body(json => json.Remove(field))));
+    }
+
     private static byte[] Body(Action<JsonObject>? change = null)
     {
         var json = JsonNode.Parse("""

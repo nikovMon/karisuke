@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 2,
+  "ruleName": "Example FindAir rule",
+  "description": "Illustrative sensor, grid and coordinates; replace with your real values.",
+  "isActive": true,
+  "matchAll": false,
+  "match": {
+    "sensors": [
+      {
+        "name": "sensor-example",
+        "registrationQualities": ["Accurate", "Sensor"],
+        "gridTypes": ["grid-example"]
+      }
+    ],
+    "resolution": { "min": 0.5, "max": 1.2 },
+    "maxPhotoAgeDays": 2,
+    "locationWkt": "POLYGON ((0 0, 2 0, 2 2, 0 2, 0 0))"
+  },
+  "runParams": [
+    {
+      "tenantId": "tenant-example",
+      "algorithmNames": ["FindAir"],
+      "tilingConfigs": [
+        {
+          "tileSizeWidth": 512,
+          "tileSizeHeight": 512,
+          "tileOverlapWidth": 16,
+          "tileOverlapHeight": 16
+        }
+      ]
+    }
+  ],
+  "createdBy": "deployment-example",
+  "updatedBy": "deployment-example",
+  "creationTime": "2026-10-12T00:00:00Z",
+  "updateTime": "2026-10-12T00:00:00Z"
+}

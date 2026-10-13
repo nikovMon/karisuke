@@ -75,11 +75,29 @@ public sealed class OverlayDispatchContextFactoryTests
     [InlineData("{}")]
     [InlineData("{\"id\":\"x\",\"photoTime\":\"bad-date\"}")]
     [InlineData("{\"id\":\"x\",\"id\":\"y\",\"photoTime\":\"2026-09-23\"}")]
-    [InlineData("{\"id\":\"x\",\"photoTime\":\"2026-09-23\",\"legId\":42}")]
-    [InlineData("{\"id\":\"x\",\"photoTime\":\"2026-09-23\",\"width\":\"10\"}")]
     [InlineData("{\"id\":\"x\",\"photoTime\":\"2026-09-23\",\"bestResolution\":1e400}")]
     public void InvalidInputFailsBeforePayloadConstruction(string json) =>
         Assert.Throws<ArgumentException>(() => Context(json));
+
+    [Theory]
+    [InlineData("legId", "42")]
+    [InlineData("prevOverlayId", "[]")]
+    [InlineData("nextOverlayId", "true")]
+    [InlineData("width", "\"10\"")]
+    [InlineData("height", "10.5")]
+    [InlineData("imageUrl", "42")]
+    [InlineData("sensorType", "{}")]
+    [InlineData("gridURI", "[]")]
+    [InlineData("areaOfInterest", "false")]
+    public void PipelineSpecificTypeErrorsArePreservedForTheConsumingContract(string field, string value)
+    {
+        var context = Context($$"""{"id":"image-a","photoTime":"2026-09-23T10:00:00Z","{{field}}":{{value}}}""");
+
+        var error = Assert.Single(context.InputFieldErrors);
+        Assert.Equal($"input.{field}", error.Field);
+        Assert.NotEmpty(error.Message);
+        Assert.Equal("image-a", context.ImageId);
+    }
 
     private static PipelineDispatchContext Context(string json)
     {

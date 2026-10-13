@@ -1,0 +1,63 @@
+{
+  "PipelineCatalog": {
+    "RabbitMqConnections": {
+      "findair-output": {
+        "Hostname": "localhost",
+        "Port": 5673,
+        "Username": "guest",
+        "Password": "guest",
+        "VirtualHost": "/"
+      }
+    },
+    "Pipelines": {
+      "FindAir": {
+        "Enabled": true,
+        "ContractId": "FindAir",
+        "RulesIndex": "asd-integ-pipeline-index",
+        "ExtraData": {},
+        "Transport": {
+          "Kind": "rabbitmq",
+          "RabbitMq": {
+            "ConnectionRef": "findair-output",
+            "VirtualHost": null,
+            "Output": {
+              "QueueName": "int.algo.tb_publisher",
+              "Arguments": {
+                "x-dead-letter-exchange": "",
+                "x-dead-letter-routing-key": "int.algo.tb_publisher.dlq"
+              },
+              "ExchangeSettings": {
+                "ShouldBindToExchange": false,
+                "ExchangeName": "",
+                "ExchangeType": "direct",
+                "RoutingKey": "",
+                "Arguments": {},
+                "BindingArguments": {}
+              }
+            }
+          }
+        }
+      },
+      "DeepWisdom": {
+        "Enabled": true,
+        "ContractId": "DeepWisdom",
+        "RulesIndex": "algo-integ-pipeline-index",
+        "ExtraData": {
+          "XUserName": "replace-me-user",
+          "Origin": "replace-me-origin",
+          "QueueType": "replace-me-queue-type",
+          "SaveDetections": true
+        },
+        "Transport": {
+          "Kind": "http",
+          "Http": {
+            "Endpoint": "https://example.invalid/mission/upsert/",
+            "Method": "PUT",
+            "TimeoutSeconds": 20,
+            "Headers": {}
+          }
+        }
+      }
+    }
+  }
+}

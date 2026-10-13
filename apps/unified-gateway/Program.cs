@@ -45,7 +45,7 @@ public sealed partial class Program
         builder.Services.AddHostedService(provider => provider.GetRequiredService<GatewayRuleCache>());
 
         // Hosted services start in registration order, so rules are loaded before consuming starts.
-        builder.Services.AddRabbitMqConsumer(builder.Configuration);
+        builder.Services.AddRabbitMqConsumer(builder.Configuration, allowNoOutput: true);
         builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<RuleMatcher>();
         builder.Services.AddSingleton<IRabbitMqMessageHandler, SourceMessageHandler>();

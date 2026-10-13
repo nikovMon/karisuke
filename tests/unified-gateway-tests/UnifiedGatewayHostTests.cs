@@ -31,9 +31,9 @@ public sealed class UnifiedGatewayHostTests
         Assert.Equal(new[] { "catalog", "contracts", "rules", "dispatch" }, body.RootElement.GetProperty("capabilities")
             .EnumerateArray().Select(capability => capability.GetString()));
         Assert.False(body.RootElement.TryGetProperty("retryWorkerEnabled", out _));
-        var source = factory.Services.GetRequiredService<IRuleSourceResolver>().Resolve("asd");
+        var source = factory.Services.GetRequiredService<IRuleSourceResolver>().Resolve("FindAir");
         Assert.Equal("asd-integ-pipeline-index", source.IndexName);
-        Assert.Equal("asd", source.PipelineId);
+        Assert.Equal("FindAir", source.PipelineId);
     }
 
     [Fact]
@@ -41,15 +41,15 @@ public sealed class UnifiedGatewayHostTests
     {
         using var factory = CreateFactory(new Dictionary<string, string?>
         {
-            ["PipelineCatalog:Pipelines:asd:ExtraData"] = "{\"internalValue\":\"private\"}"
+            ["PipelineCatalog:Pipelines:FindAir:ExtraData"] = "{\"internalValue\":\"private\"}"
         });
         using var client = factory.CreateClient();
 
         var catalog = factory.Services.GetRequiredService<IPipelineCatalog>();
         Assert.Equal(2, catalog.GetAll().Count);
-        var pipeline = catalog.GetRequired("asd");
-        Assert.Equal("asd", pipeline.PipelineId);
-        Assert.Equal("asd", pipeline.ContractId);
+        var pipeline = catalog.GetRequired("FindAir");
+        Assert.Equal("FindAir", pipeline.PipelineId);
+        Assert.Equal("FindAir", pipeline.ContractId);
         Assert.Equal("private", pipeline.ExtraData.Value.GetProperty("internalValue").GetString());
     }
 
@@ -58,7 +58,7 @@ public sealed class UnifiedGatewayHostTests
     {
         using var factory = CreateFactory(new Dictionary<string, string?>
         {
-            ["PipelineCatalog:Pipelines:asd:ContractId"] = "missing"
+            ["PipelineCatalog:Pipelines:FindAir:ContractId"] = "missing"
         });
 
         Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
@@ -69,12 +69,12 @@ public sealed class UnifiedGatewayHostTests
     {
         using var factory = CreateFactory(new Dictionary<string, string?>
         {
-            ["PipelineCatalog:Pipelines:asd:Enabled"] = "false"
+            ["PipelineCatalog:Pipelines:FindAir:Enabled"] = "false"
         });
         using var client = factory.CreateClient();
 
-        Assert.False(factory.Services.GetRequiredService<IPipelineCatalog>().GetRequired("asd").Enabled);
-        Assert.DoesNotContain(factory.Services.GetRequiredService<IPipelineCatalog>().GetEnabled(), pipeline => pipeline.PipelineId == "asd");
+        Assert.False(factory.Services.GetRequiredService<IPipelineCatalog>().GetRequired("FindAir").Enabled);
+        Assert.DoesNotContain(factory.Services.GetRequiredService<IPipelineCatalog>().GetEnabled(), pipeline => pipeline.PipelineId == "FindAir");
     }
 
     [Theory]
@@ -84,11 +84,11 @@ public sealed class UnifiedGatewayHostTests
     {
         using var factory = CreateFactory(new Dictionary<string, string?>
         {
-            ["PipelineCatalog:Pipelines:asd:Enabled"] = enabled.ToString()
+            ["PipelineCatalog:Pipelines:FindAir:Enabled"] = enabled.ToString()
         });
         using var client = factory.CreateClient();
 
-        foreach (var path in new[] { "/pipelines", "/pipelines/asd", "/pipelines/algo", "/pipelines/missing" })
+        foreach (var path in new[] { "/pipelines", "/pipelines/FindAir", "/pipelines/DeepWisdom", "/pipelines/missing" })
         {
             using var response = await client.GetAsync(path);
             Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
@@ -96,25 +96,27 @@ public sealed class UnifiedGatewayHostTests
     }
 
     [Fact]
-    public void SharedCatalogIncludesAlgoWithPrivateSettingsAndPassiveHttpDescriptor()
+    public void GatewayCatalogIncludesDeepWisdomWithHttpDescriptor()
     {
         using var factory = CreateFactory();
         using var client = factory.CreateClient();
-        var pipeline = factory.Services.GetRequiredService<IPipelineCatalog>().GetRequired("algo");
-        Assert.Equal("algo", pipeline.ContractId);
+        var pipeline = factory.Services.GetRequiredService<IPipelineCatalog>().GetRequired("DeepWisdom");
+        Assert.Equal("DeepWisdom", pipeline.ContractId);
         Assert.Equal("algo-integ-pipeline-index", pipeline.RulesIndex);
         Assert.Equal("PUT", pipeline.Transport.Http!.Method);
         Assert.True(pipeline.ExtraData.Value.GetProperty("SaveDetections").GetBoolean());
     }
 
     [Fact]
-    public void AlgoSettingsMustPassContractValidationBeforeHostServesTraffic()
+    public void DeepWisdomExtraDataDoesNotRequireNamedSettings()
     {
         using var factory = CreateFactory(new Dictionary<string, string?>
         {
-            ["PipelineCatalog:Pipelines:algo:ExtraData"] = "{}"
+            ["PipelineCatalog:Pipelines:DeepWisdom:ExtraData"] = "{}"
         });
-        Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
+        using var client = factory.CreateClient();
+        Assert.Empty(factory.Services.GetRequiredService<IPipelineCatalog>()
+            .GetRequired("DeepWisdom").ExtraData.Value.EnumerateObject());
     }
 
     [Fact]

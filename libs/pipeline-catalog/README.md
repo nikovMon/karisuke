@@ -2,6 +2,12 @@
 
 Shared configuration, contract registration validation, and rule-source resolution for the gateway and Rules API. This library performs no Elasticsearch, HTTP, or RabbitMQ I/O.
 
+The unified gateway ships a separate [`unified-gateway.pipelinecatalog.json`](configuration/unified-gateway.pipelinecatalog.json) with pipeline/contract IDs `FindAir` and `DeepWisdom`. The original `pipelinecatalog.json` remains the default for existing Rules API hosts; both catalogs are copied into output. `AddPipelineCatalogFileAsBase` accepts an optional host-specific default filename while preserving explicit `PipelineCatalogFile` selection. Existing indexes and queue names are not renamed.
+
+For the new contract IDs, `ExtraData` has no field schema: every key/value is preserved under `extraData` in the outgoing JSON body for either transport. DeepWisdom's familiar settings can also populate existing top-level fields, but are optional. Legacy `algo` configurations keep their existing settings validation and wire format. The legacy examples below remain supported.
+
+`Transport.RabbitMq.VirtualHost` optionally overrides the named connection's `VirtualHost` for one pipeline. Null/omitted inherits; explicit empty/whitespace values fail validation. Overrides are copied into the destination without mutating a shared connection or sibling pipeline.
+
 Register `IPipelineContractRegistry`, then call `services.AddPipelineCatalog(configuration)` in each host. `ValidateOnStart` checks the configuration even when no caller has resolved `IPipelineCatalog`. A missing catalog, empty pipeline object, unknown contract, or invalid entry fails startup with `OptionsValidationException`. Disabled entries undergo the same validation; registered contracts that are not configured are allowed.
 
 ## Shared JSON file

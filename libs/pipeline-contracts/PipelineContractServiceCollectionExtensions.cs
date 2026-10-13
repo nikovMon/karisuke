@@ -13,6 +13,8 @@ public static class PipelineContractServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         services.AddSingleton<IPipelineContract, AsdPipelineContract>();
         services.AddSingleton<IPipelineContract, AlgoPipelineContract>();
+        services.AddSingleton<IPipelineContract, FindAirPipelineContract>();
+        services.AddSingleton<IPipelineContract, DeepWisdomPipelineContract>();
         services.AddSingleton<IPipelineContractRegistry, PipelineContractRegistry>();
         return services;
     }

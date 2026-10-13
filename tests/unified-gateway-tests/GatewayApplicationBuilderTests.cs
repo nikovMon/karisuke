@@ -160,10 +160,27 @@ public sealed class GatewayApplicationBuilderTests
             ["--PipelineCatalogFile", "missing.json"], files.Options()));
     }
 
+    [Fact]
+    public async Task GatewayDefaultUsesNewNamesWhileExplicitLegacyCatalogRemainsCompatible()
+    {
+        using var files = new RuntimeFiles();
+        var builder = GatewayApplicationBuilder.Create([], files.Options());
+        RegisterCatalog(builder);
+        await using var app = builder.Build();
+        var catalog = app.Services.GetRequiredService<IPipelineCatalog>();
+        Assert.Equal(["DeepWisdom", "FindAir"], catalog.GetAll().Select(pipeline => pipeline.PipelineId).Order());
+
+        var legacyBuilder = GatewayApplicationBuilder.Create(
+            ["--PipelineCatalogFile", Path.Combine(AppContext.BaseDirectory, "pipelinecatalog.json")], files.Options());
+        RegisterCatalog(legacyBuilder);
+        await using var legacyApp = legacyBuilder.Build();
+        var legacyCatalog = legacyApp.Services.GetRequiredService<IPipelineCatalog>();
+        Assert.Equal(["algo", "asd"], legacyCatalog.GetAll().Select(pipeline => pipeline.PipelineId).Order());
+    }
+
     private static void RegisterCatalog(WebApplicationBuilder builder)
     {
-        builder.Services.AddSingleton<IPipelineContract, AsdPipelineContract>();
-        builder.Services.AddSingleton<IPipelineContractRegistry, PipelineContractRegistry>();
+        builder.Services.AddPipelineContracts();
         builder.Services.AddPipelineCatalog(builder.Configuration);
     }
 

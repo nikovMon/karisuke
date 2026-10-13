@@ -147,6 +147,7 @@ Queue settings:
 
 - `InputQueue` is the queue consumed by `IRabbitMqConsumer` and the default
   target for `PublishToInputAsync`.
+- `OutputQueue` remains required by the standard consumer/client registrations. A handler that publishes through its own transports must explicitly use `AddRabbitMqConsumer(configuration, allowNoOutput: true)`; the unified gateway uses this overload. Existing service startup validation is preserved.
 - `OutputQueue` receives successful handler output when
   `RabbitMqMessageProcessingResult.Success(outputBody)` is returned.
 - `RetryQueue` is the legacy single retry queue. `RetryQueues` can declare one

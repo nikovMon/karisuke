@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using ImagingPipeline.Common.Dtos.Gateway.Messages;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.GeometryUtils;
 using NetTopologySuite.Geometries;
@@ -8,8 +7,8 @@ using NetTopologySuite.Geometries;
 namespace ImagingPipeline.RuleEngine.Input;
 
 /// <summary>
-/// Parses and validates an incoming image update. Every field the matcher or a pipeline contract
-/// relies on is checked here, so a bad message fails once with a stable error code.
+/// Validates the fields needed to identify an image and match rules. Pipeline-specific metadata
+/// remains optional here; each selected contract validates the original values it consumes.
 /// </summary>
 public static class GatewayInputMessageParser
 {
@@ -19,7 +18,6 @@ public static class GatewayInputMessageParser
 
         Require(input.Id, "Input image id is required and must be a non-empty string.", "gateway.missing_image_id");
         Require(input.SensorName, "Input sensor name is required and must be a non-empty string.", "gateway.missing_sensor_name");
-        Require(input.SensorType, "Input sensor type is required and must be a non-empty string.", "gateway.missing_sensor_type");
         Require(
             input.RegistrationQuality,
             "Input registration quality is required and must be a non-empty string.",
@@ -38,44 +36,32 @@ public static class GatewayInputMessageParser
                 "gateway.invalid_best_resolution");
         }
 
-        Require(input.ImageUrl, "Input image URL is required and must be a non-empty string.", "gateway.missing_image_url");
-        if (input.ImageWidth <= 0)
-        {
-            throw new InvalidInputMessageException(
-                "Input image width is required and must be greater than zero.", "gateway.invalid_image_width");
-        }
-
-        if (input.ImageHeight <= 0)
-        {
-            throw new InvalidInputMessageException(
-                "Input image height is required and must be greater than zero.", "gateway.invalid_image_height");
-        }
-
         var geometry = ReadRoiFootprint(input.RoiFootprint);
         Require(input.GridType, "Input grid type is required and must be a non-empty string.", "gateway.missing_grid_type");
-        Require(input.GridUri, "Input grid URI is required and must be a non-empty string.", "gateway.missing_grid_uri");
+
+        var area = OptionalString(input.AreaOfInterest);
 
         return new GatewayInputMessage(
             input.Id,
             input.SensorName,
-            input.SensorType,
+            OptionalString(input.SensorType) ?? string.Empty,
             registrationQuality,
             input.BestResolution,
-            string.IsNullOrWhiteSpace(input.AreaOfInterest) ? null : input.AreaOfInterest.Trim(),
-            input.ImageUrl,
-            input.ImageWidth,
-            input.ImageHeight,
+            string.IsNullOrWhiteSpace(area) ? null : area.Trim(),
+            OptionalString(input.ImageUrl) ?? string.Empty,
+            OptionalInteger(input.ImageWidth),
+            OptionalInteger(input.ImageHeight),
             input.PhotoTime.ToUniversalTime(),
             geometry,
             input.GridType,
-            input.GridUri);
+            OptionalString(input.GridUri) ?? string.Empty);
     }
 
-    private static GatewayInputMessageDto Deserialize(ReadOnlyMemory<byte> body)
+    private static GatewayMatchInputDto Deserialize(ReadOnlyMemory<byte> body)
     {
         try
         {
-            return JsonSerializer.Deserialize(body.Span, GatewayInputJsonSerializerContext.Default.GatewayInputMessageDto)
+            return JsonSerializer.Deserialize(body.Span, GatewayInputJsonSerializerContext.Default.GatewayMatchInputDto)
                 ?? throw new InvalidInputMessageException("Input body cannot be JSON null.", "gateway.invalid_json_shape");
         }
         catch (JsonException ex)
@@ -84,6 +70,14 @@ public static class GatewayInputMessageParser
                 $"Input body does not match the required JSON contract: {ex.Message}", "gateway.invalid_json");
         }
     }
+
+    // These convenience values are only used for matching/telemetry compatibility. Contract
+    // projection reads the original body and preserves type errors for the affected pipeline.
+    private static string? OptionalString(JsonElement value) =>
+        value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static int OptionalInteger(JsonElement value) =>
+        value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number) ? number : 0;
 
     private static Geometry ReadRoiFootprint(JsonElement roiFootprint)
     {
@@ -112,5 +106,49 @@ public static class GatewayInputMessageParser
     }
 }
 
-[JsonSerializable(typeof(GatewayInputMessageDto))]
+[JsonSerializable(typeof(GatewayMatchInputDto))]
 internal sealed partial class GatewayInputJsonSerializerContext : JsonSerializerContext;
+
+// Deliberately separate from the legacy gateway DTO: relaxing this boundary must not alter
+// another service's input contract. JsonElement defers pipeline-specific type validation.
+internal sealed class GatewayMatchInputDto
+{
+    [JsonPropertyName("id")]
+    public required string Id { get; init; }
+
+    [JsonPropertyName("sensorName")]
+    public required string SensorName { get; init; }
+
+    [JsonPropertyName("registrationQuality")]
+    public required string RegistrationQuality { get; init; }
+
+    [JsonPropertyName("bestResolution")]
+    public required double BestResolution { get; init; }
+
+    [JsonPropertyName("photoTime")]
+    public required DateTimeOffset PhotoTime { get; init; }
+
+    [JsonPropertyName("roiFootprint")]
+    public required JsonElement RoiFootprint { get; init; }
+
+    [JsonPropertyName("gridType")]
+    public required string GridType { get; init; }
+
+    [JsonPropertyName("sensorType")]
+    public JsonElement SensorType { get; init; }
+
+    [JsonPropertyName("areaOfInterest")]
+    public JsonElement AreaOfInterest { get; init; }
+
+    [JsonPropertyName("imageUrl")]
+    public JsonElement ImageUrl { get; init; }
+
+    [JsonPropertyName("width")]
+    public JsonElement ImageWidth { get; init; }
+
+    [JsonPropertyName("height")]
+    public JsonElement ImageHeight { get; init; }
+
+    [JsonPropertyName("gridURI")]
+    public JsonElement GridUri { get; init; }
+}

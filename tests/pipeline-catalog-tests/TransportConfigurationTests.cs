@@ -37,6 +37,50 @@ public sealed class TransportConfigurationTests
     }
 
     [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("\t")]
+    public void EmptyPipelineVirtualHostFailsValidation(string virtualHost)
+    {
+        var pipeline = Rabbit("asd", "output");
+        pipeline = pipeline with
+        {
+            Transport = pipeline.Transport with
+            {
+                RabbitMq = pipeline.Transport.RabbitMq! with { VirtualHost = virtualHost }
+            }
+        };
+
+        var exception = Assert.Throws<OptionsValidationException>(() => Catalog(OptionsFor(pipeline)));
+
+        Assert.Contains("Transport:RabbitMq:VirtualHost", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("/")]
+    [InlineData("pipeline-specific")]
+    [InlineData("/nested host")]
+    public async Task HostBindsPipelineVirtualHostWithoutOverwritingItsNamedConnection(string? virtualHost)
+    {
+        var settings = ValidConfiguration();
+        settings["PipelineCatalog:RabbitMqConnections:source:VirtualHost"] = "/shared";
+        if (virtualHost is not null)
+            settings["PipelineCatalog:Pipelines:asd:Transport:RabbitMq:VirtualHost"] = virtualHost;
+        using var host = BuildHost(settings);
+
+        await host.StartAsync();
+        var catalog = host.Services.GetRequiredService<IPipelineCatalog>();
+        var connections = host.Services.GetRequiredService<IRabbitMqConnectionResolver>();
+
+        Assert.Equal(virtualHost, catalog.GetRequired("asd").Transport.RabbitMq!.VirtualHost);
+        Assert.Equal(virtualHost, Assert.Single(catalog.GetAll()).Transport.RabbitMq!.VirtualHost);
+        Assert.Equal(virtualHost, Assert.Single(catalog.GetEnabled()).Transport.RabbitMq!.VirtualHost);
+        Assert.Equal("/shared", connections.GetRequired("source").VirtualHost);
+        await host.StopAsync();
+    }
+
+    [Theory]
     [InlineData("hostname")]
     [InlineData("port")]
     [InlineData("username")]
