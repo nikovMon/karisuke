@@ -75,7 +75,11 @@ internal sealed class RabbitMqOutcomeRouter
         }
         catch (Exception ex)
         {
-            RabbitMqLog.CompletionFailed(_logger, ex, delivery.Message.MessageId);
+            using (BeginMessageScope(delivery))
+            {
+                RabbitMqLog.CompletionFailed(_logger, ex);
+            }
+
             throw new RabbitMqMessageCompletionException(delivery.Message.MessageId, ex);
         }
     }
@@ -136,12 +140,17 @@ internal sealed class RabbitMqOutcomeRouter
             retry.NextRetryCount,
             TelemetryOutcome.Retry,
             TelemetryErrorCategory.Handler);
-        RabbitMqLog.RetryScheduled(
-            _logger,
-            delivery.Message.MessageId,
-            retry.NextRetryCount,
-            _options.MaxRetryAttempts,
-            _options.RetryExchange);
+        using (BeginMessageScope(delivery))
+        using (_logger.BeginScope(new KeyValuePair<string, object?>[]
+               {
+                   new(TelemetryAttributeNames.RetryAttempt, retry.NextRetryCount),
+                   new(TelemetryAttributeNames.RetryMaxAttempts, _options.MaxRetryAttempts),
+                   new(TelemetryAttributeNames.MessagingDestinationName, _options.RetryExchange)
+               }))
+        {
+            RabbitMqLog.RetryScheduled(_logger);
+        }
+
         return new RabbitMqCompletionResult(TelemetryOutcome.Retry, TelemetryErrorCategory.Handler);
     }
 
@@ -158,11 +167,16 @@ internal sealed class RabbitMqOutcomeRouter
             requeue: false,
             TelemetryOutcome.DeadLetter,
             cancellationToken);
-        RabbitMqLog.DeadLettered(
-            _logger,
-            delivery.Message.MessageId,
-            _options.EffectiveDeadLetterQueue,
-            reason);
+        using (BeginMessageScope(delivery))
+        using (_logger.BeginScope(new KeyValuePair<string, object?>[]
+               {
+                   new(TelemetryAttributeNames.MessagingDestinationName, _options.EffectiveDeadLetterQueue),
+                   new(TelemetryAttributeNames.DeadLetterReason, reason)
+               }))
+        {
+            RabbitMqLog.DeadLettered(_logger);
+        }
+
         return new RabbitMqCompletionResult(TelemetryOutcome.DeadLetter, error);
     }
 
@@ -172,34 +186,10 @@ internal sealed class RabbitMqOutcomeRouter
         TelemetryOutcome outcome,
         CancellationToken cancellationToken)
     {
-        var started = TelemetryTiming.StartTimestamp();
-        var metricOutcome = outcome;
-        var error = TelemetryErrorCategory.None;
-        try
-        {
-            await channel.BasicAckAsync(deliveryTag, multiple: false, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            metricOutcome = TelemetryOutcome.Cancelled;
-            error = TelemetryErrorCategory.Cancelled;
-            throw;
-        }
-        catch
-        {
-            metricOutcome = TelemetryOutcome.Failure;
-            error = TelemetryErrorCategory.Unknown;
-            throw;
-        }
-        finally
-        {
-            MessagingTelemetry.RecordSettlement(
-                _options.InputQueue,
-                MessagingOperation.Ack,
-                metricOutcome,
-                TelemetryTiming.ElapsedSeconds(started),
-                error);
-        }
+        using var telemetry = RabbitMqSettlementTelemetry.Begin(
+            _options.InputQueue, MessagingOperation.Ack, outcome, cancellationToken);
+        await channel.BasicAckAsync(deliveryTag, multiple: false, cancellationToken);
+        telemetry.Settled();
     }
 
     private async Task NackAsync(
@@ -209,35 +199,17 @@ internal sealed class RabbitMqOutcomeRouter
         TelemetryOutcome outcome,
         CancellationToken cancellationToken)
     {
-        var started = TelemetryTiming.StartTimestamp();
-        var metricOutcome = outcome;
-        var error = TelemetryErrorCategory.None;
-        try
-        {
-            await channel.BasicNackAsync(deliveryTag, multiple: false, requeue, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            metricOutcome = TelemetryOutcome.Cancelled;
-            error = TelemetryErrorCategory.Cancelled;
-            throw;
-        }
-        catch
-        {
-            metricOutcome = TelemetryOutcome.Failure;
-            error = TelemetryErrorCategory.Unknown;
-            throw;
-        }
-        finally
-        {
-            MessagingTelemetry.RecordSettlement(
-                _options.InputQueue,
-                MessagingOperation.Nack,
-                metricOutcome,
-                TelemetryTiming.ElapsedSeconds(started),
-                error);
-        }
+        using var telemetry = RabbitMqSettlementTelemetry.Begin(
+            _options.InputQueue, MessagingOperation.Nack, outcome, cancellationToken);
+        await channel.BasicNackAsync(deliveryTag, multiple: false, requeue, cancellationToken);
+        telemetry.Settled();
     }
+
+    private IDisposable? BeginMessageScope(RabbitMqDelivery delivery) =>
+        _logger.BeginScope(new KeyValuePair<string, object?>[]
+        {
+            new(TelemetryAttributeNames.MessagingMessageId, delivery.Message.MessageId)
+        });
 
     private async Task PublishOutputMessagesAsync(
         IReadOnlyList<RabbitMqMessageEnvelope> outputMessages,

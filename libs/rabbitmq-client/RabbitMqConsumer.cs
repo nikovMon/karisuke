@@ -219,7 +219,14 @@ internal sealed class RabbitMqConsumer : IRabbitMqConsumer
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 handlerException = ex;
-                RabbitMqLog.HandlerFailed(_logger, ex, delivery.Message.MessageId);
+                using (_logger.BeginScope(new KeyValuePair<string, object?>[]
+                       {
+                           new(TelemetryAttributeNames.MessagingMessageId, delivery.Message.MessageId)
+                       }))
+                {
+                    RabbitMqLog.HandlerFailed(_logger, ex);
+                }
+
                 // The handler's stage span and this error log already carry the exception.
                 activity.SetTelemetryError(TelemetryErrorCategory.Handler, ex, recordException: false);
                 result = RabbitMqMessageProcessingResult.RetryableFailure(ex.Message);

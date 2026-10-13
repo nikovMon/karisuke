@@ -114,6 +114,10 @@ public static class TelemetryAttributeNames
     public const string TileIndex = "findair.tile.index";
     public const string TileCount = "findair.tile.count";
     public const string RetryAttempt = "findair.retry.attempt";
+    public const string RetryMaxAttempts = "findair.retry.max_attempts";
+    public const string DeadLetterReason = "findair.dead_letter.reason";
+    public const string MessagingMessageId = "messaging.message.id";
+    public const string MessagingDestinationName = "messaging.destination.name";
     public const string DependencyName = "findair.dependency.name";
     public const string DependencyOperation = "findair.dependency.operation";
     public const string ProjectionMode = "findair.projection.mode";
