@@ -6,7 +6,7 @@ using ImagingPipeline.Common.Dtos.Rules.Models;
 
 namespace ImagingPipeline.PipelineContracts;
 
-public sealed class AsdPipelineContract : IPipelineContract
+public sealed class FindAirPipelineContract : IPipelineContract
 {
     // This marker belongs to the existing downstream AMQP wire protocol. It is independent
     // of the gateway's unversioned pipeline and contract IDs and must remain an AMQP integer.
@@ -22,7 +22,7 @@ public sealed class AsdPipelineContract : IPipelineContract
         new[] { "tileSizeWidth", "tileSizeHeight", "tileOverlapWidth", "tileOverlapHeight" }
             .ToFrozenSet(StringComparer.Ordinal);
 
-    public string ContractId => "asd";
+    public string ContractId => "FindAir";
 
     public IReadOnlyList<ContractValidationError> ValidateRunParams(JsonElement runParams)
     {
@@ -31,7 +31,7 @@ public sealed class AsdPipelineContract : IPipelineContract
         return errors.AsReadOnly();
     }
 
-    public IReadOnlyList<ContractValidationError> ValidateContext(PipelineDispatchContext context)
+    public IReadOnlyList<ContractValidationError> ValidateContext(PipelineDispatchContext context, JsonElement runParams = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         var errors = new List<ContractValidationError>();
@@ -50,6 +50,8 @@ public sealed class AsdPipelineContract : IPipelineContract
         if (context.PhotoTime == default) errors.Add(new("input.photoTime", "Must be supplied."));
         if (context.RoiFootprint.ValueKind != JsonValueKind.Object)
             errors.Add(new("input.roiFootprint", "Must be a GeoJSON object."));
+        errors.AddRange(context.InputFieldErrors.Where(error => error.Field is
+            "input.imageUrl" or "input.width" or "input.height" or "input.sensorType" or "input.gridURI" or "input.areaOfInterest"));
         return errors.AsReadOnly();
 
         void Required(string value, string field)
@@ -74,7 +76,7 @@ public sealed class AsdPipelineContract : IPipelineContract
                 nameof(runParams));
         }
 
-        var contextErrors = ValidateContext(context);
+        var contextErrors = ValidateContext(context, runParams);
         if (contextErrors.Count != 0)
         {
             throw new ArgumentException(
@@ -127,7 +129,7 @@ public sealed class AsdPipelineContract : IPipelineContract
             RabbitMqAttributes);
     }
 
-    private static AsdRunParameters ParseRunParams(JsonElement runParams, List<ContractValidationError> errors)
+    private static FindAirRunParameters ParseRunParams(JsonElement runParams, List<ContractValidationError> errors)
     {
         if (runParams.ValueKind != JsonValueKind.Object)
         {
@@ -261,7 +263,7 @@ public sealed class AsdPipelineContract : IPipelineContract
         }
     }
 
-    private sealed record AsdRunParameters(
+    private sealed record FindAirRunParameters(
         string TenantId,
         List<AlgorithmName> AlgorithmNames,
         List<TilingConfig> TilingConfigs);

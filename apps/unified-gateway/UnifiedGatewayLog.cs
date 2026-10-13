@@ -21,6 +21,9 @@ internal static partial class UnifiedGatewayLog
     [LoggerMessage(6021, LogLevel.Information, "Source message processed.")]
     public static partial void SourceMessageProcessed(this ILogger logger);
 
+    [LoggerMessage(6022, LogLevel.Debug, "Source message filtered.")]
+    public static partial void SourceMessageFiltered(this ILogger logger);
+
     [LoggerMessage(6010, LogLevel.Information, "Pipeline rules loaded.")]
     public static partial void PipelineRulesLoaded(this ILogger logger);
 

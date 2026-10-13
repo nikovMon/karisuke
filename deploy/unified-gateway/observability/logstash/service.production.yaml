@@ -1,0 +1,16 @@
+# Requires Logstash pods labeled app: logstash with an HTTP listener on 8083.
+# If this Service already exists, merge this port while retaining its other ports.
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash
+  namespace: gateway-observability-prod
+spec:
+  type: ClusterIP
+  selector:
+    app: logstash
+  ports:
+    - name: gateway-prod
+      port: 8083
+      targetPort: 8083
+      protocol: TCP

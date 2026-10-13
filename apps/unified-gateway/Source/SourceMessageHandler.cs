@@ -29,6 +29,7 @@ public sealed class SourceMessageHandler(
     {
         if (!UpdatedFields.Contains(message.Headers, "gridType"))
         {
+            SourceMessageTelemetry.Filtered(message, logger, "grid_type_not_updated");
             return RabbitMqMessageProcessingResult.Success();
         }
 
@@ -63,12 +64,22 @@ public sealed class SourceMessageHandler(
         List<string> invalidPipelines)
     {
         var units = new Dictionary<string, DispatchUnit>(StringComparer.Ordinal);
-        foreach (var pipelineRules in ruleCache.Current)
+        var pipelines = ruleCache.Current;
+        if (pipelines.Count == 0)
+        {
+            SourceMessageTelemetry.Filtered(message, logger, "no_enabled_pipelines");
+        }
+
+        foreach (var pipelineRules in pipelines)
         {
             var pipelineId = pipelineRules.Pipeline.PipelineId;
             using var pipelineScope = logger.BeginScope(new KeyValuePair<string, object?>[] { new(TelemetryAttributeNames.PipelineId, pipelineId) });
             var evaluation = matcher.Match(image, pipelineRules.Rules);
             logger.LogRulesEvaluated(evaluation);
+            if (evaluation.Matches.Count == 0)
+            {
+                SourceMessageTelemetry.Filtered(message, logger, "no_matching_rules");
+            }
 
             foreach (var match in evaluation.Matches)
             {
@@ -78,6 +89,7 @@ public sealed class SourceMessageHandler(
                     var dispatchId = DispatchIdentity.Create(image.ImageId, pipelineId, match.Rule.Id, runParams);
                     if (units.ContainsKey(dispatchId))
                     {
+                        SourceMessageTelemetry.Filtered(message, logger, "duplicate_run");
                         continue;
                     }
 

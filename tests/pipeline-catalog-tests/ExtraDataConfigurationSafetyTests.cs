@@ -65,7 +65,7 @@ public sealed class ExtraDataConfigurationSafetyTests
         const string pipeline = "PipelineCatalog:Pipelines:second";
         using var configuration = Configuration(new Dictionary<string, string?>
         {
-            [$"{pipeline}:ContractId"] = "asd",
+            [$"{pipeline}:ContractId"] = "FindAir",
             [$"{pipeline}:Enabled"] = "true",
             [$"{pipeline}:RulesIndex"] = "second-integ-pipeline-index",
             [$"{pipeline}:Transport:Kind"] = "http",
@@ -113,7 +113,7 @@ public sealed class ExtraDataConfigurationSafetyTests
 
     private static Dictionary<string, string?> BaseConfiguration() => new()
     {
-        ["PipelineCatalog:Pipelines:asd:ContractId"] = "asd",
+        ["PipelineCatalog:Pipelines:asd:ContractId"] = "FindAir",
         ["PipelineCatalog:Pipelines:asd:Enabled"] = "true",
         ["PipelineCatalog:Pipelines:asd:RulesIndex"] = "asd-integ-pipeline-index",
         ["PipelineCatalog:Pipelines:asd:Transport:Kind"] = "http",
@@ -126,7 +126,7 @@ public sealed class ExtraDataConfigurationSafetyTests
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
         builder.Configuration.AddConfiguration(configuration);
         builder.Services.AddLogging();
-        builder.Services.AddSingleton<IPipelineContractRegistry>(new PipelineContractRegistry([new AsdPipelineContract()]));
+        builder.Services.AddSingleton<IPipelineContractRegistry>(new PipelineContractRegistry([new FindAirPipelineContract()]));
         builder.Services.AddPipelineCatalog(builder.Configuration);
         return builder.Build();
     }

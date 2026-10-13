@@ -6,22 +6,18 @@ using System.Text.Json;
 
 namespace ImagingPipeline.PipelineContracts;
 
-/// <summary>Builds one Algo Manager mission request for an already selected rule and overlay.</summary>
-public sealed class AlgoPipelineContract : IPipelineContract
+/// <summary>Builds one DeepWisdom mission request for an already selected rule and overlay.</summary>
+public sealed class DeepWisdomPipelineContract : IPipelineContract
 {
     private static readonly FrozenSet<string> RunParamFields = new[]
     {
         "customer", "profile_name", "hebrew_rule_name", "algorithm_name", "priority", "username",
         "run_every_other_image", "should_check_in_vip"
     }.ToFrozenSet(StringComparer.Ordinal);
-    private static readonly FrozenSet<string> SettingFields = new[]
-    {
-        "XUserName", "Origin", "QueueType", "SaveDetections"
-    }.ToFrozenSet(StringComparer.Ordinal);
     private static readonly FrozenDictionary<string, string> NoAttributes =
         new Dictionary<string, string>().ToFrozenDictionary(StringComparer.Ordinal);
 
-    public string ContractId => "algo";
+    public string ContractId => "DeepWisdom";
 
     public IReadOnlyList<ContractValidationError> ValidateRunParams(JsonElement runParams)
     {
@@ -30,20 +26,18 @@ public sealed class AlgoPipelineContract : IPipelineContract
         return errors.AsReadOnly();
     }
 
-    public IReadOnlyList<ContractValidationError> ValidateExtraData(JsonElement extraData)
-    {
-        var errors = new List<ContractValidationError>();
-        ParseSettings(extraData, errors);
-        return errors.AsReadOnly();
-    }
+    public IReadOnlyList<ContractValidationError> ValidateExtraData(JsonElement extraData) =>
+        extraData.ValueKind is JsonValueKind.Object or JsonValueKind.Undefined
+            ? []
+            : [new("extraData", "Must be a JSON object when provided.")];
 
-    // Algo receives the rule's area as focusedWkt, so an Algo rule needs a location.
+    // DeepWisdom receives the rule's area as focusedWkt, so its rules need a location.
     public IReadOnlyList<ContractValidationError> ValidateRuleLocation(string? locationWkt) =>
         string.IsNullOrWhiteSpace(locationWkt)
-            ? [new("match.locationWkt", "Must be supplied; Algo sends the rule's location as focusedWkt.")]
+            ? [new("match.locationWkt", "Must be supplied; DeepWisdom sends the rule's location as focusedWkt.")]
             : [];
 
-    public IReadOnlyList<ContractValidationError> ValidateContext(PipelineDispatchContext context)
+    public IReadOnlyList<ContractValidationError> ValidateContext(PipelineDispatchContext context, JsonElement runParams = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         var errors = new List<ContractValidationError>();
@@ -52,6 +46,12 @@ public sealed class AlgoPipelineContract : IPipelineContract
         if (PhotoTime(context) == default)
             errors.Add(new("input.photoTime", "Must be supplied."));
         errors.AddRange(ValidateRuleLocation(context.RuleLocationWkt));
+        if (runParams.ValueKind == JsonValueKind.Object &&
+            runParams.TryGetProperty("run_every_other_image", out var everyOther) && everyOther.ValueKind == JsonValueKind.True)
+        {
+            errors.AddRange(context.InputFieldErrors.Where(error => error.Field is
+                "input.legId" or "input.prevOverlayId" or "input.nextOverlayId"));
+        }
         return errors.AsReadOnly();
     }
 
@@ -61,25 +61,28 @@ public sealed class AlgoPipelineContract : IPipelineContract
         var errors = new List<ContractValidationError>();
         var parameters = ParseRunParams(runParams, errors);
         ThrowIfInvalid(errors, nameof(runParams));
-        var settings = ParseSettings(extraData, errors);
+        errors.AddRange(ValidateExtraData(extraData));
         ThrowIfInvalid(errors, nameof(extraData));
-        errors.AddRange(ValidateContext(context));
+        errors.AddRange(ValidateContext(context, runParams));
         ThrowIfInvalid(errors, nameof(context));
         var photoTime = PhotoTime(context);
 
         var buffer = new ArrayBufferWriter<byte>();
-        // Algo Manager receives JSON directly; preserve the legacy serializer's unescaped Unicode.
+        // DeepWisdom receives JSON directly; preserve the legacy serializer's unescaped Unicode.
         using var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         writer.WriteStartObject();
         writer.WriteString("modelName", parameters.ProfileName);
         writer.WriteString("focusedWkt", context.RuleLocationWkt);
-        writer.WriteString("origin", settings.Origin);
-        writer.WriteString("queueType", settings.QueueType);
+        WriteConfiguredValue(writer, extraData, "Origin", "origin");
+        WriteConfiguredValue(writer, extraData, "QueueType", "queueType");
         writer.WriteNumber("priority", parameters.Priority);
-        writer.WriteBoolean("saveDetections", settings.SaveDetections);
+        WriteConfiguredValue(writer, extraData, "SaveDetections", "saveDetections");
         writer.WriteString("algorithmName", parameters.AlgorithmName);
         writer.WriteString("missionName", $"{parameters.HebrewRuleName} {photoTime.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)}");
-        writer.WriteString("username", parameters.Username ?? settings.XUserName);
+        if (parameters.Username is not null)
+            writer.WriteString("username", parameters.Username);
+        else if (!WriteConfiguredValue(writer, extraData, "XUserName", "username"))
+            writer.WriteNull("username");
         writer.WriteString("displayName", parameters.Customer);
         writer.WriteString("requestingUnit", parameters.Customer);
         writer.WriteBoolean("runEveryOtherImage", parameters.RunEveryOtherImage);
@@ -96,21 +99,35 @@ public sealed class AlgoPipelineContract : IPipelineContract
             writer.WriteNull("photoTime");
         writer.WriteEndObject();
         writer.WriteEndArray();
+        if (extraData.ValueKind == JsonValueKind.Object && extraData.EnumerateObject().MoveNext())
+        {
+            writer.WritePropertyName("extraData");
+            extraData.WriteTo(writer);
+        }
         writer.WriteEndObject();
         writer.Flush();
         return new(buffer.WrittenSpan.ToArray(), "application/json", NoAttributes);
     }
 
+    private static bool WriteConfiguredValue(Utf8JsonWriter writer, JsonElement extraData, string setting, string output)
+    {
+        if (extraData.ValueKind != JsonValueKind.Object || !extraData.TryGetProperty(setting, out var value))
+            return false;
+        writer.WritePropertyName(output);
+        value.WriteTo(writer);
+        return true;
+    }
+
     private static DateTime PhotoTime(PipelineDispatchContext context) => context.OverlayPhotoTime ?? context.PhotoTime.DateTime;
 
-    private static AlgoRunParameters ParseRunParams(JsonElement value, List<ContractValidationError> errors)
+    private static DeepWisdomRunParameters ParseRunParams(JsonElement value, List<ContractValidationError> errors)
     {
         if (value.ValueKind != JsonValueKind.Object)
         {
             errors.Add(new("runParams", "Must be an object."));
             return new("", null, null, "", 0, null, false, false);
         }
-        ValidateProperties(value, RunParamFields, allowUnknown: false, errors);
+        ValidateProperties(value, RunParamFields, errors);
         return new(
             ReadRequiredString(value, "customer", errors),
             ReadNullableString(value, "profile_name", errors),
@@ -120,21 +137,6 @@ public sealed class AlgoPipelineContract : IPipelineContract
             ReadNullableString(value, "username", errors),
             ReadBoolean(value, "run_every_other_image", errors),
             ReadBoolean(value, "should_check_in_vip", errors));
-    }
-
-    private static AlgoSettings ParseSettings(JsonElement value, List<ContractValidationError> errors)
-    {
-        if (value.ValueKind != JsonValueKind.Object)
-        {
-            errors.Add(new("extraData", "Must be an object containing Algo settings."));
-            return new("", "", "", false);
-        }
-        ValidateProperties(value, SettingFields, allowUnknown: true, errors);
-        return new(
-            ReadRequiredString(value, "XUserName", errors),
-            ReadRequiredString(value, "Origin", errors),
-            ReadRequiredString(value, "QueueType", errors),
-            ReadBoolean(value, "SaveDetections", errors));
     }
 
     private static string ReadRequiredString(JsonElement value, string name, List<ContractValidationError> errors)
@@ -172,15 +174,13 @@ public sealed class AlgoPipelineContract : IPipelineContract
         return 0;
     }
 
-    private static void ValidateProperties(JsonElement value, FrozenSet<string> known, bool allowUnknown, List<ContractValidationError> errors)
+    private static void ValidateProperties(JsonElement value, FrozenSet<string> known, List<ContractValidationError> errors)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var property in value.EnumerateObject())
         {
             if (!known.Contains(property.Name))
-            {
-                if (!allowUnknown) errors.Add(new(property.Name, "Unknown parameter."));
-            }
+                errors.Add(new(property.Name, "Unknown parameter."));
             else if (!seen.Add(property.Name))
                 errors.Add(new(property.Name, "Duplicate parameters are not allowed."));
         }
@@ -192,8 +192,6 @@ public sealed class AlgoPipelineContract : IPipelineContract
             throw new ArgumentException(string.Join("; ", errors.Select(error => $"{error.Field}: {error.Message}")), parameterName);
     }
 
-    private sealed record AlgoRunParameters(string Customer, string? ProfileName, string? HebrewRuleName,
+    private sealed record DeepWisdomRunParameters(string Customer, string? ProfileName, string? HebrewRuleName,
         string AlgorithmName, int Priority, string? Username, bool RunEveryOtherImage, bool ShouldCheckInVip);
-
-    private sealed record AlgoSettings(string XUserName, string Origin, string QueueType, bool SaveDetections);
 }

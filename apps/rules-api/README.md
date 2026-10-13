@@ -160,8 +160,8 @@ Lists every configured pipeline, enabled or not, ordered by ID. Transport settin
 
 ```json
 [
-  { "pipelineId": "algo", "contractId": "algo", "enabled": true },
-  { "pipelineId": "asd", "contractId": "asd", "enabled": true }
+  { "pipelineId": "DeepWisdom", "contractId": "DeepWisdom", "enabled": true },
+  { "pipelineId": "FindAir", "contractId": "FindAir", "enabled": true }
 ]
 ```
 
@@ -653,7 +653,7 @@ Every v2 rule change appends one record to `Elasticsearch:AuditIndex` (default `
 
 ```json
 {
-  "pipelineId": "asd",
+  "pipelineId": "FindAir",
   "ruleId": "6f1c...",
   "changeType": "created | updated | activated | deactivated | deleted",
   "previousState": { },

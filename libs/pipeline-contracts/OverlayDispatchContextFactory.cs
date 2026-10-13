@@ -34,40 +34,50 @@ public static class OverlayDispatchContextFactory
         // Preserve the pictured Algo DateTime.Parse behavior separately from ASD's UTC timestamp.
         // Never substitute the full-image footprint for the explicit ROI.
         var roi = overlay.TryGetProperty("roiFootprint", out var geometry) ? geometry.Clone() : default;
-        var area = ReadString(overlay, "areaOfInterest");
+        var fieldErrors = new List<ContractValidationError>();
+        var area = ReadString(overlay, "areaOfInterest", fieldErrors);
         return new PipelineDispatchContext(
             taskId, ruleId, imageId, roi, timestamp.ToUniversalTime(),
-            ReadString(overlay, "sensorType") ?? string.Empty,
-            ReadString(overlay, "imageUrl") ?? string.Empty,
-            ReadInteger(overlay, "width"), ReadInteger(overlay, "height"),
+            ReadString(overlay, "sensorType", fieldErrors) ?? string.Empty,
+            ReadString(overlay, "imageUrl", fieldErrors) ?? string.Empty,
+            ReadInteger(overlay, "width", fieldErrors), ReadInteger(overlay, "height", fieldErrors),
             ReadNumber(overlay, "bestResolution"),
             ReadString(overlay, "sensorName") ?? string.Empty,
             string.IsNullOrWhiteSpace(area) ? null : area.Trim(),
             ReadString(overlay, "gridType") ?? string.Empty,
-            ReadString(overlay, "gridURI") ?? string.Empty)
+            ReadString(overlay, "gridURI", fieldErrors) ?? string.Empty)
         {
             OverlayPhotoTime = legacyTime,
-            LegId = ReadString(overlay, "legId"),
-            PrevOverlayId = ReadString(overlay, "prevOverlayId"),
-            NextOverlayId = ReadString(overlay, "nextOverlayId")
+            LegId = ReadString(overlay, "legId", fieldErrors),
+            PrevOverlayId = ReadString(overlay, "prevOverlayId", fieldErrors),
+            NextOverlayId = ReadString(overlay, "nextOverlayId", fieldErrors),
+            InputFieldErrors = fieldErrors.AsReadOnly()
         };
     }
 
-    private static string? ReadString(JsonElement overlay, string field)
+    private static string? ReadString(JsonElement overlay, string field, List<ContractValidationError>? errors = null)
     {
         if (!overlay.TryGetProperty(field, out var value) || value.ValueKind == JsonValueKind.Null)
             return null;
         if (value.ValueKind != JsonValueKind.String)
-            throw new ArgumentException($"Overlay {field} must be a string or null.", nameof(overlay));
+        {
+            if (errors is null)
+                throw new ArgumentException($"Overlay {field} must be a string or null.", nameof(overlay));
+            errors.Add(new($"input.{field}", "Must be a string or null."));
+            return null;
+        }
         return value.GetString();
     }
 
-    private static int ReadInteger(JsonElement overlay, string field)
+    private static int ReadInteger(JsonElement overlay, string field, List<ContractValidationError> errors)
     {
         if (!overlay.TryGetProperty(field, out var value) || value.ValueKind == JsonValueKind.Null)
             return 0;
         if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var number))
-            throw new ArgumentException($"Overlay {field} must be a 32-bit integer.", nameof(overlay));
+        {
+            errors.Add(new($"input.{field}", "Must be a 32-bit integer."));
+            return 0;
+        }
         return number;
     }
 

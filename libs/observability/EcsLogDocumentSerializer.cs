@@ -87,7 +87,8 @@ internal static class EcsLogDocumentSerializer
             [TelemetryAttributeNames.RulesFailedIds] = TelemetryAttributeNames.RulesFailedIds,
             [TelemetryAttributeNames.ErrorCode] = TelemetryAttributeNames.ErrorCode,
             [TelemetryAttributeNames.DispatchUnitCount] = TelemetryAttributeNames.DispatchUnitCount,
-            [TelemetryAttributeNames.DispatchFailedCount] = TelemetryAttributeNames.DispatchFailedCount
+            [TelemetryAttributeNames.DispatchFailedCount] = TelemetryAttributeNames.DispatchFailedCount,
+            [TelemetryAttributeNames.FilterReason] = TelemetryAttributeNames.FilterReason
         };
 
     public static byte[] SerializeBatch(

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
 
 namespace ImagingPipeline.Observability;
 
@@ -43,12 +44,9 @@ internal static class EcsLoggingRegistration
                     ActivityTrackingOptions.TraceId |
                     ActivityTrackingOptions.SpanId;
             });
-            builder.Logging.AddJsonConsole(options =>
-            {
-                options.IncludeScopes = true;
-                options.UseUtcTimestamp = true;
-                options.TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.fff'Z'";
-            });
+            builder.Logging
+                .AddConsole(options => options.FormatterName = StructuredJsonConsoleFormatter.FormatterName)
+                .AddConsoleFormatter<StructuredJsonConsoleFormatter, JsonConsoleFormatterOptions>(ConfigureConsole);
         }
 
         if (!logstashEnabled)
@@ -72,6 +70,13 @@ internal static class EcsLoggingRegistration
         builder.Services.AddSingleton<EcsLogstashExporterService>();
         builder.Services.AddSingleton<IHostedService>(
             static services => services.GetRequiredService<EcsLogstashExporterService>());
+    }
+
+    private static void ConfigureConsole(JsonConsoleFormatterOptions options)
+    {
+        options.IncludeScopes = true;
+        options.UseUtcTimestamp = true;
+        options.TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.fff'Z'";
     }
 
     private static bool ReadBoolean(string? raw, string key, bool defaultValue)

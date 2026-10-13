@@ -16,7 +16,7 @@ public sealed class PipelineExtraDataTests
         using (var document = JsonDocument.Parse("""{"text":"true","flag":true,"empty":[],"object":{}}"""))
             extra = new(document.RootElement);
         var options = OptionsWith(extra);
-        var catalog = new Catalog(Options.Create(options), new PipelineContractRegistry([new AsdPipelineContract()]), NullLogger<Catalog>.Instance);
+        var catalog = new Catalog(Options.Create(options), new PipelineContractRegistry([new FindAirPipelineContract()]), NullLogger<Catalog>.Instance);
 
         options.Pipelines["asd"] = options.Pipelines["asd"] with { ExtraData = PipelineExtraData.Parse("{\"changed\":true}") };
         var data = catalog.GetRequired("asd").ExtraData.Value;
@@ -39,7 +39,7 @@ public sealed class PipelineExtraDataTests
     public void NullProgrammaticExtraDataFailsCatalogValidation()
     {
         var options = OptionsWith(null!);
-        var registry = new PipelineContractRegistry([new AsdPipelineContract()]);
+        var registry = new PipelineContractRegistry([new FindAirPipelineContract()]);
         var error = Assert.Throws<OptionsValidationException>(() => new Catalog(Options.Create(options), registry, NullLogger<Catalog>.Instance));
         Assert.Contains("ExtraData", error.Message, StringComparison.Ordinal);
     }
@@ -48,7 +48,7 @@ public sealed class PipelineExtraDataTests
     {
         Pipelines = new() { ["asd"] = new()
         {
-            ContractId = "asd", Enabled = true, RulesIndex = "asd-integ-pipeline-index",
+            ContractId = "FindAir", Enabled = true, RulesIndex = "asd-integ-pipeline-index",
             ExtraData = extra, Transport = new() { Kind = PipelineTransportKind.Http, Http = new() { Endpoint = "https://example.invalid/" } }
         } }
     };

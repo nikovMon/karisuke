@@ -7,13 +7,13 @@ public sealed class PipelineContractRegistryTests
     [Fact]
     public void RegistryReturnsRegisteredInstancesByExactId()
     {
-        var contract = new AsdPipelineContract();
+        var contract = new FindAirPipelineContract();
         var registry = new PipelineContractRegistry([contract]);
 
-        Assert.Same(contract, registry.GetRequired("asd"));
-        Assert.True(registry.TryGet("asd", out var found));
+        Assert.Same(contract, registry.GetRequired("FindAir"));
+        Assert.True(registry.TryGet("FindAir", out var found));
         Assert.Same(contract, found);
-        Assert.False(registry.TryGet("ASD", out var wrongCase));
+        Assert.False(registry.TryGet("FINDAIR", out var wrongCase));
         Assert.Null(wrongCase);
     }
 
@@ -21,7 +21,7 @@ public sealed class PipelineContractRegistryTests
     public void RegistryRejectsDuplicateContractIds()
     {
         Assert.Throws<ArgumentException>(() =>
-            new PipelineContractRegistry([new AsdPipelineContract(), new AsdPipelineContract()]));
+            new PipelineContractRegistry([new FindAirPipelineContract(), new FindAirPipelineContract()]));
     }
 
     [Theory]
@@ -40,26 +40,26 @@ public sealed class PipelineContractRegistryTests
     }
 
     [Fact]
-    public void UnknownContractCannotBeResolvedOrSilentlyReplacedWithAsd()
+    public void UnknownContractCannotBeResolvedOrSilentlyReplacedWithFindAir()
     {
-        var registry = new PipelineContractRegistry([new AsdPipelineContract()]);
+        var registry = new PipelineContractRegistry([new FindAirPipelineContract()]);
 
-        Assert.False(registry.TryGet("algo", out var contract));
+        Assert.False(registry.TryGet("DeepWisdom", out var contract));
         Assert.Null(contract);
-        Assert.Throws<KeyNotFoundException>(() => registry.GetRequired("algo"));
+        Assert.Throws<KeyNotFoundException>(() => registry.GetRequired("DeepWisdom"));
     }
 
     [Fact]
     public void RegistrySupportsEmptyRegistrationAndSnapshotsItsInput()
     {
         var empty = new PipelineContractRegistry([]);
-        Assert.False(empty.TryGet("asd", out _));
+        Assert.False(empty.TryGet("FindAir", out _));
 
-        var contracts = new List<IPipelineContract> { new AsdPipelineContract() };
+        var contracts = new List<IPipelineContract> { new FindAirPipelineContract() };
         var registry = new PipelineContractRegistry(contracts);
         contracts.Clear();
 
-        Assert.IsType<AsdPipelineContract>(registry.GetRequired("asd"));
+        Assert.IsType<FindAirPipelineContract>(registry.GetRequired("FindAir"));
     }
 
     private sealed class StubContract(string contractId) : IPipelineContract

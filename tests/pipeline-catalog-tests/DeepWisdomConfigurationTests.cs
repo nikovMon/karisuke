@@ -2,23 +2,22 @@ using ImagingPipeline.PipelineContracts;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Options;
 
 namespace ImagingPipeline.PipelineCatalog.Tests;
 
-public sealed class AlgoConfigurationTests
+public sealed class DeepWisdomConfigurationTests
 {
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task InvalidContractSettingsFailStartupEvenForDisabledAlgoPipelines(bool enabled)
+    public async Task ArbitraryExtraDataDoesNotImposeASettingsSchema(bool enabled)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Configuration.Sources.Clear();
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["PipelineCatalog:Pipelines:algo:Enabled"] = enabled.ToString(),
-            ["PipelineCatalog:Pipelines:algo:ContractId"] = "algo",
+            ["PipelineCatalog:Pipelines:algo:ContractId"] = "DeepWisdom",
             ["PipelineCatalog:Pipelines:algo:RulesIndex"] = "algo-integ-pipeline-index",
             ["PipelineCatalog:Pipelines:algo:Transport:Kind"] = "http",
             ["PipelineCatalog:Pipelines:algo:Transport:Http:Endpoint"] = "https://example.invalid/work",
@@ -26,14 +25,14 @@ public sealed class AlgoConfigurationTests
                 {"XUserName":"private-user","Origin":"private-origin","QueueType":"private-queue","SaveDetections":"true"}
                 """
         });
-        builder.Services.AddSingleton<IPipelineContractRegistry>(new PipelineContractRegistry([new AlgoPipelineContract()]));
+        builder.Services.AddSingleton<IPipelineContractRegistry>(new PipelineContractRegistry([new DeepWisdomPipelineContract()]));
         builder.Services.AddPipelineCatalog(builder.Configuration);
         using var host = builder.Build();
 
-        var error = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
-        Assert.Contains("ExtraData", error.Message, StringComparison.Ordinal);
-        Assert.Contains("SaveDetections", error.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("private-user", error.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("private-origin", error.Message, StringComparison.Ordinal);
+        await host.StartAsync();
+        var pipeline = host.Services.GetRequiredService<IPipelineCatalog>().GetRequired("algo");
+        Assert.Equal(enabled, pipeline.Enabled);
+        Assert.Equal("true", pipeline.ExtraData.Value.GetProperty("SaveDetections").GetString());
+        await host.StopAsync();
     }
 }

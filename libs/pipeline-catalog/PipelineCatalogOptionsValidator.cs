@@ -169,6 +169,11 @@ public sealed class PipelineCatalogOptionsValidator(IPipelineContractRegistry co
                     errors.Add($"{prefix}:RabbitMq:ConnectionRef must be a nonempty connection reference without surrounding whitespace or control characters.");
                 }
 
+                if (transport.RabbitMq.VirtualHost is { } virtualHost && string.IsNullOrWhiteSpace(virtualHost))
+                {
+                    errors.Add($"{prefix}:RabbitMq:VirtualHost must not be empty when configured; omit it to inherit the connection's virtual host.");
+                }
+
                 RabbitMqOptionsValidation.ValidateQueue(transport.RabbitMq.Output, $"{prefix}:RabbitMq:Output", errors);
                 break;
 

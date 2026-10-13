@@ -31,10 +31,10 @@ public sealed class PipelineRuleAuditTests : IDisposable
     public async Task EveryChangeAppendsARecordWithItsStates()
     {
         var id = await CreateAsync();
-        await _client.PatchAsJsonAsync($"/pipelines/asd/rules/{id}", new { description = "edited" });
-        await _client.PatchAsJsonAsync($"/pipelines/asd/rules/{id}/activity", new { isActive = false });
-        await _client.PatchAsJsonAsync($"/pipelines/asd/rules/{id}/activity", new { isActive = true });
-        await _client.DeleteAsync($"/pipelines/asd/rules/{id}");
+        await _client.PatchAsJsonAsync($"/pipelines/FindAir/rules/{id}", new { description = "edited" });
+        await _client.PatchAsJsonAsync($"/pipelines/FindAir/rules/{id}/activity", new { isActive = false });
+        await _client.PatchAsJsonAsync($"/pipelines/FindAir/rules/{id}/activity", new { isActive = true });
+        await _client.DeleteAsync($"/pipelines/FindAir/rules/{id}");
 
         var records = Records();
 
@@ -43,7 +43,7 @@ public sealed class PipelineRuleAuditTests : IDisposable
             records.Select(record => record.ChangeType));
         Assert.All(records, record =>
         {
-            Assert.Equal("asd", record.PipelineId);
+            Assert.Equal("FindAir", record.PipelineId);
             Assert.Equal(id, record.RuleId);
             Assert.Null(record.ChangedBy);
         });
@@ -63,8 +63,8 @@ public sealed class PipelineRuleAuditTests : IDisposable
     {
         var id = await CreateAsync();
 
-        await _client.PatchAsJsonAsync($"/pipelines/asd/rules/sensors/add?ids={id}", new { sensorName = "camera", gridTypes = new[] { "grid-a" } });
-        await _client.PatchAsJsonAsync($"/pipelines/asd/rules/sensors/add?ids={id}", new { sensorName = "camera", gridTypes = new[] { "grid-a" } });
+        await _client.PatchAsJsonAsync($"/pipelines/FindAir/rules/sensors/add?ids={id}", new { sensorName = "camera", gridTypes = new[] { "grid-a" } });
+        await _client.PatchAsJsonAsync($"/pipelines/FindAir/rules/sensors/add?ids={id}", new { sensorName = "camera", gridTypes = new[] { "grid-a" } });
 
         var records = Records();
         Assert.Equal(2, records.Count);
@@ -77,7 +77,7 @@ public sealed class PipelineRuleAuditTests : IDisposable
         var id = await CreateAsync();
 
         await _client.PatchAsJsonAsync(
-            $"/pipelines/asd/rules/{id}",
+            $"/pipelines/FindAir/rules/{id}",
             new { ruleName = "first", isActive = false, match = new { locationWkt = "POLYGON ((0 0, 2 0, 2 2, 0 2, 0 0))" } });
 
         var record = Records()[1];
@@ -91,7 +91,7 @@ public sealed class PipelineRuleAuditTests : IDisposable
     {
         var id = await CreateAsync();
 
-        await _client.PatchAsJsonAsync($"/pipelines/asd/rules/{id}", new { ruleName = "first", isActive = false });
+        await _client.PatchAsJsonAsync($"/pipelines/FindAir/rules/{id}", new { ruleName = "first", isActive = false });
 
         var record = Records()[1];
         Assert.Equal(RuleChangeType.Deactivated, record.ChangeType);
@@ -103,7 +103,7 @@ public sealed class PipelineRuleAuditTests : IDisposable
     {
         _store.FailingIndexes.Add(AuditIndex);
 
-        var response = await _client.PostAsJsonAsync("/pipelines/asd/rules", NewRule());
+        var response = await _client.PostAsJsonAsync("/pipelines/FindAir/rules", NewRule());
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         Assert.Empty(_store.All<RuleAuditRecord>(AuditIndex));
@@ -114,7 +114,7 @@ public sealed class PipelineRuleAuditTests : IDisposable
 
     private async Task<string> CreateAsync()
     {
-        var response = await _client.PostAsJsonAsync("/pipelines/asd/rules", NewRule());
+        var response = await _client.PostAsJsonAsync("/pipelines/FindAir/rules", NewRule());
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<PipelineRuleDocument>())!.Id;
     }

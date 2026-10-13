@@ -6,13 +6,29 @@ namespace ImagingPipeline.UnifiedGateway.Tests;
 public sealed class DispatchIdentityTests
 {
     [Fact]
-    public void IdContainsImagePipelineRuleAndRunParamsHash()
+    public void IdIsAFixedLengthTransportSafeHash()
     {
         var id = DispatchIdentity.Create("image-a", "asd", "rule-a", Parse("""{"tenantId":"t"}"""));
 
-        var parts = id.Split(':');
-        Assert.Equal(["image-a", "asd", "rule-a"], parts[..3]);
-        Assert.Matches("^[0-9a-f]{16}$", parts[3]);
+        Assert.Matches("^[0-9a-f]{64}$", id);
+    }
+
+    [Theory]
+    [InlineData('a')]
+    [InlineData('\u05d0')]
+    public void LongIdentifiersCannotExceedTheAmqpMessageIdLimit(char character)
+    {
+        var id = DispatchIdentity.Create(new string(character, 1000), "asd", new string(character, 1000), Parse("{}"));
+
+        Assert.Equal(64, System.Text.Encoding.UTF8.GetByteCount(id));
+    }
+
+    [Fact]
+    public void IdentifierSeparatorsCannotCollideAcrossTupleBoundaries()
+    {
+        Assert.NotEqual(
+            DispatchIdentity.Create("image:asd", "algo", "rule", Parse("{}")),
+            DispatchIdentity.Create("image", "asd", "algo:rule", Parse("{}")));
     }
 
     [Fact]

@@ -104,7 +104,7 @@ public sealed class RabbitMqDispatchTransport : IDispatchTransport
                 connection.Port,
                 connection.Username,
                 connection.Password,
-                connection.VirtualHost),
+                transport.VirtualHost ?? connection.VirtualHost),
             QueueName = output.QueueName,
             QueueArguments = output.Arguments,
             ExchangeName = exchange.ExchangeName,

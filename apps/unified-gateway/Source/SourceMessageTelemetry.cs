@@ -28,6 +28,17 @@ internal sealed class SourceMessageTelemetry : IDisposable
 
     public static SourceMessageTelemetry Begin(RabbitMqMessageEnvelope message, ILogger logger) => new(message, logger);
 
+    /// <summary>Explains an acknowledged message or run that did not need dispatching.</summary>
+    public static void Filtered(RabbitMqMessageEnvelope message, ILogger logger, string reason)
+    {
+        using var messageScope = logger.BeginTelemetryScope(new TelemetryLogContext(MessageId: message.MessageId));
+        using var filterScope = logger.BeginScope(new KeyValuePair<string, object?>[]
+        {
+            new(TelemetryAttributeNames.FilterReason, reason)
+        });
+        logger.SourceMessageFiltered();
+    }
+
     /// <summary>The message breaks its contract and will be dead-lettered.</summary>
     public void Rejected(InvalidInputMessageException exception)
     {

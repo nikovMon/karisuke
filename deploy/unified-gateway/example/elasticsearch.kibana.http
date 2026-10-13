@@ -1,0 +1,119 @@
+# Run selected requests in Kibana Dev Tools against your intended cluster.
+# These requests have NOT been executed by the configuration review.
+# Create both indexes before starting unified-gateway.
+# Mapping is gateway-only: match and runParams remain in _source but are not searchable.
+# Elasticsearch does not validate contract run parameters in enabled:false objects.
+# Gateway rule loading performs that validation. Do not disable _source.
+
+PUT ug-asd-rules
+{
+  "mappings": {
+    "dynamic": "strict",
+    "_source": { "enabled": true },
+    "properties": {
+      "schemaVersion": { "type": "integer" },
+      "ruleName": { "type": "keyword" },
+      "description": { "type": "text" },
+      "isActive": { "type": "boolean" },
+      "matchAll": { "type": "boolean" },
+      "match": { "type": "object", "enabled": false },
+      "runParams": { "type": "object", "enabled": false },
+      "createdBy": { "type": "keyword" },
+      "updatedBy": { "type": "keyword" },
+      "creationTime": { "type": "date" },
+      "updateTime": { "type": "date" }
+    }
+  }
+}
+
+PUT ug-algo-rules
+{
+  "mappings": {
+    "dynamic": "strict",
+    "_source": { "enabled": true },
+    "properties": {
+      "schemaVersion": { "type": "integer" },
+      "ruleName": { "type": "keyword" },
+      "description": { "type": "text" },
+      "isActive": { "type": "boolean" },
+      "matchAll": { "type": "boolean" },
+      "match": { "type": "object", "enabled": false },
+      "runParams": { "type": "object", "enabled": false },
+      "createdBy": { "type": "keyword" },
+      "updatedBy": { "type": "keyword" },
+      "creationTime": { "type": "date" },
+      "updateTime": { "type": "date" }
+    }
+  }
+}
+
+# Illustrative active rules. Edit sensor/grid/geometry/contract values first.
+# _create refuses to overwrite an existing document with this ID.
+# Keep the document ID in the URL, not in the JSON body.
+
+PUT ug-asd-rules/_create/asd-rule-001?refresh=wait_for
+{
+  "schemaVersion": 2,
+  "ruleName": "Example FindAir rule",
+  "description": "Illustrative sensor, grid and coordinates; replace with your real values.",
+  "isActive": true,
+  "matchAll": false,
+  "match": {
+    "sensors": [
+      { "name": "sensor-example", "registrationQualities": ["Accurate", "Sensor"], "gridTypes": ["grid-example"] }
+    ],
+    "resolution": { "min": 0.5, "max": 1.2 },
+    "maxPhotoAgeDays": 2,
+    "locationWkt": "POLYGON ((0 0, 2 0, 2 2, 0 2, 0 0))"
+  },
+  "runParams": [
+    {
+      "tenantId": "tenant-example",
+      "algorithmNames": ["FindAir"],
+      "tilingConfigs": [
+        { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 16, "tileOverlapHeight": 16 }
+      ]
+    }
+  ],
+  "createdBy": "deployment-example",
+  "updatedBy": "deployment-example",
+  "creationTime": "2026-10-12T00:00:00Z",
+  "updateTime": "2026-10-12T00:00:00Z"
+}
+
+PUT ug-algo-rules/_create/algo-rule-001?refresh=wait_for
+{
+  "schemaVersion": 2,
+  "ruleName": "Example DeepWisdom rule",
+  "description": "Illustrative location and algorithm; replace with your real values.",
+  "isActive": true,
+  "matchAll": false,
+  "match": {
+    "maxPhotoAgeDays": 2,
+    "locationWkt": "POLYGON ((0 0, 2 0, 2 2, 0 2, 0 0))"
+  },
+  "runParams": [
+    {
+      "customer": "customer-example",
+      "profile_name": null,
+      "hebrew_rule_name": "Example mission",
+      "algorithm_name": "example-algorithm",
+      "priority": 1,
+      "username": null,
+      "run_every_other_image": false,
+      "should_check_in_vip": false
+    }
+  ],
+  "createdBy": "deployment-example",
+  "updatedBy": "deployment-example",
+  "creationTime": "2026-10-12T00:00:00Z",
+  "updateTime": "2026-10-12T00:00:00Z"
+}
+
+# Verify both mappings, then inspect active rules the gateway can load.
+GET ug-asd-rules,ug-algo-rules/_mapping
+
+GET ug-asd-rules,ug-algo-rules/_search
+{
+  "query": { "term": { "isActive": true } }
+}

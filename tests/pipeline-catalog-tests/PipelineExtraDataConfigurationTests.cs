@@ -273,7 +273,7 @@ public sealed class PipelineExtraDataConfigurationTests
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
         builder.Configuration.AddConfiguration(configuration);
         builder.Services.AddLogging();
-        builder.Services.AddSingleton<IPipelineContractRegistry>(new PipelineContractRegistry([new AsdPipelineContract()]));
+        builder.Services.AddSingleton<IPipelineContractRegistry>(new PipelineContractRegistry([new FindAirPipelineContract()]));
         builder.Services.AddPipelineCatalog(builder.Configuration);
         return builder.Build();
     }
@@ -284,7 +284,7 @@ public sealed class PipelineExtraDataConfigurationTests
         {
           "PipelineCatalog": {
             "Pipelines": { "asd": {
-              "ContractId": "asd",
+              "ContractId": "FindAir",
               "Enabled": true,
               "RulesIndex": "rules-integ",
               "Transport": {

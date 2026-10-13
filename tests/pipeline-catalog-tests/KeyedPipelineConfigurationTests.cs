@@ -9,7 +9,7 @@ namespace ImagingPipeline.PipelineCatalog.Tests;
 public sealed class KeyedPipelineConfigurationTests
 {
     private const string Settings = """
-        {"Enabled":true,"ContractId":"asd","RulesIndex":"rules",
+        {"Enabled":true,"ContractId":"FindAir","RulesIndex":"rules",
          "Transport":{"Kind":"http","Http":{"Endpoint":"https://example.invalid/process"}}}
         """;
 
@@ -46,7 +46,7 @@ public sealed class KeyedPipelineConfigurationTests
 
     [Theory]
     [InlineData("{\"asd\":{},\"asd\":{}}")]
-    [InlineData("{\"asd\":{\"Enabled\":true},\"ASD\":{\"ContractId\":\"asd\"}}")]
+    [InlineData("{\"asd\":{\"Enabled\":true},\"ASD\":{\"ContractId\":\"FindAir\"}}")]
     public void NativeJsonRejectsDuplicateIdsBeforeConfigurationCanMergeThem(string pipelines)
     {
         var error = Assert.Throws<FormatException>(() => BuildConfiguration(pipelines));
@@ -122,7 +122,7 @@ public sealed class KeyedPipelineConfigurationTests
         {
             var services = new ServiceCollection();
             services.AddLogging();
-            services.AddSingleton<IPipelineContractRegistry>(new PipelineContractRegistry([new AsdPipelineContract()]));
+            services.AddSingleton<IPipelineContractRegistry>(new PipelineContractRegistry([new FindAirPipelineContract()]));
             services.AddPipelineCatalog(configuration);
             using var provider = services.BuildServiceProvider();
             var error = Assert.Throws<InvalidOperationException>(() => provider.GetRequiredService<IPipelineCatalog>());
@@ -186,7 +186,7 @@ public sealed class KeyedPipelineConfigurationTests
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
         builder.Configuration.AddConfiguration(configuration);
         builder.Services.AddLogging();
-        builder.Services.AddSingleton<IPipelineContractRegistry>(new PipelineContractRegistry([new AsdPipelineContract()]));
+        builder.Services.AddSingleton<IPipelineContractRegistry>(new PipelineContractRegistry([new FindAirPipelineContract()]));
         builder.Services.AddPipelineCatalog(builder.Configuration);
         return builder.Build();
     }

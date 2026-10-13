@@ -101,6 +101,13 @@ A complete configuration has the following shape:
 }
 ```
 
+When console logging is enabled, the shared JSON formatter preserves rule ID
+lists and AMQP UTF-8 header values as typed JSON arrays and strings instead of
+CLR type names such as `System.String[]`. Console records retain the usual
+`Message`, `State`, and `Scopes` fields. This applies to every service using the
+shared observability registration. Logstash ECS logging already preserves these
+values.
+
 Environment variables use the normal .NET double-underscore mapping. Examples:
 
 ```text

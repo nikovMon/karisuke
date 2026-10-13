@@ -21,8 +21,8 @@ public interface IPipelineContract
     /// </summary>
     IReadOnlyList<ContractValidationError> ValidateRuleLocation(string? locationWkt) => [];
 
-    /// <summary>Validates only the event fields used by this contract.</summary>
-    IReadOnlyList<ContractValidationError> ValidateContext(PipelineDispatchContext context) => [];
+    /// <summary>Validates event fields used by the selected run, including conditional payload fields.</summary>
+    IReadOnlyList<ContractValidationError> ValidateContext(PipelineDispatchContext context, JsonElement runParams = default) => [];
 
     /// <summary>
     /// Builds the downstream payload from event data, selected rule parameters and per-pipeline
@@ -55,6 +55,9 @@ public sealed record PipelineDispatchContext(
     string GridType,
     string GridUri)
 {
+    /// <summary>Projection errors for pipeline-specific fields, checked only by contracts that use them.</summary>
+    public IReadOnlyList<ContractValidationError> InputFieldErrors { get; init; } = [];
+
     public string? LegId { get; init; }
     public string? PrevOverlayId { get; init; }
     public string? NextOverlayId { get; init; }
@@ -66,8 +69,8 @@ public sealed record PipelineDispatchContext(
     public string? RuleLocationWkt { get; init; }
 
     /// <summary>
-    /// The legacy Algo clock value from DateTime.Parse. Kept separately from the UTC timestamp
-    /// used by ASD so formatting the mission date does not introduce a second conversion.
+    /// The original DeepWisdom clock value from DateTime.Parse. Kept separately from the UTC timestamp
+    /// used by FindAir so formatting the mission date does not introduce a second conversion.
     /// </summary>
     public DateTime? OverlayPhotoTime { get; init; }
 }

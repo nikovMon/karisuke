@@ -37,6 +37,50 @@ public sealed class TransportConfigurationTests
     }
 
     [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("\t")]
+    public void EmptyPipelineVirtualHostFailsValidation(string virtualHost)
+    {
+        var pipeline = Rabbit("asd", "output");
+        pipeline = pipeline with
+        {
+            Transport = pipeline.Transport with
+            {
+                RabbitMq = pipeline.Transport.RabbitMq! with { VirtualHost = virtualHost }
+            }
+        };
+
+        var exception = Assert.Throws<OptionsValidationException>(() => Catalog(OptionsFor(pipeline)));
+
+        Assert.Contains("Transport:RabbitMq:VirtualHost", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("/")]
+    [InlineData("pipeline-specific")]
+    [InlineData("/nested host")]
+    public async Task HostBindsPipelineVirtualHostWithoutOverwritingItsNamedConnection(string? virtualHost)
+    {
+        var settings = ValidConfiguration();
+        settings["PipelineCatalog:RabbitMqConnections:source:VirtualHost"] = "/shared";
+        if (virtualHost is not null)
+            settings["PipelineCatalog:Pipelines:asd:Transport:RabbitMq:VirtualHost"] = virtualHost;
+        using var host = BuildHost(settings);
+
+        await host.StartAsync();
+        var catalog = host.Services.GetRequiredService<IPipelineCatalog>();
+        var connections = host.Services.GetRequiredService<IRabbitMqConnectionResolver>();
+
+        Assert.Equal(virtualHost, catalog.GetRequired("asd").Transport.RabbitMq!.VirtualHost);
+        Assert.Equal(virtualHost, Assert.Single(catalog.GetAll()).Transport.RabbitMq!.VirtualHost);
+        Assert.Equal(virtualHost, Assert.Single(catalog.GetEnabled()).Transport.RabbitMq!.VirtualHost);
+        Assert.Equal("/shared", connections.GetRequired("source").VirtualHost);
+        await host.StopAsync();
+    }
+
+    [Theory]
     [InlineData("hostname")]
     [InlineData("port")]
     [InlineData("username")]
@@ -340,7 +384,7 @@ public sealed class TransportConfigurationTests
 
     private static PipelineDefinition Rabbit(string id, string connectionRef) => new()
     {
-        PipelineId = id, Enabled = true, ContractId = "asd", RulesIndex = "rules",
+        PipelineId = id, Enabled = true, ContractId = "FindAir", RulesIndex = "rules",
         Transport = new()
         {
             Kind = PipelineTransportKind.RabbitMq, RabbitMq = new()
@@ -352,7 +396,7 @@ public sealed class TransportConfigurationTests
 
     private static PipelineDefinition Http(Dictionary<string, string> headers, int timeoutSeconds = 20) => new()
     {
-        PipelineId = "http", Enabled = true, ContractId = "asd", RulesIndex = "rules",
+        PipelineId = "http", Enabled = true, ContractId = "FindAir", RulesIndex = "rules",
         Transport = new()
         {
             Kind = PipelineTransportKind.Http, Http = new()
@@ -377,7 +421,7 @@ public sealed class TransportConfigurationTests
     {
         var contract = new Mock<IPipelineContract>();
         contract.Setup(value => value.ValidateExtraData(It.IsAny<System.Text.Json.JsonElement>())).Returns([]);
-        contract.SetupGet(value => value.ContractId).Returns("asd");
+        contract.SetupGet(value => value.ContractId).Returns("FindAir");
         return new PipelineContractRegistry([contract.Object]);
     }
 
@@ -389,7 +433,7 @@ public sealed class TransportConfigurationTests
         ["PipelineCatalog:RabbitMqConnections:source:Hostname"] = "localhost",
         ["PipelineCatalog:RabbitMqConnections:source:Username"] = "guest",
         ["PipelineCatalog:RabbitMqConnections:source:Password"] = "guest",
-        ["PipelineCatalog:Pipelines:asd:ContractId"] = "asd",
+        ["PipelineCatalog:Pipelines:asd:ContractId"] = "FindAir",
         ["PipelineCatalog:Pipelines:asd:Enabled"] = "true",
         ["PipelineCatalog:Pipelines:asd:RulesIndex"] = "rules",
         ["PipelineCatalog:Pipelines:asd:Transport:Kind"] = "rabbitmq",

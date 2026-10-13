@@ -160,10 +160,22 @@ public sealed class GatewayApplicationBuilderTests
             ["--PipelineCatalogFile", "missing.json"], files.Options()));
     }
 
+    [Fact]
+    public async Task GatewayDefaultLoadsRenamedPipelinesFromSharedCatalog()
+    {
+        using var files = new RuntimeFiles();
+        var builder = GatewayApplicationBuilder.Create([], files.Options());
+        RegisterCatalog(builder);
+        await using var app = builder.Build();
+        var catalog = app.Services.GetRequiredService<IPipelineCatalog>();
+        Assert.Equal(["DeepWisdom", "FindAir"], catalog.GetAll().Select(pipeline => pipeline.PipelineId).Order());
+
+        Assert.All(catalog.GetAll(), pipeline => Assert.Equal(pipeline.PipelineId, pipeline.ContractId));
+    }
+
     private static void RegisterCatalog(WebApplicationBuilder builder)
     {
-        builder.Services.AddSingleton<IPipelineContract, AsdPipelineContract>();
-        builder.Services.AddSingleton<IPipelineContractRegistry, PipelineContractRegistry>();
+        builder.Services.AddPipelineContracts();
         builder.Services.AddPipelineCatalog(builder.Configuration);
     }
 
@@ -173,7 +185,7 @@ public sealed class GatewayApplicationBuilderTests
             "Pipelines": {
               "test": {
                 "Enabled": true,
-                "ContractId": "asd",
+                "ContractId": "FindAir",
                 "RulesIndex": "test-pipeline-index",
                 "ExtraData": {{extraData}},
                 "Transport": { "Kind": "http", "Http": { "Endpoint": "https://example.invalid/work" } }

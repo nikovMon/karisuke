@@ -48,7 +48,7 @@ public sealed class PipelineRuleValidatorTests
         var rule = Rule();
         rule.Match!.LocationWkt = null;
 
-        var errors = PipelineRuleValidator.Validate(rule, new AlgoPipelineContract()).Errors;
+        var errors = PipelineRuleValidator.Validate(rule, new DeepWisdomPipelineContract()).Errors;
 
         Assert.Contains(errors, error => error.StartsWith("match.locationWkt", StringComparison.Ordinal));
     }

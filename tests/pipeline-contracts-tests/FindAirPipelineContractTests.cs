@@ -6,7 +6,7 @@ using ImagingPipeline.Common.Dtos.Gateway.Messages;
 
 namespace ImagingPipeline.PipelineContracts.Tests;
 
-public sealed class AsdPipelineContractTests
+public sealed class FindAirPipelineContractTests
 {
     private const string ValidRunParams = """
         {
@@ -19,10 +19,10 @@ public sealed class AsdPipelineContractTests
         }
         """;
 
-    private readonly AsdPipelineContract _contract = new();
+    private readonly FindAirPipelineContract _contract = new();
 
     [Fact]
-    public void BuildPayloadPreservesLegacyAsdWireFieldsOrderAndAttributes()
+    public void BuildPayloadPreservesFindAirWireFieldsOrderAndAttributes()
     {
         // Golden wire fixture follows the existing GatewayOutputMessageBuilder contract.
         const string expected = """
@@ -190,7 +190,7 @@ public sealed class AsdPipelineContractTests
     [Fact]
     public void ValidateRunParamsAcceptsSupportedAlgorithmsAndZeroOverlap()
     {
-        Assert.Equal("asd", _contract.ContractId);
+        Assert.Equal("FindAir", _contract.ContractId);
         Assert.Empty(_contract.ValidateRunParams(Json(ValidRunParams)));
     }
 

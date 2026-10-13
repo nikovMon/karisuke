@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace ImagingPipeline.UnifiedGateway.Dispatch;
 
 /// <summary>
-/// Builds the deterministic dispatch ID: <c>{imageId}:{pipelineId}:{ruleId}:{runParamsHash}</c>.
+/// Builds a transport-safe, 64-character SHA-256 ID from the complete dispatch identity.
 /// The same image, pipeline, rule and run parameters always produce the same ID, regardless of
 /// property order or whitespace in the run parameters, so redeliveries reuse it.
 /// </summary>
@@ -16,18 +16,19 @@ public static class DispatchIdentity
         ArgumentException.ThrowIfNullOrWhiteSpace(imageId);
         ArgumentException.ThrowIfNullOrWhiteSpace(pipelineId);
         ArgumentException.ThrowIfNullOrWhiteSpace(ruleId);
-        return $"{imageId}:{pipelineId}:{ruleId}:{HashRunParams(runParams)}";
-    }
-
-    internal static string HashRunParams(JsonElement runParams)
-    {
         var buffer = new ArrayBufferWriter<byte>();
         using (var writer = new Utf8JsonWriter(buffer))
         {
+            // JSON string boundaries prevent identifiers containing separators from colliding.
+            writer.WriteStartArray();
+            writer.WriteStringValue(imageId);
+            writer.WriteStringValue(pipelineId);
+            writer.WriteStringValue(ruleId);
             WriteCanonical(writer, runParams);
+            writer.WriteEndArray();
         }
 
-        return Convert.ToHexStringLower(SHA256.HashData(buffer.WrittenSpan))[..16];
+        return Convert.ToHexStringLower(SHA256.HashData(buffer.WrittenSpan));
     }
 
     // Rewrites JSON into one fixed form so equal run params hash equally: object properties are

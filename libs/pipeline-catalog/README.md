@@ -2,11 +2,17 @@
 
 Shared configuration, contract registration validation, and rule-source resolution for the gateway and Rules API. This library performs no Elasticsearch, HTTP, or RabbitMQ I/O.
 
+The unified gateway and Rules API use the shared [`pipelinecatalog.json`](configuration/pipelinecatalog.json) with pipeline/contract IDs `FindAir` and `DeepWisdom`. `PipelineCatalogFile` selects a replacement catalog for a deployment. Existing indexes and queue names are not renamed.
+
+`ExtraData` has no field schema: every key/value is preserved under `extraData` in the outgoing JSON body for either transport. DeepWisdom's familiar settings can also populate existing top-level fields, but are optional. Custom catalogs must use the current contract IDs; `asd` and `algo` aliases are not registered.
+
+`Transport.RabbitMq.VirtualHost` optionally overrides the named connection's `VirtualHost` for one pipeline. Null/omitted inherits; explicit empty/whitespace values fail validation. Overrides are copied into the destination without mutating a shared connection or sibling pipeline.
+
 Register `IPipelineContractRegistry`, then call `services.AddPipelineCatalog(configuration)` in each host. `ValidateOnStart` checks the configuration even when no caller has resolved `IPipelineCatalog`. A missing catalog, empty pipeline object, unknown contract, or invalid entry fails startup with `OptionsValidationException`. Disabled entries undergo the same validation; registered contracts that are not configured are allowed.
 
 ## Shared JSON file
 
-[`configuration/pipelinecatalog.json`](configuration/pipelinecatalog.json) holds the shared sample catalog, with ASD and Algo pipeline entries. It is separate from host-specific observability/logging settings. The library copies it to consuming build/publish output as `pipelinecatalog.json` so it works without a repository checkout at runtime. Values for Algo are placeholders; deployments supply their own values and credentials.
+[`configuration/pipelinecatalog.json`](configuration/pipelinecatalog.json) holds the shared sample catalog, with FindAir and DeepWisdom pipeline entries. It is separate from host-specific observability/logging settings. The library copies it to consuming build/publish output as `pipelinecatalog.json` so it works without a repository checkout at runtime. Values for DeepWisdom are placeholders; deployments supply their own values and credentials.
 
 `AddPipelineCatalogJsonFile(path)` is a reusable configuration extension that preserves `ExtraData` JSON types before the first load, including when used on a live `ConfigurationManager`. A minimal loading sequence for a future host is:
 
@@ -18,9 +24,9 @@ var configuration = new ConfigurationBuilder()
     .Build();
 ```
 
-Register the contracts named in the selected file, then call `services.AddPipelineCatalog(configuration)`. There is no automatic Rules API integration. Select one complete catalog file for the host's deployment: named entries merge across configuration providers, and omission does not remove an earlier entry. The unified gateway selects a replacement path using `PipelineCatalogFile` with normal host configuration precedence. The file is required by default and the library does not watch it unless explicitly requested; the catalog itself remains a startup snapshot.
+Register the contracts named in the selected file, then call `services.AddPipelineCatalog(configuration)`. The unified gateway and Rules API load the shared file through `AddPipelineCatalogFileAsBase`. Select one complete catalog file for the host's deployment: named entries merge across configuration providers, and omission does not remove an earlier entry. A host selects a replacement path using `PipelineCatalogFile` with normal configuration precedence. The file is required by default and the library does not watch it unless explicitly requested; the catalog itself remains a startup snapshot.
 
-Each gateway deployment provides its own pipeline list. Every entry declares its rule index, contract and transport. The integration and production deployments keep the same target pipeline IDs, with a dedicated index in each environment: ASD uses `asd-integ-pipeline-index` in integration and `asd-pipeline-index` in production; Algo follows the same pattern. The catalog does not infer routing from the OpenShift namespace, .NET environment, or pipeline name.
+Each gateway deployment provides its own pipeline list. Every entry declares its rule index, contract and transport. The integration and production deployments keep the same target pipeline IDs, with a dedicated index in each environment: FindAir uses `asd-integ-pipeline-index` in integration and `asd-pipeline-index` in production; DeepWisdom follows the same pattern with the existing `algo` index names. The catalog does not infer routing from the OpenShift namespace, .NET environment, or pipeline name.
 
 Unknown configuration keys fail binding at startup, including nested `PipelineId`, removed `DisplayName`, global `Environment`/`IntegrationRulesIndex`, and per-entry `ProductionRulesIndex` settings. `Pipelines` is an object keyed by pipeline ID, with `PipelineSettings` values; the old array shape is rejected. The catalog populates runtime `PipelineDefinition.PipelineId` from the key. Contract IDs have no version suffix.
 
@@ -28,7 +34,7 @@ Unknown configuration keys fail binding at startup, including nested `PipelineId
 {
   "PipelineCatalog": {
     "RabbitMqConnections": {
-      "asd-output": {
+      "findair-output": {
         "Hostname": "localhost",
         "Port": 5672,
         "Username": "guest",
@@ -37,15 +43,15 @@ Unknown configuration keys fail binding at startup, including nested `PipelineId
       }
     },
     "Pipelines": {
-      "asd": {
+      "FindAir": {
         "Enabled": true,
-        "ContractId": "asd",
+        "ContractId": "FindAir",
         "RulesIndex": "asd-integ-pipeline-index",
         "ExtraData": {},
         "Transport": {
           "Kind": "rabbitmq",
           "RabbitMq": {
-            "ConnectionRef": "asd-output",
+            "ConnectionRef": "findair-output",
             "Output": {
               "QueueName": "publisher",
               "Arguments": {},
@@ -68,7 +74,7 @@ Unknown configuration keys fail binding at startup, including nested `PipelineId
 
 Pipeline/contract lookups are case-sensitive. Pipeline keys cannot differ only by case, contain `__`, or end with `_`; these spellings are ambiguous in configuration/environment paths. Use the same ID spelling in every provider; case-variant overrides are rejected before binding, including across chained configuration sources. Transport `Kind` accepts exactly `rabbitmq` or `http`, with only the matching settings object. Each pipeline has exactly one output transport descriptor. HTTP settings are `Endpoint` (full HTTP/HTTPS URL including query), `Method` (default `POST`), positive `TimeoutSeconds` (default `20`), and `Headers` (name/value dictionary). Header names and values are validated; request framing and contract-owned content type cannot be overridden. The contract builds body bytes and content type; transport configuration does not contain a body template. These settings describe a destination without sending requests or implementing delivery policies.
 
-`ExtraData` is the per-pipeline contract-settings object, defaulting to `{}`. Strings, numbers, booleans, nulls, arrays and nested objects retain their JSON types, property names and empty containers. The catalog calls the selected contract's `ValidateExtraData` at startup. ASD allows arbitrary values and retains its nested body behavior; Algo requires `XUserName`, `Origin`, `QueueType` and boolean `SaveDetections`, mapping them to its known body fields. There is no separate `ContractSettings` section. Use `AddPipelineCatalogJsonFile` for catalog files or `AddPipelineCatalogJsonStream` for streams. The unified host uses standard `WebApplication.CreateBuilder`: native `ExtraData` objects belong in the dedicated catalog, while appsettings/user-secrets overrides must supply a complete JSON string. `PreservePipelineExtraDataJson` remains available for other hosts that explicitly stage their JSON sources before loading. A complete JSON-string override at `PipelineCatalog__Pipelines__asd__ExtraData` replaces the whole object according to normal provider precedence; hierarchical overrides below `ExtraData` are rejected because ordinary configuration binding loses JSON types.
+`ExtraData` is an arbitrary per-pipeline JSON object, defaulting to `{}`. Strings, numbers, booleans, nulls, arrays and nested objects retain their JSON types, property names and empty containers. The catalog calls the selected contract's `ValidateExtraData` at startup. FindAir and DeepWisdom accept arbitrary properties and include the complete nonempty object under `extraData` in the outgoing body. DeepWisdom optionally maps `XUserName`, `Origin`, `QueueType` and `SaveDetections` to its existing top-level fields as well. There is no separate `ContractSettings` section. Use `AddPipelineCatalogJsonFile` for catalog files or `AddPipelineCatalogJsonStream` for streams. The unified host uses standard `WebApplication.CreateBuilder`: native `ExtraData` objects belong in the catalog file, while appsettings/user-secrets overrides must supply a complete JSON string. `PreservePipelineExtraDataJson` remains available for hosts that explicitly stage their JSON sources before loading. A complete JSON-string override at `PipelineCatalog__Pipelines__FindAir__ExtraData` replaces the whole object according to normal provider precedence; hierarchical overrides below `ExtraData` are rejected because ordinary configuration binding loses JSON types.
 
 `RabbitMqConnections` holds reusable broker definitions with hostname, port, username, password and virtual host. `IRabbitMqConnectionResolver.GetRequired(connectionRef)` resolves a validated definition. Unknown output references fail startup. Passwords must come from deployment secrets outside the local sample and are not included in validation errors. This foundation exposes no pipeline metadata endpoints.
 

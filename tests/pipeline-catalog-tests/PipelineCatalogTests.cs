@@ -56,7 +56,7 @@ public sealed class PipelineCatalogTests
 
         Assert.Equal(new RuleSource("rules-integ", "asd"), catalog.Resolve("asd"));
         Assert.Equal(new RuleSource("rules-integ", "http-pipeline"), catalog.Resolve("http-pipeline"));
-        Assert.Equal("asd", catalog.GetRequired("asd").ContractId);
+        Assert.Equal("FindAir", catalog.GetRequired("asd").ContractId);
         Assert.Equal(PipelineTransportKind.RabbitMq, catalog.GetRequired("asd").Transport.Kind);
         Assert.Equal("publisher", catalog.GetRequired("asd").Transport.RabbitMq!.Output.QueueName);
         Assert.Equal("http", catalog.GetRequired("http-pipeline").ContractId);
@@ -74,7 +74,7 @@ public sealed class PipelineCatalogTests
         });
 
         Assert.Equal(new RuleSource("explicitly-configured-rules", "integ"), catalog.Resolve("integ"));
-        Assert.Equal("asd", catalog.GetRequired("integ").ContractId);
+        Assert.Equal("FindAir", catalog.GetRequired("integ").ContractId);
     }
 
     [Fact]
@@ -409,7 +409,7 @@ public sealed class PipelineCatalogTests
     {
         var active = new Mock<IPipelineContract>();
         active.Setup(contract => contract.ValidateExtraData(It.IsAny<System.Text.Json.JsonElement>())).Returns([]);
-        active.SetupGet(contract => contract.ContractId).Returns("asd");
+        active.SetupGet(contract => contract.ContractId).Returns("FindAir");
         var unused = new Mock<IPipelineContract>();
         unused.Setup(contract => contract.ValidateExtraData(It.IsAny<System.Text.Json.JsonElement>())).Returns([]);
         unused.SetupGet(contract => contract.ContractId).Returns("unused");
@@ -423,7 +423,7 @@ public sealed class PipelineCatalogTests
     {
         PipelineId = pipelineId,
         Enabled = true,
-        ContractId = "asd",
+        ContractId = "FindAir",
         RulesIndex = $"{pipelineId}-rules",
         Transport = new PipelineTransportOptions
         {
@@ -448,7 +448,7 @@ public sealed class PipelineCatalogTests
         ["PipelineCatalog:RabbitMqConnections:asd-broker:Username"] = "guest",
         ["PipelineCatalog:RabbitMqConnections:asd-broker:Password"] = "guest",
         ["PipelineCatalog:Pipelines:asd:Enabled"] = "true",
-        ["PipelineCatalog:Pipelines:asd:ContractId"] = "asd",
+        ["PipelineCatalog:Pipelines:asd:ContractId"] = "FindAir",
         ["PipelineCatalog:Pipelines:asd:RulesIndex"] = "rules-integ",
         ["PipelineCatalog:Pipelines:asd:Transport:Kind"] = "rabbitmq",
         ["PipelineCatalog:Pipelines:asd:Transport:RabbitMq:ConnectionRef"] = "asd-broker",

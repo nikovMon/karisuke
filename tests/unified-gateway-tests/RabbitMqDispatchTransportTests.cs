@@ -57,6 +57,36 @@ public sealed class RabbitMqDispatchTransportTests
         Assert.False(destination.BindQueueToExchange);
     }
 
+    [Theory]
+    [InlineData(null, "/asd")]
+    [InlineData("/", "/")]
+    [InlineData("pipeline-specific", "pipeline-specific")]
+    [InlineData("/nested host", "/nested host")]
+    public async Task PipelineVirtualHostOverridesOnlyItsOwnDestination(string? configured, string expected)
+    {
+        var pipeline = RabbitMqPipeline("asd");
+        pipeline = pipeline with
+        {
+            Transport = pipeline.Transport with
+            {
+                RabbitMq = pipeline.Transport.RabbitMq! with { VirtualHost = configured }
+            }
+        };
+        var sibling = RabbitMqPipeline("sibling");
+        var catalog = CreateCatalog(pipeline, sibling);
+        var publisher = new RecordingPublisher();
+        var transport = new RabbitMqDispatchTransport(catalog, catalog, publisher);
+
+        await transport.SendAsync(Unit(pipeline), CancellationToken.None);
+        await transport.SendAsync(Unit(sibling), CancellationToken.None);
+
+        Assert.Equal(expected, publisher.Published[0].Destination.Connection.VirtualHost);
+        Assert.Equal("/asd", publisher.Published[1].Destination.Connection.VirtualHost);
+        Assert.Equal("/asd", ((IRabbitMqConnectionResolver)catalog).GetRequired("asd-output").VirtualHost);
+        Assert.Equal(configured, catalog.GetRequired("asd").Transport.RabbitMq!.VirtualHost);
+        Assert.Equal("broker-a", publisher.Published[0].Destination.Connection.Host);
+    }
+
     [Fact]
     public async Task EnvelopeCarriesDispatchIdSourceIdPayloadAndContractHeaders()
     {

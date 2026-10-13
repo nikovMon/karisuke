@@ -33,7 +33,8 @@ public sealed class AlgoPreparationTests
         Assert.Equal("second-user", secondBody.RootElement.GetProperty("username").GetString());
         Assert.Equal("example-algorithm", firstBody.RootElement.GetProperty("algorithmName").GetString());
         Assert.Equal("image-a", firstBody.RootElement.GetProperty("tasksData")[0].GetProperty("imageId").GetString());
-        Assert.False(firstBody.RootElement.TryGetProperty("extraData", out _));
+        Assert.Equal("first-origin", firstBody.RootElement.GetProperty("extraData").GetProperty("Origin").GetString());
+        Assert.Equal("second-origin", secondBody.RootElement.GetProperty("extraData").GetProperty("Origin").GetString());
         Assert.NotEqual(first.Work.Pipeline.RulesIndex, second.Work.Pipeline.RulesIndex);
         Assert.NotEqual(first.Work.Pipeline.Transport.Http!.Endpoint, second.Work.Pipeline.Transport.Http!.Endpoint);
     }
@@ -52,7 +53,7 @@ public sealed class AlgoPreparationTests
 
     private static PipelineWorkPreparer CreatePreparer()
     {
-        var registry = new PipelineContractRegistry([new AlgoPipelineContract()]);
+        var registry = new PipelineContractRegistry([new DeepWisdomPipelineContract()]);
         var catalog = new Catalog(Options.Create(new PipelineCatalogOptions
         {
             Pipelines = new(StringComparer.Ordinal)
@@ -66,7 +67,7 @@ public sealed class AlgoPreparationTests
 
     private static PipelineDefinition Definition(string name, bool save) => new()
     {
-        PipelineId = $"algo-{name}", ContractId = "algo", Enabled = true,
+        PipelineId = $"algo-{name}", ContractId = "DeepWisdom", Enabled = true,
         RulesIndex = $"algo-{name}-integ-pipeline-index",
         ExtraData = new PipelineExtraData(JsonSerializer.SerializeToElement(new
         {
