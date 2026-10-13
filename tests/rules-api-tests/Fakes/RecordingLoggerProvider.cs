@@ -7,7 +7,9 @@ internal sealed class RecordingLoggerProvider : ILoggerProvider
 {
     public ConcurrentQueue<LogEntry> Entries { get; } = new();
 
-    public ILogger CreateLogger(string categoryName) => new RecordingLogger(categoryName, Entries);
+    private readonly LoggerExternalScopeProvider _scopes = new();
+
+    public ILogger CreateLogger(string categoryName) => new RecordingLogger(categoryName, Entries, _scopes);
 
     public void Dispose()
     {
@@ -21,12 +23,14 @@ internal sealed class RecordingLoggerProvider : ILoggerProvider
         Exception? Exception,
         IReadOnlyDictionary<string, object?> Properties);
 
+    /// <summary>Records scope fields as entry properties, the way the ECS serializer flattens them.</summary>
     private sealed class RecordingLogger(
         string category,
-        ConcurrentQueue<LogEntry> entries) : ILogger
+        ConcurrentQueue<LogEntry> entries,
+        LoggerExternalScopeProvider scopes) : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state)
-            where TState : notnull => null;
+            where TState : notnull => scopes.Push(state);
 
         public bool IsEnabled(LogLevel logLevel) => true;
 
@@ -37,12 +41,25 @@ internal sealed class RecordingLoggerProvider : ILoggerProvider
             Exception? exception,
             Func<TState, Exception?, string> formatter)
         {
-            var properties = state is IEnumerable<KeyValuePair<string, object?>> values
-                ? values.ToDictionary(
-                    static item => item.Key,
-                    static item => item.Value,
-                    StringComparer.Ordinal)
-                : new Dictionary<string, object?>(StringComparer.Ordinal);
+            var properties = new Dictionary<string, object?>(StringComparer.Ordinal);
+            scopes.ForEachScope(static (scope, fields) =>
+            {
+                if (scope is IEnumerable<KeyValuePair<string, object?>> values)
+                {
+                    foreach (var item in values)
+                    {
+                        fields[item.Key] = item.Value;
+                    }
+                }
+            }, properties);
+
+            if (state is IEnumerable<KeyValuePair<string, object?>> values)
+            {
+                foreach (var item in values)
+                {
+                    properties[item.Key] = item.Value;
+                }
+            }
 
             entries.Enqueue(new LogEntry(
                 category,

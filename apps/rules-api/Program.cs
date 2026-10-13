@@ -16,8 +16,10 @@ using Microsoft.AspNetCore.Routing;
 
 namespace ImagingPipeline.Rules.Api;
 
-public sealed partial class Program
+public sealed class Program
 {
+    private const int MaxLoggedInvalidFields = 100;
+
     public static async Task Main(string[] args)
     {
         RegistrationQualityContract.EnsureValid();
@@ -46,12 +48,6 @@ public sealed partial class Program
                     .Select(item => item.Key)
                     .ToArray();
 
-                var fieldsToLog = invalidFields
-                    .Take(100)
-                    .ToArray();
-
-                var totalInvalidFieldsCount = invalidFields.Length;
-
                 var totalErrorsCount = context.ModelState.Values
                     .Sum(value => value.Errors.Count);
 
@@ -62,14 +58,16 @@ public sealed partial class Program
                     Activity.Current.SetTag(TelemetryAttributeNames.PipelineOutcome, "rejected");
                     Activity.Current.SetTag(TelemetryAttributeNames.ErrorCategory, "validation");
                 }
-                LogRequestModelValidationFailed(
-                    logger,
-                    context.HttpContext.Request.Method,
-                    ResolveRequestRoute(context.HttpContext),
-                    totalInvalidFieldsCount,
-                    totalErrorsCount,
-                    fieldsToLog.Length,
-                    string.Join(", ", fieldsToLog));
+                using (BeginRequestScope(logger, context.HttpContext))
+                using (logger.BeginScope(new KeyValuePair<string, object?>[]
+                       {
+                           new(TelemetryAttributeNames.RequestInvalidFieldNames, invalidFields.Take(MaxLoggedInvalidFields).ToArray()),
+                           new(TelemetryAttributeNames.RequestInvalidFieldCount, invalidFields.Length),
+                           new(TelemetryAttributeNames.RequestErrorCount, totalErrorsCount)
+                       }))
+                {
+                    logger.RequestModelValidationFailed();
+                }
 
                 var problemDetailsFactory = context.HttpContext.RequestServices
                     .GetRequiredService<ProblemDetailsFactory>();
@@ -117,11 +115,11 @@ public sealed partial class Program
                         TelemetryErrorCategory.Dependency,
                         persistenceException,
                         recordException: false);
-                    LogPersistenceFailure(
-                        app.Logger,
-                        persistenceException,
-                        context.Request.Method,
-                        ResolveRequestRoute(context));
+                    using (BeginRequestScope(app.Logger, context))
+                    {
+                        app.Logger.PersistenceOperationFailed(persistenceException);
+                    }
+
                     context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
                     await context.Response.WriteAsJsonAsync(new { error = "Elasticsearch dependency is unavailable." });
                     return;
@@ -131,11 +129,11 @@ public sealed partial class Program
                     TelemetryErrorCategory.Handler,
                     exception,
                     recordException: false);
-                LogUnexpectedServerError(
-                    app.Logger,
-                    exception,
-                    context.Request.Method,
-                    ResolveRequestRoute(context));
+                using (BeginRequestScope(app.Logger, context))
+                {
+                    app.Logger.UnexpectedServerError(exception);
+                }
+
                 context.Response.StatusCode = StatusCodes.Status500InternalServerError;
                 await context.Response.WriteAsJsonAsync(new { error = "Unexpected server error." });
             });
@@ -160,6 +158,13 @@ public sealed partial class Program
         await app.RunAsync();
     }
 
+    private static IDisposable? BeginRequestScope(ILogger logger, HttpContext context) =>
+        logger.BeginScope(new KeyValuePair<string, object?>[]
+        {
+            new(TelemetryAttributeNames.HttpRequestMethod, context.Request.Method),
+            new(TelemetryAttributeNames.HttpRoute, ResolveRequestRoute(context))
+        });
+
     private static string ResolveRequestRoute(HttpContext context)
     {
         var endpoint = context.Features.Get<IExceptionHandlerFeature>()?.Endpoint
@@ -177,37 +182,4 @@ public sealed partial class Program
 
         return route.StartsWith('/') ? route : $"/{route}";
     }
-
-    [LoggerMessage(
-        EventId = 1001,
-        Level = LogLevel.Warning,
-        Message = "Request model validation failed for {RequestMethod} {RequestRoute}. Total invalid fields: {TotalInvalidFieldsCount}. Total errors: {TotalErrorsCount}. Showing first {ShownFieldsCount} fields: {Fields}")]
-    private static partial void LogRequestModelValidationFailed(
-        ILogger logger,
-        string requestMethod,
-        string requestRoute,
-        int totalInvalidFieldsCount,
-        int totalErrorsCount,
-        int shownFieldsCount,
-        string fields);
-
-    [LoggerMessage(
-        EventId = 1002,
-        Level = LogLevel.Error,
-        Message = "Elasticsearch persistence operation failed for {RequestMethod} {RequestRoute}")]
-    private static partial void LogPersistenceFailure(
-        ILogger logger,
-        Exception exception,
-        string requestMethod,
-        string requestRoute);
-
-    [LoggerMessage(
-        EventId = 1003,
-        Level = LogLevel.Error,
-        Message = "Unexpected server error for {RequestMethod} {RequestRoute}")]
-    private static partial void LogUnexpectedServerError(
-        ILogger logger,
-        Exception? exception,
-        string requestMethod,
-        string requestRoute);
 }

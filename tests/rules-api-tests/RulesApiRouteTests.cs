@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.Common.Dtos.Rules.Responses;
+using ImagingPipeline.Observability;
 using ImagingPipeline.Rules.Api.Tests.Fakes;
 using static ImagingPipeline.Common.Dtos.Rules.Models.RegistrationQuality;
 
@@ -167,8 +168,11 @@ public sealed class RulesApiRouteTests
         var entry = Assert.Single(
             loggerProvider.Entries,
             log => log.EventId.Id == 1001);
-        Assert.Equal("/rules", entry.Properties["RequestRoute"]);
-        Assert.DoesNotContain("RequestPath", entry.Properties.Keys);
+        Assert.Equal("Request model validation failed.", entry.Message);
+        Assert.Equal("/rules", entry.Properties[TelemetryAttributeNames.HttpRoute]);
+        Assert.Equal("GET", entry.Properties[TelemetryAttributeNames.HttpRequestMethod]);
+        Assert.Equal(["isActive"], (string[])entry.Properties[TelemetryAttributeNames.RequestInvalidFieldNames]!);
+        Assert.Equal(1, entry.Properties[TelemetryAttributeNames.RequestInvalidFieldCount]);
     }
 
     [Fact]
@@ -827,8 +831,8 @@ public sealed class RulesApiRouteTests
         var entry = Assert.Single(
             loggerProvider.Entries,
             log => log.EventId.Id == 1002);
-        Assert.Equal("/rules/name/{ruleName}", entry.Properties["RequestRoute"]);
-        Assert.DoesNotContain("RequestPath", entry.Properties.Keys);
+        Assert.Equal("Elasticsearch persistence operation failed.", entry.Message);
+        Assert.Equal("/rules/name/{ruleName}", entry.Properties[TelemetryAttributeNames.HttpRoute]);
         Assert.DoesNotContain(sensitiveRuleName, entry.Message, StringComparison.Ordinal);
     }
 

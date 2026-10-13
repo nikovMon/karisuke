@@ -4,6 +4,16 @@ namespace ImagingPipeline.Rules.Api;
 
 internal static partial class RulesApiLog
 {
+    // Request-level failures. Method, route and details travel in the log scope.
+    [LoggerMessage(1001, LogLevel.Warning, "Request model validation failed.")]
+    public static partial void RequestModelValidationFailed(this ILogger logger);
+
+    [LoggerMessage(1002, LogLevel.Error, "Elasticsearch persistence operation failed.")]
+    public static partial void PersistenceOperationFailed(this ILogger logger, Exception exception);
+
+    [LoggerMessage(1003, LogLevel.Error, "Unexpected server error.")]
+    public static partial void UnexpectedServerError(this ILogger logger, Exception? exception);
+
     [LoggerMessage(5001, LogLevel.Debug, "Starting rule operation {Operation}. RuleId: {RuleId}; UpdatedFields: {UpdatedFields}")]
     public static partial void RuleOperationStartingWithFields(
         this ILogger logger,
@@ -133,11 +143,9 @@ internal static partial class RulesApiLog
     [LoggerMessage(5039, LogLevel.Warning, "Rule audit record could not be written; the rule change itself was saved.")]
     public static partial void RuleAuditWriteFailed(this ILogger logger, Exception exception);
 
-    [LoggerMessage(5050, LogLevel.Warning, "Elasticsearch health probe returned an invalid response. HttpStatusCode: {HttpStatusCode}; FailureType: {FailureType}")]
-    public static partial void ElasticsearchHealthInvalidResponse(
-        this ILogger logger,
-        int? httpStatusCode,
-        string? failureType);
+    // The status code and failure type travel in the log scope.
+    [LoggerMessage(5050, LogLevel.Warning, "Elasticsearch health probe returned an invalid response.")]
+    public static partial void ElasticsearchHealthInvalidResponse(this ILogger logger);
 
     [LoggerMessage(5051, LogLevel.Warning, "Elasticsearch health probe failed.")]
     public static partial void ElasticsearchHealthProbeFailed(
