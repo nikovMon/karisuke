@@ -16,7 +16,7 @@ using Microsoft.AspNetCore.Routing;
 
 namespace ImagingPipeline.Rules.Api;
 
-public sealed partial class Program
+public sealed class Program
 {
     private const int MaxLoggedInvalidFields = 100;
 
@@ -66,7 +66,7 @@ public sealed partial class Program
                            new(TelemetryAttributeNames.RequestErrorCount, totalErrorsCount)
                        }))
                 {
-                    LogRequestModelValidationFailed(logger);
+                    logger.RequestModelValidationFailed();
                 }
 
                 var problemDetailsFactory = context.HttpContext.RequestServices
@@ -117,7 +117,7 @@ public sealed partial class Program
                         recordException: false);
                     using (BeginRequestScope(app.Logger, context))
                     {
-                        LogPersistenceFailure(app.Logger, persistenceException);
+                        app.Logger.PersistenceOperationFailed(persistenceException);
                     }
 
                     context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
@@ -131,7 +131,7 @@ public sealed partial class Program
                     recordException: false);
                 using (BeginRequestScope(app.Logger, context))
                 {
-                    LogUnexpectedServerError(app.Logger, exception);
+                    app.Logger.UnexpectedServerError(exception);
                 }
 
                 context.Response.StatusCode = StatusCodes.Status500InternalServerError;
@@ -182,22 +182,4 @@ public sealed partial class Program
 
         return route.StartsWith('/') ? route : $"/{route}";
     }
-
-    [LoggerMessage(
-        EventId = 1001,
-        Level = LogLevel.Warning,
-        Message = "Request model validation failed.")]
-    private static partial void LogRequestModelValidationFailed(ILogger logger);
-
-    [LoggerMessage(
-        EventId = 1002,
-        Level = LogLevel.Error,
-        Message = "Elasticsearch persistence operation failed.")]
-    private static partial void LogPersistenceFailure(ILogger logger, Exception exception);
-
-    [LoggerMessage(
-        EventId = 1003,
-        Level = LogLevel.Error,
-        Message = "Unexpected server error.")]
-    private static partial void LogUnexpectedServerError(ILogger logger, Exception? exception);
 }

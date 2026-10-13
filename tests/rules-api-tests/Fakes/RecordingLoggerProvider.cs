@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Collections.Immutable;
 using Microsoft.Extensions.Logging;
 
 namespace ImagingPipeline.Rules.Api.Tests.Fakes;
@@ -8,7 +7,7 @@ internal sealed class RecordingLoggerProvider : ILoggerProvider
 {
     public ConcurrentQueue<LogEntry> Entries { get; } = new();
 
-    private readonly AsyncLocal<ImmutableStack<IEnumerable<KeyValuePair<string, object?>>>> _scopes = new();
+    private readonly LoggerExternalScopeProvider _scopes = new();
 
     public ILogger CreateLogger(string categoryName) => new RecordingLogger(categoryName, Entries, _scopes);
 
@@ -28,20 +27,10 @@ internal sealed class RecordingLoggerProvider : ILoggerProvider
     private sealed class RecordingLogger(
         string category,
         ConcurrentQueue<LogEntry> entries,
-        AsyncLocal<ImmutableStack<IEnumerable<KeyValuePair<string, object?>>>> scopes) : ILogger
+        LoggerExternalScopeProvider scopes) : ILogger
     {
         public IDisposable? BeginScope<TState>(TState state)
-            where TState : notnull
-        {
-            if (state is not IEnumerable<KeyValuePair<string, object?>> values)
-            {
-                return null;
-            }
-
-            var previous = scopes.Value ?? ImmutableStack<IEnumerable<KeyValuePair<string, object?>>>.Empty;
-            scopes.Value = previous.Push(values);
-            return new Scope(() => scopes.Value = previous);
-        }
+            where TState : notnull => scopes.Push(state);
 
         public bool IsEnabled(LogLevel logLevel) => true;
 
@@ -53,13 +42,16 @@ internal sealed class RecordingLoggerProvider : ILoggerProvider
             Func<TState, Exception?, string> formatter)
         {
             var properties = new Dictionary<string, object?>(StringComparer.Ordinal);
-            foreach (var scope in (scopes.Value ?? []).Reverse())
+            scopes.ForEachScope(static (scope, fields) =>
             {
-                foreach (var item in scope)
+                if (scope is IEnumerable<KeyValuePair<string, object?>> values)
                 {
-                    properties[item.Key] = item.Value;
+                    foreach (var item in values)
+                    {
+                        fields[item.Key] = item.Value;
+                    }
                 }
-            }
+            }, properties);
 
             if (state is IEnumerable<KeyValuePair<string, object?>> values)
             {
@@ -77,10 +69,5 @@ internal sealed class RecordingLoggerProvider : ILoggerProvider
                 exception,
                 properties));
         }
-    }
-
-    private sealed class Scope(Action dispose) : IDisposable
-    {
-        public void Dispose() => dispose();
     }
 }

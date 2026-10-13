@@ -4,6 +4,16 @@ namespace ImagingPipeline.Rules.Api;
 
 internal static partial class RulesApiLog
 {
+    // Request-level failures. Method, route and details travel in the log scope.
+    [LoggerMessage(1001, LogLevel.Warning, "Request model validation failed.")]
+    public static partial void RequestModelValidationFailed(this ILogger logger);
+
+    [LoggerMessage(1002, LogLevel.Error, "Elasticsearch persistence operation failed.")]
+    public static partial void PersistenceOperationFailed(this ILogger logger, Exception exception);
+
+    [LoggerMessage(1003, LogLevel.Error, "Unexpected server error.")]
+    public static partial void UnexpectedServerError(this ILogger logger, Exception? exception);
+
     [LoggerMessage(5001, LogLevel.Debug, "Starting rule operation {Operation}. RuleId: {RuleId}; UpdatedFields: {UpdatedFields}")]
     public static partial void RuleOperationStartingWithFields(
         this ILogger logger,
