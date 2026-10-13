@@ -11,7 +11,7 @@ internal static class RuleTestData
 {
     public static readonly DateTimeOffset Now = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
 
-    public static readonly IPipelineContract Contract = new AsdPipelineContract();
+    public static readonly IPipelineContract Contract = new FindAirPipelineContract();
 
     public static PipelineRuleDocument Rule(string id = "rule-1") => new()
     {

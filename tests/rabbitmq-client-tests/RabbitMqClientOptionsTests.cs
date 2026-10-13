@@ -222,7 +222,7 @@ public sealed class RabbitMqClientOptionsTests
     }
 
     [Fact]
-    public void ConsumerValidationRequiresExplicitOptInForNoOutputQueue()
+    public void ConsumerValidationAllowsNoOutputQueue()
     {
         var options = new RabbitMqClientOptions
         {
@@ -236,9 +236,7 @@ public sealed class RabbitMqClientOptionsTests
             RetryQueues = [new RabbitMqRetryQueueOptions { RetryCount = 1, Queue = "retry.1", DelayMilliseconds = 1000 }]
         };
 
-        Assert.False(options.IsConsumerValid(out var error));
-        Assert.Contains("OutputQueue", error, StringComparison.Ordinal);
-        Assert.True(options.IsConsumerValid(out _, allowNoOutput: true));
+        Assert.True(options.IsConsumerValid(out _));
         Assert.False(options.HasOutput);
     }
 

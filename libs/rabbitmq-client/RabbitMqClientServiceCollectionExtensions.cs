@@ -34,21 +34,11 @@ public static class RabbitMqClientServiceCollectionExtensions
 
     public static IServiceCollection AddRabbitMqConsumer(
         this IServiceCollection services,
-        IConfiguration configuration) =>
-        services.AddRabbitMqConsumer(configuration, allowNoOutput: false);
-
-    /// <summary>
-    /// Registers a consumer. Set <paramref name="allowNoOutput"/> only when its handler publishes
-    /// through another transport instead of returning messages for the configured output queue.
-    /// </summary>
-    public static IServiceCollection AddRabbitMqConsumer(
-        this IServiceCollection services,
-        IConfiguration configuration,
-        bool allowNoOutput)
+        IConfiguration configuration)
     {
         services.AddRabbitMqPublisher(configuration);
         AddRabbitMqOptions(services, configuration)
-            .Validate(options => options.IsConsumerValid(out _, allowNoOutput), "RabbitMq consumer configuration is invalid.")
+            .Validate(options => options.IsConsumerValid(out _), "RabbitMq consumer configuration is invalid.")
             .ValidateOnStart();
 
         services.TryAddSingleton<IRabbitMqConsumerConnectionManager, RabbitMqConsumerConnectionManager>();

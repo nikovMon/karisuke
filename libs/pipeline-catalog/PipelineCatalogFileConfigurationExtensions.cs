@@ -17,18 +17,12 @@ public static class PipelineCatalogFileConfigurationExtensions
     /// </summary>
     public static IConfigurationManager AddPipelineCatalogFileAsBase(
         this IConfigurationManager configuration, string contentRootPath)
-        => AddPipelineCatalogFileAsBase(configuration, contentRootPath, DefaultFileName);
-
-    /// <summary>Allows a host to ship its own default without changing another host's catalog.</summary>
-    public static IConfigurationManager AddPipelineCatalogFileAsBase(
-        this IConfigurationManager configuration, string contentRootPath, string defaultFileName)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentException.ThrowIfNullOrWhiteSpace(contentRootPath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(defaultFileName);
         var configuredFile = configuration[FileSettingName];
         var catalogFile = configuredFile is null
-            ? Path.Combine(AppContext.BaseDirectory, defaultFileName)
+            ? Path.Combine(AppContext.BaseDirectory, DefaultFileName)
             : Path.GetFullPath(configuredFile, contentRootPath);
         var catalog = new ConfigurationBuilder().AddPipelineCatalogJsonFile(catalogFile);
 

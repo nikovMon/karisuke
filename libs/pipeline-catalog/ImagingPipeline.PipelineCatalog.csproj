@@ -6,8 +6,6 @@
   <ItemGroup>
     <None Update="configuration\pipelinecatalog.json" TargetPath="pipelinecatalog.json"
           CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <None Update="configuration\unified-gateway.pipelinecatalog.json" TargetPath="unified-gateway.pipelinecatalog.json"
-          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" />

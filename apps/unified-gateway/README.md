@@ -2,11 +2,11 @@
 
 Consumes image updates, matches independently refreshed pipeline rules, prepares one unit per matched run, and dispatches through RabbitMQ or HTTP. The supported pipeline contracts are **FindAir** and **DeepWisdom**.
 
-## Catalog and compatibility
+## Catalog
 
-The gateway defaults to [`unified-gateway.pipelinecatalog.json`](../../libs/pipeline-catalog/configuration/unified-gateway.pipelinecatalog.json), copied beside the application. Pipeline keys and contract IDs are `FindAir` and `DeepWisdom`, with exact casing. `PipelineCatalogFile` selects a complete replacement catalog; relative paths resolve against the host content root. Environment variables and command-line arguments override catalog values using the same pipeline spelling.
+The gateway defaults to the shared [`pipelinecatalog.json`](../../libs/pipeline-catalog/configuration/pipelinecatalog.json), copied beside the application. Pipeline keys and contract IDs are `FindAir` and `DeepWisdom`, with exact casing. `PipelineCatalogFile` selects a complete replacement catalog; relative paths resolve against the host content root. Environment variables and command-line arguments override catalog values using the same pipeline spelling.
 
-The shared `pipelinecatalog.json` remains available for existing Rules API configurations. Legacy `asd` and `algo` contract IDs remain supported, including the old `algo` settings validation and output format. The new gateway names do not rename stored rule indexes or existing downstream queues. A Rules API deployment can explicitly select the gateway catalog when its API should expose the new pipeline names.
+The gateway and Rules API use the same default catalog and contract names. Custom catalogs must use `FindAir` and `DeepWisdom` as contract IDs. Stored rule indexes and existing downstream queues retain their configured names.
 
 Each enabled pipeline has its own `RulesIndex`, `ExtraData`, and exactly one transport. Rule indexes are explicit deployment settings; no index is created or migrated. Startup loads every enabled pipeline before consuming. Refresh failures retain that pipeline's previous rules. A nonempty load where every rule is rejected also retains the last usable snapshot.
 
@@ -44,7 +44,7 @@ The named connection supplies broker credentials and a default virtual host. Eac
 
 `Transport.RabbitMq.VirtualHost` takes precedence over `RabbitMqConnections.<ConnectionRef>.VirtualHost`. Omit it or use null to inherit the connection value. Explicit empty or whitespace-only values fail validation. The override does not change the shared connection or another pipeline's destination. Connections to different virtual hosts are isolated.
 
-The source consumer uses the application's `RabbitMq` section. Output transports use only the selected catalog destination. The gateway explicitly registers a consumer that has no common `OutputQueue`; other services retain their required-output startup validation.
+The source consumer uses the application's `RabbitMq` section. Output transports use only the selected catalog destination. The shared RabbitMQ client allows consumers to omit `OutputQueue`, so the gateway needs no special registration option.
 
 ## Input validation and filtering
 
@@ -68,7 +68,7 @@ A retryable unit retries the whole original source message, which is matched aga
 
 The service exposes `/health` and `/metrics` on the configured Prometheus listener (default port 9464). Health identifies host capabilities; it is not a broker or Elasticsearch connectivity probe. No pipeline metadata routes are exposed here.
 
-`Observability:Logs:PreserveStructuredConsoleValues` is enabled for this host. Console JSON preserves arrays, typed counts and UTF-8 fields instead of printing CLR type names such as `System.String[]`. Other services keep their existing console formatter. ECS/Logstash serialization preserves the same field values. The Logstash dataset is `unified_gateway`, a valid data-stream component.
+The shared console JSON formatter preserves arrays, typed counts and UTF-8 fields instead of printing CLR type names such as `System.String[]`. ECS/Logstash serialization preserves the same field values. The Logstash dataset is `unified_gateway`, a valid data-stream component.
 
 Preparation, rule loading and dispatch have separate spans and metrics. Dispatch logs include pipeline identity, transport, dispatch/source IDs, outcome and HTTP status when present. Metric labels use bounded outcomes/error categories and configured pipeline IDs, not image IDs or arbitrary ExtraData. Bodies, credentials and ExtraData values are not logged.
 

@@ -20,7 +20,7 @@ public sealed class PipelineRulesApiTests
         using var factory = new RulesApiFactory(store);
         using var client = factory.CreateClient();
 
-        var rules = await client.GetFromJsonAsync<List<PipelineRuleDocument>>("/pipelines/asd/rules");
+        var rules = await client.GetFromJsonAsync<List<PipelineRuleDocument>>("/pipelines/FindAir/rules");
 
         var rule = Assert.Single(rules!);
         Assert.Equal("asd-rule", rule.Id);
@@ -36,7 +36,7 @@ public sealed class PipelineRulesApiTests
         using var factory = new RulesApiFactory(store);
         using var client = factory.CreateClient();
 
-        var names = await client.GetFromJsonAsync<List<string>>("/pipelines/asd/rules?getNameOnly=true&isActive=false");
+        var names = await client.GetFromJsonAsync<List<string>>("/pipelines/FindAir/rules?getNameOnly=true&isActive=false");
 
         Assert.Equal(["inactive"], names);
     }
@@ -49,10 +49,10 @@ public sealed class PipelineRulesApiTests
         using var factory = new RulesApiFactory(store);
         using var client = factory.CreateClient();
 
-        var byId = await client.GetFromJsonAsync<PipelineRuleDocument>("/pipelines/asd/rules/rule-1");
-        var byName = await client.GetFromJsonAsync<PipelineRuleDocument>("/pipelines/asd/rules/name/first");
-        var missing = await client.GetAsync("/pipelines/asd/rules/unknown");
-        var otherPipeline = await client.GetAsync("/pipelines/algo/rules/rule-1");
+        var byId = await client.GetFromJsonAsync<PipelineRuleDocument>("/pipelines/FindAir/rules/rule-1");
+        var byName = await client.GetFromJsonAsync<PipelineRuleDocument>("/pipelines/FindAir/rules/name/first");
+        var missing = await client.GetAsync("/pipelines/FindAir/rules/unknown");
+        var otherPipeline = await client.GetAsync("/pipelines/DeepWisdom/rules/rule-1");
 
         Assert.Equal("first", byId!.RuleName);
         Assert.Equal("rule-1", byName!.Id);
@@ -85,7 +85,7 @@ public sealed class PipelineRulesApiTests
         using var factory = new RulesApiFactory(new InMemoryIndexStore());
         using var client = factory.CreateClient();
 
-        var response = await client.GetAsync("/pipelines/asd/rules" + query);
+        var response = await client.GetAsync("/pipelines/FindAir/rules" + query);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }

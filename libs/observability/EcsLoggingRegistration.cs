@@ -44,20 +44,9 @@ internal static class EcsLoggingRegistration
                     ActivityTrackingOptions.TraceId |
                     ActivityTrackingOptions.SpanId;
             });
-            var preserveStructuredValues = ReadBoolean(
-                configuration["Observability:Logs:PreserveStructuredConsoleValues"],
-                "Observability:Logs:PreserveStructuredConsoleValues",
-                defaultValue: false);
-            if (preserveStructuredValues)
-            {
-                builder.Logging
-                    .AddConsole(options => options.FormatterName = StructuredJsonConsoleFormatter.FormatterName)
-                    .AddConsoleFormatter<StructuredJsonConsoleFormatter, JsonConsoleFormatterOptions>(ConfigureConsole);
-            }
-            else
-            {
-                builder.Logging.AddJsonConsole(ConfigureConsole);
-            }
+            builder.Logging
+                .AddConsole(options => options.FormatterName = StructuredJsonConsoleFormatter.FormatterName)
+                .AddConsoleFormatter<StructuredJsonConsoleFormatter, JsonConsoleFormatterOptions>(ConfigureConsole);
         }
 
         if (!logstashEnabled)

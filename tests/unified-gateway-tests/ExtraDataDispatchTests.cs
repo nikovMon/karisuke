@@ -15,15 +15,13 @@ namespace ImagingPipeline.UnifiedGateway.Tests;
 public sealed class ExtraDataDispatchTests
 {
     [Fact]
-    public void RegisteredContractsResolveCanonicalAndLegacyIds()
+    public void RegisteredContractsResolveRenamedIds()
     {
         using var provider = new ServiceCollection().AddPipelineContracts().BuildServiceProvider();
         var registry = provider.GetRequiredService<IPipelineContractRegistry>();
 
         Assert.IsType<FindAirPipelineContract>(registry.GetRequired("FindAir"));
         Assert.IsType<DeepWisdomPipelineContract>(registry.GetRequired("DeepWisdom"));
-        Assert.IsType<AsdPipelineContract>(registry.GetRequired("asd"));
-        Assert.IsType<AlgoPipelineContract>(registry.GetRequired("algo"));
     }
 
     [Theory]

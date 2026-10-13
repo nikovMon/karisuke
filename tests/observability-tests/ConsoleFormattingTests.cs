@@ -15,7 +15,7 @@ public sealed class ConsoleFormattingTests
     [Fact]
     public void StructuredConsoleFormatter_PreservesRuleIdArraysUtf8HeadersAndNumbers()
     {
-        using var host = CreateHost(preserveStructuredValues: true);
+        using var host = CreateHost();
         var formatter = host.Services.GetServices<ConsoleFormatter>()
             .Single(item => item.Name == StructuredJsonConsoleFormatter.FormatterName);
         var scopes = new LoggerExternalScopeProvider();
@@ -44,19 +44,16 @@ public sealed class ConsoleFormattingTests
         Assert.DoesNotContain("System.Byte[]", writer.ToString(), StringComparison.Ordinal);
     }
 
-    [Theory]
-    [InlineData(false, ConsoleFormatterNames.Json)]
-    [InlineData(true, StructuredJsonConsoleFormatter.FormatterName)]
-    public void StructuredConsoleFormatting_IsOptIn(bool enabled, string expectedFormatter)
+    [Fact]
+    public void ConsoleLogging_UsesStructuredFormatterByDefault()
     {
-        using var host = CreateHost(enabled);
+        using var host = CreateHost();
 
-        Assert.Equal(expectedFormatter,
+        Assert.Equal(StructuredJsonConsoleFormatter.FormatterName,
             host.Services.GetRequiredService<IOptions<ConsoleLoggerOptions>>().Value.FormatterName);
-        Assert.False(new ObservabilityLogOptions().PreserveStructuredConsoleValues);
     }
 
-    private static IHost CreateHost(bool preserveStructuredValues)
+    private static IHost CreateHost()
     {
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true });
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
@@ -66,11 +63,6 @@ public sealed class ConsoleFormattingTests
             ["Observability:Logs:ConsoleEnabled"] = "true",
             ["Observability:Logs:Logstash:Enabled"] = "false"
         });
-        if (preserveStructuredValues)
-        {
-            builder.Configuration["Observability:Logs:PreserveStructuredConsoleValues"] = "true";
-        }
-
         builder.AddImagingPipelineObservability(ObservabilityServiceNames.UnifiedGateway);
         return builder.Build();
     }

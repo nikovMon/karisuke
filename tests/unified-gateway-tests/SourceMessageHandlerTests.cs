@@ -314,7 +314,7 @@ public sealed class SourceMessageHandlerTests
             IReadOnlyDictionary<string, IReadOnlyList<PipelineRuleDocument>> rulesByPipeline,
             Func<DispatchUnit, DispatchOutcome>? send = null)
         {
-            var contracts = new PipelineContractRegistry([new AsdPipelineContract(), new AlgoPipelineContract()]);
+            var contracts = new PipelineContractRegistry([new FindAirPipelineContract(), new DeepWisdomPipelineContract()]);
             var catalog = new ImagingPipeline.PipelineCatalog.PipelineCatalog(
                 Options.Create(new PipelineCatalogOptions
                 {
@@ -324,7 +324,7 @@ public sealed class SourceMessageHandlerTests
                     },
                     Pipelines = rulesByPipeline.Keys.ToDictionary(id => id, id => (PipelineSettings)(RabbitMqPipeline(id) with
                     {
-                        ContractId = id,
+                        ContractId = id == "algo" ? "DeepWisdom" : "FindAir",
                         ExtraData = id == "algo" ? new PipelineExtraData(JsonSerializer.SerializeToElement(new
                         {
                             XUserName = "user", Origin = "origin", QueueType = "queue", SaveDetections = false

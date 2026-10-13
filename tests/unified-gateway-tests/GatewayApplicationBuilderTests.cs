@@ -161,7 +161,7 @@ public sealed class GatewayApplicationBuilderTests
     }
 
     [Fact]
-    public async Task GatewayDefaultUsesNewNamesWhileExplicitLegacyCatalogRemainsCompatible()
+    public async Task GatewayDefaultLoadsRenamedPipelinesFromSharedCatalog()
     {
         using var files = new RuntimeFiles();
         var builder = GatewayApplicationBuilder.Create([], files.Options());
@@ -170,12 +170,7 @@ public sealed class GatewayApplicationBuilderTests
         var catalog = app.Services.GetRequiredService<IPipelineCatalog>();
         Assert.Equal(["DeepWisdom", "FindAir"], catalog.GetAll().Select(pipeline => pipeline.PipelineId).Order());
 
-        var legacyBuilder = GatewayApplicationBuilder.Create(
-            ["--PipelineCatalogFile", Path.Combine(AppContext.BaseDirectory, "pipelinecatalog.json")], files.Options());
-        RegisterCatalog(legacyBuilder);
-        await using var legacyApp = legacyBuilder.Build();
-        var legacyCatalog = legacyApp.Services.GetRequiredService<IPipelineCatalog>();
-        Assert.Equal(["algo", "asd"], legacyCatalog.GetAll().Select(pipeline => pipeline.PipelineId).Order());
+        Assert.All(catalog.GetAll(), pipeline => Assert.Equal(pipeline.PipelineId, pipeline.ContractId));
     }
 
     private static void RegisterCatalog(WebApplicationBuilder builder)
@@ -190,7 +185,7 @@ public sealed class GatewayApplicationBuilderTests
             "Pipelines": {
               "test": {
                 "Enabled": true,
-                "ContractId": "asd",
+                "ContractId": "FindAir",
                 "RulesIndex": "test-pipeline-index",
                 "ExtraData": {{extraData}},
                 "Transport": { "Kind": "http", "Http": { "Endpoint": "https://example.invalid/work" } }

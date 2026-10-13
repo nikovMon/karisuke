@@ -20,12 +20,12 @@ public sealed class PipelineRuleWriteApiTests
         using var factory = new RulesApiFactory(_store);
         using var client = factory.CreateClient();
 
-        var response = await client.PostAsJsonAsync("/pipelines/asd/rules", NewRule("first"));
+        var response = await client.PostAsJsonAsync("/pipelines/FindAir/rules", NewRule("first"));
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var rule = await response.Content.ReadFromJsonAsync<PipelineRuleDocument>();
         Assert.False(string.IsNullOrEmpty(rule!.Id));
-        Assert.EndsWith($"/pipelines/asd/rules/{rule.Id}", response.Headers.Location!.ToString(), StringComparison.Ordinal);
+        Assert.EndsWith($"/pipelines/FindAir/rules/{rule.Id}", response.Headers.Location!.ToString(), StringComparison.Ordinal);
         var stored = _store.Stored(AsdIndex, rule.Id)!;
         Assert.Equal("Polygon", stored["match"]!["location"]!["type"]!.GetValue<string>());
         Assert.Null(stored["_id"]);
@@ -39,7 +39,7 @@ public sealed class PipelineRuleWriteApiTests
         using var client = factory.CreateClient();
         var request = NewRule("first", tenantId: " ");
 
-        var response = await client.PostAsJsonAsync("/pipelines/asd/rules", request);
+        var response = await client.PostAsJsonAsync("/pipelines/FindAir/rules", request);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("runParams[0].tenantId", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
@@ -55,7 +55,7 @@ public sealed class PipelineRuleWriteApiTests
         request.Match = null;
         request.MatchAll = true;
 
-        var response = await client.PostAsJsonAsync("/pipelines/algo/rules", request);
+        var response = await client.PostAsJsonAsync("/pipelines/DeepWisdom/rules", request);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("match.locationWkt", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
@@ -66,9 +66,9 @@ public sealed class PipelineRuleWriteApiTests
     {
         using var factory = new RulesApiFactory(_store);
         using var client = factory.CreateClient();
-        await client.PostAsJsonAsync("/pipelines/asd/rules", NewRule("first"));
+        await client.PostAsJsonAsync("/pipelines/FindAir/rules", NewRule("first"));
 
-        var duplicate = await client.PostAsJsonAsync("/pipelines/asd/rules", NewRule("first"));
+        var duplicate = await client.PostAsJsonAsync("/pipelines/FindAir/rules", NewRule("first"));
 
         Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
     }
@@ -81,7 +81,7 @@ public sealed class PipelineRuleWriteApiTests
         var id = await CreateAsync(client, "first");
 
         var response = await client.PatchAsJsonAsync(
-            $"/pipelines/asd/rules/{id}",
+            $"/pipelines/FindAir/rules/{id}",
             new { match = new { maxPhotoAgeDays = 7 } });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -98,7 +98,7 @@ public sealed class PipelineRuleWriteApiTests
         using var client = factory.CreateClient();
         var id = await CreateAsync(client, "first");
 
-        var response = await client.PatchAsJsonAsync($"/pipelines/asd/rules/{id}", new { match = new { locationWkt = (string?)null } });
+        var response = await client.PatchAsJsonAsync($"/pipelines/FindAir/rules/{id}", new { match = new { locationWkt = (string?)null } });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Null(_store.Stored(AsdIndex, id)!["match"]!["location"]);
@@ -111,7 +111,7 @@ public sealed class PipelineRuleWriteApiTests
         using var client = factory.CreateClient();
         var id = await CreateAsync(client, "first");
 
-        var response = await client.PatchAsJsonAsync($"/pipelines/asd/rules/{id}", new { match = (object?)null });
+        var response = await client.PatchAsJsonAsync($"/pipelines/FindAir/rules/{id}", new { match = (object?)null });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("matchAll", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
@@ -125,10 +125,10 @@ public sealed class PipelineRuleWriteApiTests
         using var client = factory.CreateClient();
         var id = await CreateAsync(client, "first");
 
-        var deactivated = await client.PatchAsJsonAsync($"/pipelines/asd/rules/{id}/activity", new { isActive = false });
+        var deactivated = await client.PatchAsJsonAsync($"/pipelines/FindAir/rules/{id}/activity", new { isActive = false });
         var isActive = _store.Stored(AsdIndex, id)!["isActive"]!.GetValue<bool>();
-        var deleted = await client.DeleteAsync($"/pipelines/asd/rules/{id}");
-        var deletedAgain = await client.DeleteAsync($"/pipelines/asd/rules/{id}");
+        var deleted = await client.DeleteAsync($"/pipelines/FindAir/rules/{id}");
+        var deletedAgain = await client.DeleteAsync($"/pipelines/FindAir/rules/{id}");
 
         Assert.Equal(HttpStatusCode.OK, deactivated.StatusCode);
         Assert.False(isActive);
@@ -149,8 +149,8 @@ public sealed class PipelineRuleWriteApiTests
         using var factory = new RulesApiFactory(_store);
         using var client = factory.CreateClient();
 
-        var deactivated = await client.PatchAsJsonAsync("/pipelines/asd/rules/stale/activity", new { isActive = false });
-        var reactivated = await client.PatchAsJsonAsync("/pipelines/asd/rules/stale/activity", new { isActive = true });
+        var deactivated = await client.PatchAsJsonAsync("/pipelines/FindAir/rules/stale/activity", new { isActive = false });
+        var reactivated = await client.PatchAsJsonAsync("/pipelines/FindAir/rules/stale/activity", new { isActive = true });
 
         Assert.Equal(HttpStatusCode.OK, deactivated.StatusCode);
         Assert.False(_store.Stored(AsdIndex, "stale")!["isActive"]!.GetValue<bool>());
@@ -163,8 +163,8 @@ public sealed class PipelineRuleWriteApiTests
         using var factory = new RulesApiFactory(_store);
         using var client = factory.CreateClient();
 
-        var update = await client.PatchAsJsonAsync("/pipelines/asd/rules/missing", new { ruleName = "x" });
-        var activity = await client.PatchAsJsonAsync("/pipelines/asd/rules/missing/activity", new { isActive = true });
+        var update = await client.PatchAsJsonAsync("/pipelines/FindAir/rules/missing", new { ruleName = "x" });
+        var activity = await client.PatchAsJsonAsync("/pipelines/FindAir/rules/missing/activity", new { isActive = true });
 
         Assert.Equal(HttpStatusCode.NotFound, update.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, activity.StatusCode);
@@ -172,7 +172,7 @@ public sealed class PipelineRuleWriteApiTests
 
     private async Task<string> CreateAsync(HttpClient client, string name)
     {
-        var response = await client.PostAsJsonAsync("/pipelines/asd/rules", NewRule(name));
+        var response = await client.PostAsJsonAsync("/pipelines/FindAir/rules", NewRule(name));
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<PipelineRuleDocument>())!.Id;
     }

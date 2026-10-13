@@ -10,7 +10,7 @@ using Microsoft.Extensions.Options;
 namespace ImagingPipeline.Observability;
 
 /// <summary>
-/// An opt-in JSON console formatter that preserves arrays and AMQP string headers in
+/// A JSON console formatter that preserves arrays and AMQP string headers in
 /// structured scopes. The framework JSON formatter otherwise writes arrays as CLR type names.
 /// </summary>
 internal sealed class StructuredJsonConsoleFormatter(IOptionsMonitor<JsonConsoleFormatterOptions> options)

@@ -83,48 +83,6 @@ public sealed class RabbitMqServiceCollectionTests
         Assert.NotNull(provider.GetService<IRabbitMqClient>());
     }
 
-    [Theory]
-    [InlineData(false, null)]
-    [InlineData(false, "")]
-    [InlineData(false, " ")]
-    [InlineData(true, null)]
-    [InlineData(true, "")]
-    [InlineData(true, " ")]
-    public async Task DefaultConsumerAndClientRegistrationsRejectMissingOutput(bool useClientAlias, string? outputQueue)
-    {
-        var configuration = Configuration(new Dictionary<string, string?> { ["RabbitMq:OutputQueue"] = outputQueue });
-        var services = new ServiceCollection().AddLogging();
-        if (useClientAlias)
-            services.AddRabbitMqClient(configuration);
-        else
-            services.AddRabbitMqConsumer(configuration);
-        await using var provider = services.BuildServiceProvider(validateScopes: true);
-
-        var exception = Assert.Throws<OptionsValidationException>(
-            () => provider.GetRequiredService<IOptions<RabbitMqClientOptions>>().Value);
-
-        Assert.Contains("RabbitMq consumer configuration is invalid.", exception.Failures);
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData(" ")]
-    [InlineData("output")]
-    public async Task ConsumerRegistrationAcceptsMissingOrConfiguredOutputWithExplicitOptIn(string? outputQueue)
-    {
-        var configuration = Configuration(new Dictionary<string, string?> { ["RabbitMq:OutputQueue"] = outputQueue });
-        await using var provider = new ServiceCollection()
-            .AddLogging()
-            .AddRabbitMqConsumer(configuration, allowNoOutput: true)
-            .BuildServiceProvider(validateScopes: true);
-
-        var options = provider.GetRequiredService<IOptions<RabbitMqClientOptions>>().Value;
-
-        Assert.True(options.IsConsumerValid(out var error, allowNoOutput: true), error);
-        Assert.Equal(!string.IsNullOrWhiteSpace(outputQueue), options.HasOutput);
-    }
-
     [Fact]
     public async Task AddRabbitMqConsumerUsesSeparatePublisherAndConsumerConnectionManagers()
     {

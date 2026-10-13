@@ -30,7 +30,7 @@ public sealed class PipelinesApiTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(
-            [new PipelineResponse("algo", "algo", true), new PipelineResponse("asd", "asd", true)],
+            [new PipelineResponse("DeepWisdom", "DeepWisdom", true), new PipelineResponse("FindAir", "FindAir", true)],
             pipelines);
         Assert.DoesNotContain("transport", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("rulesIndex", json, StringComparison.OrdinalIgnoreCase);
@@ -42,10 +42,10 @@ public sealed class PipelinesApiTests
         using var factory = new RulesApiFactory(new InMemoryRuleRepository());
         using var client = factory.CreateClient();
 
-        var found = await client.GetFromJsonAsync<PipelineResponse>("/pipelines/asd");
+        var found = await client.GetFromJsonAsync<PipelineResponse>("/pipelines/FindAir");
         var missing = await client.GetAsync("/pipelines/unknown");
 
-        Assert.Equal(new PipelineResponse("asd", "asd", true), found);
+        Assert.Equal(new PipelineResponse("FindAir", "FindAir", true), found);
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
     }
 
@@ -74,7 +74,7 @@ public sealed class PipelinesApiTests
 
     private sealed class SinglePipelineCatalog : IPipelineCatalog
     {
-        private static readonly PipelineDefinition Pipeline = new() { PipelineId = "asd", ContractId = "asd", Enabled = true };
+        private static readonly PipelineDefinition Pipeline = new() { PipelineId = "FindAir", ContractId = "FindAir", Enabled = true };
 
         public IReadOnlyList<PipelineDefinition> GetAll() => [Pipeline];
         public IReadOnlyList<PipelineDefinition> GetEnabled() => [Pipeline];

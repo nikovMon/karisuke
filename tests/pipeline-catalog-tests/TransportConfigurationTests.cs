@@ -384,7 +384,7 @@ public sealed class TransportConfigurationTests
 
     private static PipelineDefinition Rabbit(string id, string connectionRef) => new()
     {
-        PipelineId = id, Enabled = true, ContractId = "asd", RulesIndex = "rules",
+        PipelineId = id, Enabled = true, ContractId = "FindAir", RulesIndex = "rules",
         Transport = new()
         {
             Kind = PipelineTransportKind.RabbitMq, RabbitMq = new()
@@ -396,7 +396,7 @@ public sealed class TransportConfigurationTests
 
     private static PipelineDefinition Http(Dictionary<string, string> headers, int timeoutSeconds = 20) => new()
     {
-        PipelineId = "http", Enabled = true, ContractId = "asd", RulesIndex = "rules",
+        PipelineId = "http", Enabled = true, ContractId = "FindAir", RulesIndex = "rules",
         Transport = new()
         {
             Kind = PipelineTransportKind.Http, Http = new()
@@ -421,7 +421,7 @@ public sealed class TransportConfigurationTests
     {
         var contract = new Mock<IPipelineContract>();
         contract.Setup(value => value.ValidateExtraData(It.IsAny<System.Text.Json.JsonElement>())).Returns([]);
-        contract.SetupGet(value => value.ContractId).Returns("asd");
+        contract.SetupGet(value => value.ContractId).Returns("FindAir");
         return new PipelineContractRegistry([contract.Object]);
     }
 
@@ -433,7 +433,7 @@ public sealed class TransportConfigurationTests
         ["PipelineCatalog:RabbitMqConnections:source:Hostname"] = "localhost",
         ["PipelineCatalog:RabbitMqConnections:source:Username"] = "guest",
         ["PipelineCatalog:RabbitMqConnections:source:Password"] = "guest",
-        ["PipelineCatalog:Pipelines:asd:ContractId"] = "asd",
+        ["PipelineCatalog:Pipelines:asd:ContractId"] = "FindAir",
         ["PipelineCatalog:Pipelines:asd:Enabled"] = "true",
         ["PipelineCatalog:Pipelines:asd:RulesIndex"] = "rules",
         ["PipelineCatalog:Pipelines:asd:Transport:Kind"] = "rabbitmq",

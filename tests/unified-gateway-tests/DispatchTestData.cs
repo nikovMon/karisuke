@@ -13,7 +13,7 @@ internal static class DispatchTestData
 {
     public static Catalog CreateCatalog(params PipelineDefinition[] definitions)
     {
-        var registry = new PipelineContractRegistry([new AsdPipelineContract()]);
+        var registry = new PipelineContractRegistry([new FindAirPipelineContract()]);
         return new Catalog(
             Options.Create(new PipelineCatalogOptions
             {
@@ -37,7 +37,7 @@ internal static class DispatchTestData
         RabbitMqQueueOptions? output = null) => new()
     {
         PipelineId = id,
-        ContractId = "asd",
+        ContractId = "FindAir",
         Enabled = enabled,
         RulesIndex = $"{id}-pipeline-index",
         Transport = new PipelineTransportOptions
@@ -54,7 +54,7 @@ internal static class DispatchTestData
     public static PipelineDefinition HttpPipeline(string id, HttpTransportOptions? http = null) => new()
     {
         PipelineId = id,
-        ContractId = "asd",
+        ContractId = "FindAir",
         Enabled = true,
         RulesIndex = $"{id}-pipeline-index",
         Transport = new PipelineTransportOptions

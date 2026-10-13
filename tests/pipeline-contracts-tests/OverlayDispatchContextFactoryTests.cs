@@ -43,8 +43,8 @@ public sealed class OverlayDispatchContextFactoryTests
         {
             RuleLocationWkt = "POLYGON ((0 0, 2 0, 2 2, 0 0))"
         };
-        Assert.Empty(new AlgoPipelineContract().ValidateContext(context));
-        var errors = new AsdPipelineContract().ValidateContext(context);
+        Assert.Empty(new DeepWisdomPipelineContract().ValidateContext(context));
+        var errors = new FindAirPipelineContract().ValidateContext(context);
         Assert.Contains(errors, error => error.Field == "input.imageUrl");
         Assert.Contains(errors, error => error.Field == "input.width");
         Assert.Contains(errors, error => error.Field == "input.gridURI");

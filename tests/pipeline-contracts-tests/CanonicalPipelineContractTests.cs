@@ -92,27 +92,13 @@ public sealed class CanonicalPipelineContractTests
     }
 
     [Fact]
-    public void LegacyContractIdsRetainTheirExistingBehavior()
+    public void CanonicalContractsUseOnlyFindAirAndDeepWisdomIds()
     {
-        var findAir = new FindAirPipelineContract();
-        var deepWisdom = new DeepWisdomPipelineContract();
-        var asd = new AsdPipelineContract();
-        var algo = new AlgoPipelineContract();
-        Assert.Equal("FindAir", findAir.ContractId);
-        Assert.Equal("DeepWisdom", deepWisdom.ContractId);
-        Assert.Equal("asd", asd.ContractId);
-        Assert.Equal("algo", algo.ContractId);
-        Assert.Equal(
-            asd.BuildPayload(Context(), RunParams("FindAir")).Body,
-            findAir.BuildPayload(Context(), RunParams("FindAir")).Body);
-        Assert.NotEmpty(algo.ValidateExtraData(Json("{}")));
-        var settings = Json("""
-            {"XUserName":"user","Origin":"origin","QueueType":"queue","SaveDetections":true,"custom":42}
-            """);
-        using var legacy = JsonDocument.Parse(algo.BuildPayload(Context(), RunParams("DeepWisdom"), settings).Body);
-        Assert.Equal("origin", legacy.RootElement.GetProperty("origin").GetString());
-        Assert.False(legacy.RootElement.TryGetProperty("extraData", out _));
-        Assert.False(legacy.RootElement.TryGetProperty("custom", out _));
+        var registry = new PipelineContractRegistry([new FindAirPipelineContract(), new DeepWisdomPipelineContract()]);
+        Assert.IsType<FindAirPipelineContract>(registry.GetRequired("FindAir"));
+        Assert.IsType<DeepWisdomPipelineContract>(registry.GetRequired("DeepWisdom"));
+        Assert.False(registry.TryGet("asd", out _));
+        Assert.False(registry.TryGet("algo", out _));
     }
 
     private static IPipelineContract Contract(string id) => id == "FindAir"

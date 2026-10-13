@@ -40,7 +40,6 @@ public sealed class ObservabilityLogOptions
 {
     public bool Enabled { get; set; } = true;
     public bool ConsoleEnabled { get; set; }
-    public bool PreserveStructuredConsoleValues { get; set; }
     public ObservabilityLogstashOptions Logstash { get; set; } = new();
     public ObservabilityLogDataStreamOptions DataStream { get; set; } = new();
 }

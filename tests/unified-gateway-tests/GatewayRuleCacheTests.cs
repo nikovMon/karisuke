@@ -120,7 +120,7 @@ public sealed class GatewayRuleCacheTests
         return new GatewayRuleCache(
             catalog,
             catalog,
-            new PipelineContractRegistry([new AsdPipelineContract()]),
+            new PipelineContractRegistry([new FindAirPipelineContract()]),
             repository,
             Options.Create(new RuleRefreshOptions { IntervalSeconds = 1, JitterSeconds = 0 }),
             logger);

@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 
 namespace ImagingPipeline.PipelineContracts.Tests;
 
-public sealed class AlgoPipelineContractTests
+public sealed class DeepWisdomPipelineContractTests
 {
     private const string Rule = """
         {"customer":"customer-a","profile_name":"profile-a","hebrew_rule_name":"Mission",
@@ -15,13 +15,13 @@ public sealed class AlgoPipelineContractTests
     private const string Settings = """
         {"XUserName":"configured-user","Origin":"configured-origin","QueueType":"configured-queue","SaveDetections":true}
         """;
-    private readonly AlgoPipelineContract _contract = new();
+    private readonly DeepWisdomPipelineContract _contract = new();
 
     [Fact]
-    public void BuildsLegacyMissionBodyFromRuleOverlayAndSettings()
+    public void BuildsMissionBodyFromRuleOverlayAndExtraData()
     {
         const string expected = """
-            {"modelName":"profile-a","focusedWkt":"POLYGON ((0 0, 2 0, 2 2, 0 0))","origin":"configured-origin","queueType":"configured-queue","priority":7,"saveDetections":true,"algorithmName":"custom-algorithm","missionName":"Mission 23/09/2026","username":"configured-user","displayName":"customer-a","requestingUnit":"customer-a","runEveryOtherImage":true,"shouldCheckInVip":true,"tasksData":[{"imageId":"image-a","legId":"leg-a","prevOverlayId":"image-prev","nextOverlayId":"image-next","photoTime":"2026-09-23T00:15:00"}]}
+            {"modelName":"profile-a","focusedWkt":"POLYGON ((0 0, 2 0, 2 2, 0 0))","origin":"configured-origin","queueType":"configured-queue","priority":7,"saveDetections":true,"algorithmName":"custom-algorithm","missionName":"Mission 23/09/2026","username":"configured-user","displayName":"customer-a","requestingUnit":"customer-a","runEveryOtherImage":true,"shouldCheckInVip":true,"tasksData":[{"imageId":"image-a","legId":"leg-a","prevOverlayId":"image-prev","nextOverlayId":"image-next","photoTime":"2026-09-23T00:15:00"}],"extraData":{"XUserName":"configured-user","Origin":"configured-origin","QueueType":"configured-queue","SaveDetections":true}}
             """;
         var payload = _contract.BuildPayload(Context(), Json(Rule), Json(Settings));
         Assert.Equal(expected, Encoding.UTF8.GetString(payload.Body));
@@ -141,7 +141,7 @@ public sealed class AlgoPipelineContractTests
     }
 
     [Fact]
-    public void UnknownExtraDataIsAllowedButCannotOverrideOrExtendAlgoBody()
+    public void ArbitraryExtraDataIsIncludedWithoutOverridingMissionFields()
     {
         var settings = JsonNode.Parse(Settings)!;
         settings["priority"] = 99;
@@ -151,7 +151,7 @@ public sealed class AlgoPipelineContractTests
         Assert.Equal(7, body.RootElement.GetProperty("priority").GetInt32());
         Assert.Equal("Mission 23/09/2026", body.RootElement.GetProperty("missionName").GetString());
         Assert.False(body.RootElement.TryGetProperty("custom", out _));
-        Assert.False(body.RootElement.TryGetProperty("extraData", out _));
+        Assert.True(JsonElement.DeepEquals(Json(settings.ToJsonString()), body.RootElement.GetProperty("extraData")));
         Assert.Empty(_contract.ValidateExtraData(Json(settings.ToJsonString())));
     }
 
@@ -180,23 +180,20 @@ public sealed class AlgoPipelineContractTests
     [InlineData("Origin", "\"\"")]
     [InlineData("QueueType", "42")]
     [InlineData("SaveDetections", "\"true\"")]
-    public void SettingsHaveTypedValidationWithoutExposingTheirValues(string field, string value)
+    public void ExtraDataValuesHaveNoFieldSpecificTypeValidation(string field, string value)
     {
         var settings = JsonNode.Parse(Settings)!;
         settings[field] = JsonNode.Parse(value);
-        Assert.Contains(_contract.ValidateExtraData(Json(settings.ToJsonString())), error => error.Field == field);
-        var exception = Assert.Throws<ArgumentException>(() => _contract.BuildPayload(Context(), Json(Rule), Json(settings.ToJsonString())));
-        Assert.Equal("extraData", exception.ParamName);
-        Assert.DoesNotContain("configured-user", exception.Message);
+        Assert.Empty(_contract.ValidateExtraData(Json(settings.ToJsonString())));
+        using var body = Body(Context(), settings: settings.ToJsonString());
+        Assert.True(JsonElement.DeepEquals(Json(value), body.RootElement.GetProperty("extraData").GetProperty(field)));
     }
 
     [Fact]
-    public void MissingSettingsAndDuplicateKnownFieldsAreRejected()
+    public void ExtraDataIsOptionalAndDuplicateRunParametersAreRejected()
     {
-        Assert.NotEmpty(_contract.ValidateExtraData(default));
-        Assert.Equal(4, _contract.ValidateExtraData(Json("{}")).Count);
-        var duplicateSettings = Settings.Replace("\"XUserName\":", "\"XUserName\":\"first\",\"XUserName\":", StringComparison.Ordinal);
-        Assert.Contains(_contract.ValidateExtraData(Json(duplicateSettings)), error => error.Field == "XUserName");
+        Assert.Empty(_contract.ValidateExtraData(default));
+        Assert.Empty(_contract.ValidateExtraData(Json("{}")));
         var duplicateRule = Rule.Replace("\"priority\":", "\"priority\":1,\"priority\":", StringComparison.Ordinal);
         Assert.Contains(_contract.ValidateRunParams(Json(duplicateRule)), error => error.Field == "priority");
     }
@@ -211,7 +208,7 @@ public sealed class AlgoPipelineContractTests
     }
 
     [Fact]
-    public void ContextRequiresImageAndPhotoTimeButNoAsdMetadata()
+    public void ContextRequiresImageAndPhotoTimeButNoFindAirMetadata()
     {
         Assert.Empty(_contract.ValidateContext(Context()));
         Assert.Contains(_contract.ValidateContext(Context() with { ImageId = "" }), error => error.Field == "input.id");

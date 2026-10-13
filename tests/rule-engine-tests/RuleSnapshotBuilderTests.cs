@@ -85,7 +85,7 @@ public sealed class RuleSnapshotBuilderTests
         withoutLocation.Match!.LocationWkt = null;
         withoutLocation.RunParams = [AlgoRunParams()];
 
-        var snapshot = RuleSnapshotBuilder.Build(new([withLocation, withoutLocation], []), new AlgoPipelineContract());
+        var snapshot = RuleSnapshotBuilder.Build(new([withLocation, withoutLocation], []), new DeepWisdomPipelineContract());
 
         Assert.Equal("with-location", Assert.Single(snapshot.Rules).Id);
         var rejection = Assert.Single(snapshot.Rejections);

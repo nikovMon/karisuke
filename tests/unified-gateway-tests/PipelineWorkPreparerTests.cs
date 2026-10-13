@@ -16,8 +16,8 @@ public sealed class PipelineWorkPreparerTests
     [Fact]
     public void EnabledAsdPipelineBuildsItsExistingPayloadAndAttributes()
     {
-        var pipeline = Definition("asd", "asd", enabled: true);
-        var preparer = CreatePreparer([pipeline], new AsdPipelineContract());
+        var pipeline = Definition("asd", "FindAir", enabled: true);
+        var preparer = CreatePreparer([pipeline], new FindAirPipelineContract());
 
         var result = preparer.Prepare("asd", Context(), AsdRunParams());
 
@@ -40,16 +40,16 @@ public sealed class PipelineWorkPreparerTests
     [Fact]
     public void ConfiguredExtraDataIsIsolatedPerPipelineWithoutOverridingInputOrRules()
     {
-        var first = Definition("first", "asd", true) with
+        var first = Definition("first", "FindAir", true) with
         {
             ExtraData = PipelineExtraData.Parse("""{"tenantId":"extra-tenant","imageId":"extra-image","enabled":true,"options":{"values":[1,"1",null]}}""")
         };
-        var second = Definition("second", "asd", true) with
+        var second = Definition("second", "FindAir", true) with
         {
             ExtraData = PipelineExtraData.Parse("""{"origin":"second"}"""),
             Transport = new() { Kind = PipelineTransportKind.Http, Http = new() { Endpoint = "https://example.invalid/work" } }
         };
-        var preparer = CreatePreparer([first, second], new AsdPipelineContract());
+        var preparer = CreatePreparer([first, second], new FindAirPipelineContract());
 
         var firstResult = preparer.Prepare("first", Context(), AsdRunParams());
         var secondResult = preparer.Prepare("second", Context(), AsdRunParams());
@@ -105,7 +105,7 @@ public sealed class PipelineWorkPreparerTests
     [Fact]
     public void InvalidRunParametersCannotProduceWork()
     {
-        var preparer = CreatePreparer([Definition("asd", "asd", true)], new AsdPipelineContract());
+        var preparer = CreatePreparer([Definition("asd", "FindAir", true)], new FindAirPipelineContract());
 
         var result = preparer.Prepare("asd", Context(), JsonSerializer.SerializeToElement(new { tenantId = "" }));
 
@@ -118,7 +118,7 @@ public sealed class PipelineWorkPreparerTests
     public void IntegrationPipelinesKeepTheirOwnIndexesContractsAndDestinations()
     {
         var contract = new RecordingContract();
-        var asdPipeline = Definition("asd", "asd", true) with { RulesIndex = "asd-integ-pipeline-index" };
+        var asdPipeline = Definition("asd", "FindAir", true) with { RulesIndex = "asd-integ-pipeline-index" };
         var httpPipeline = Definition("http-example", contract.ContractId, true) with
         {
             RulesIndex = "http-example-integ-pipeline-index",
@@ -130,14 +130,14 @@ public sealed class PipelineWorkPreparerTests
         };
         var preparer = CreatePreparer(
             [asdPipeline, httpPipeline],
-            new AsdPipelineContract(), contract);
+            new FindAirPipelineContract(), contract);
 
         var asdResult = preparer.Prepare("asd", Context(), AsdRunParams());
         var result = preparer.Prepare("http-example", Context(), JsonSerializer.SerializeToElement(new { mode = "analysis" }));
 
         Assert.Equal(PipelinePreparationStatus.Prepared, asdResult.Status);
         Assert.NotNull(asdResult.Work);
-        Assert.Equal("asd", asdResult.Work.Pipeline.ContractId);
+        Assert.Equal("FindAir", asdResult.Work.Pipeline.ContractId);
         Assert.Equal(PipelineTransportKind.RabbitMq, asdResult.Work.Pipeline.Transport.Kind);
         Assert.Equal("output", asdResult.Work.Pipeline.Transport.RabbitMq!.ConnectionRef);
         Assert.Equal("publisher", asdResult.Work.Pipeline.Transport.RabbitMq!.Output.QueueName);
@@ -166,7 +166,7 @@ public sealed class PipelineWorkPreparerTests
     [Fact]
     public void UnknownPipelineDoesNotFallBackToAsd()
     {
-        var preparer = CreatePreparer([Definition("asd", "asd", true)], new AsdPipelineContract());
+        var preparer = CreatePreparer([Definition("asd", "FindAir", true)], new FindAirPipelineContract());
 
         Assert.Throws<KeyNotFoundException>(() => preparer.Prepare("unknown", Context(), AsdRunParams()));
     }
@@ -182,7 +182,7 @@ public sealed class PipelineWorkPreparerTests
             ActivityStopped = activity => captured = activity
         };
         ActivitySource.AddActivityListener(listener);
-        var preparer = CreatePreparer([Definition("asd", "asd", true)], new AsdPipelineContract());
+        var preparer = CreatePreparer([Definition("asd", "FindAir", true)], new FindAirPipelineContract());
 
         preparer.Prepare("asd", Context(), AsdRunParams());
 

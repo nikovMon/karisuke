@@ -1,7 +1,7 @@
 {
   "PipelineCatalog": {
     "RabbitMqConnections": {
-      "asd-output": {
+      "findair-output": {
         "Hostname": "localhost",
         "Port": 5673,
         "Username": "guest",
@@ -10,15 +10,16 @@
       }
     },
     "Pipelines": {
-      "asd": {
+      "FindAir": {
         "Enabled": true,
-        "ContractId": "asd",
+        "ContractId": "FindAir",
         "RulesIndex": "asd-integ-pipeline-index",
         "ExtraData": {},
         "Transport": {
           "Kind": "rabbitmq",
           "RabbitMq": {
-            "ConnectionRef": "asd-output",
+            "ConnectionRef": "findair-output",
+            "VirtualHost": null,
             "Output": {
               "QueueName": "int.algo.tb_publisher",
               "Arguments": {
@@ -37,9 +38,9 @@
           }
         }
       },
-      "algo": {
+      "DeepWisdom": {
         "Enabled": true,
-        "ContractId": "algo",
+        "ContractId": "DeepWisdom",
         "RulesIndex": "algo-integ-pipeline-index",
         "ExtraData": {
           "XUserName": "replace-me-user",

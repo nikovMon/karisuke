@@ -29,7 +29,7 @@ public sealed class PipelineRuleBulkApiTests : IDisposable
         _store.Add(AsdIndex, "b", Rule("b"));
         using var client = CreateClient();
 
-        var response = await client.PatchAsJsonAsync("/pipelines/asd/rules/bulk?ids=a,b", new { match = new { maxPhotoAgeDays = 7 } });
+        var response = await client.PatchAsJsonAsync("/pipelines/FindAir/rules/bulk?ids=a,b", new { match = new { maxPhotoAgeDays = 7 } });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(["a", "b"], (await response.Content.ReadFromJsonAsync<BulkOperationResult>())!.SuccessIds);
@@ -42,7 +42,7 @@ public sealed class PipelineRuleBulkApiTests : IDisposable
         _store.Add(AsdIndex, "a", Rule("a"));
         using var client = CreateClient();
 
-        var response = await client.PatchAsJsonAsync("/pipelines/asd/rules/bulk?ids=a,missing", new { isActive = false });
+        var response = await client.PatchAsJsonAsync("/pipelines/FindAir/rules/bulk?ids=a,missing", new { isActive = false });
 
         Assert.Equal(HttpStatusCode.MultiStatus, response.StatusCode);
         var result = await response.Content.ReadFromJsonAsync<BulkOperationResult>();
@@ -57,7 +57,7 @@ public sealed class PipelineRuleBulkApiTests : IDisposable
         _store.Add(AsdIndex, "b", Rule("b"));
         using var client = CreateClient();
 
-        var response = await client.PatchAsJsonAsync("/pipelines/asd/rules/bulk?ids=a,b", new { ruleName = "same" });
+        var response = await client.PatchAsJsonAsync("/pipelines/FindAir/rules/bulk?ids=a,b", new { ruleName = "same" });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
@@ -69,7 +69,7 @@ public sealed class PipelineRuleBulkApiTests : IDisposable
         using var client = CreateClient();
 
         var response = await client.PatchAsJsonAsync(
-            "/pipelines/asd/rules/sensors/add?ids=a",
+            "/pipelines/FindAir/rules/sensors/add?ids=a",
             new { sensorName = "camera", gridTypes = new[] { "grid-a" } });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -85,7 +85,7 @@ public sealed class PipelineRuleBulkApiTests : IDisposable
         using var client = CreateClient();
 
         var response = await client.PatchAsJsonAsync(
-            "/pipelines/asd/rules/sensors/add?ids=all",
+            "/pipelines/FindAir/rules/sensors/add?ids=all",
             new { sensorName = "camera", gridTypes = new[] { "grid-a" } });
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
@@ -101,7 +101,7 @@ public sealed class PipelineRuleBulkApiTests : IDisposable
         using var client = CreateClient();
 
         var response = await client.PatchAsJsonAsync(
-            "/pipelines/asd/rules/sensors/remove?ids=a",
+            "/pipelines/FindAir/rules/sensors/remove?ids=a",
             new { sensorName = "camera", gridTypes = new[] { "grid-a" } });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -115,7 +115,7 @@ public sealed class PipelineRuleBulkApiTests : IDisposable
         using var client = CreateClient();
 
         var response = await client.PatchAsJsonAsync(
-            "/pipelines/asd/rules/sensors/remove?ids=a",
+            "/pipelines/FindAir/rules/sensors/remove?ids=a",
             new { sensorName = "camera", registrationQualities = new[] { "Accurate" } });
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
@@ -132,7 +132,7 @@ public sealed class PipelineRuleBulkApiTests : IDisposable
         _store.FailingSaveIds.Add("a");
         using var client = CreateClient();
 
-        var response = await client.PatchAsJsonAsync("/pipelines/asd/rules/bulk?ids=a,b", new { isActive = false });
+        var response = await client.PatchAsJsonAsync("/pipelines/FindAir/rules/bulk?ids=a,b", new { isActive = false });
 
         Assert.Equal(HttpStatusCode.MultiStatus, response.StatusCode);
         var result = await response.Content.ReadFromJsonAsync<BulkOperationResult>();
@@ -146,7 +146,7 @@ public sealed class PipelineRuleBulkApiTests : IDisposable
         _store.Add(AsdIndex, "a", Rule("a"));
         using var client = CreateClient();
 
-        var response = await client.PatchAsJsonAsync("/pipelines/asd/rules/bulk?ids=a,a", new { isActive = false });
+        var response = await client.PatchAsJsonAsync("/pipelines/FindAir/rules/bulk?ids=a,a", new { isActive = false });
 
         Assert.Equal(["a"], (await response.Content.ReadFromJsonAsync<BulkOperationResult>())!.SuccessIds);
     }
@@ -157,7 +157,7 @@ public sealed class PipelineRuleBulkApiTests : IDisposable
         using var factory = _factory.WithWebHostBuilder(builder => builder.UseSetting("Elasticsearch:MaxBulkSize", "1"));
         using var client = factory.CreateClient();
 
-        var response = await client.PatchAsJsonAsync("/pipelines/asd/rules/bulk?ids=a,b", new { isActive = false });
+        var response = await client.PatchAsJsonAsync("/pipelines/FindAir/rules/bulk?ids=a,b", new { isActive = false });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(0, _store.CallCount);
@@ -170,7 +170,7 @@ public sealed class PipelineRuleBulkApiTests : IDisposable
         using var client = CreateClient();
 
         var response = await client.PatchAsJsonAsync(
-            "/pipelines/asd/rules/sensors/add?ids=a",
+            "/pipelines/FindAir/rules/sensors/add?ids=a",
             new { sensorName = "camera", registrationQualities = new[] { "Accurate" } });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -178,8 +178,8 @@ public sealed class PipelineRuleBulkApiTests : IDisposable
     }
 
     [Theory]
-    [InlineData("/pipelines/asd/rules/bulk")]
-    [InlineData("/pipelines/asd/rules/sensors/add")]
+    [InlineData("/pipelines/FindAir/rules/bulk")]
+    [InlineData("/pipelines/FindAir/rules/sensors/add")]
     public async Task MissingIdsAreRejected(string path)
     {
         using var client = CreateClient();

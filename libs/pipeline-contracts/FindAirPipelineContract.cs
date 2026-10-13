@@ -6,7 +6,7 @@ using ImagingPipeline.Common.Dtos.Rules.Models;
 
 namespace ImagingPipeline.PipelineContracts;
 
-public class FindAirPipelineContract : IPipelineContract
+public sealed class FindAirPipelineContract : IPipelineContract
 {
     // This marker belongs to the existing downstream AMQP wire protocol. It is independent
     // of the gateway's unversioned pipeline and contract IDs and must remain an AMQP integer.
@@ -22,7 +22,7 @@ public class FindAirPipelineContract : IPipelineContract
         new[] { "tileSizeWidth", "tileSizeHeight", "tileOverlapWidth", "tileOverlapHeight" }
             .ToFrozenSet(StringComparer.Ordinal);
 
-    public virtual string ContractId => "FindAir";
+    public string ContractId => "FindAir";
 
     public IReadOnlyList<ContractValidationError> ValidateRunParams(JsonElement runParams)
     {
@@ -31,7 +31,7 @@ public class FindAirPipelineContract : IPipelineContract
         return errors.AsReadOnly();
     }
 
-    public IReadOnlyList<ContractValidationError> ValidateContext(PipelineDispatchContext context)
+    public IReadOnlyList<ContractValidationError> ValidateContext(PipelineDispatchContext context, JsonElement runParams = default)
     {
         ArgumentNullException.ThrowIfNull(context);
         var errors = new List<ContractValidationError>();
@@ -76,7 +76,7 @@ public class FindAirPipelineContract : IPipelineContract
                 nameof(runParams));
         }
 
-        var contextErrors = ValidateContext(context);
+        var contextErrors = ValidateContext(context, runParams);
         if (contextErrors.Count != 0)
         {
             throw new ArgumentException(
@@ -129,7 +129,7 @@ public class FindAirPipelineContract : IPipelineContract
             RabbitMqAttributes);
     }
 
-    private static AsdRunParameters ParseRunParams(JsonElement runParams, List<ContractValidationError> errors)
+    private static FindAirRunParameters ParseRunParams(JsonElement runParams, List<ContractValidationError> errors)
     {
         if (runParams.ValueKind != JsonValueKind.Object)
         {
@@ -263,7 +263,7 @@ public class FindAirPipelineContract : IPipelineContract
         }
     }
 
-    private sealed record AsdRunParameters(
+    private sealed record FindAirRunParameters(
         string TenantId,
         List<AlgorithmName> AlgorithmNames,
         List<TilingConfig> TilingConfigs);

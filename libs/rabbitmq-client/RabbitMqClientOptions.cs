@@ -105,20 +105,14 @@ public sealed class RabbitMqClientOptions
         return true;
     }
 
-    internal bool IsConsumerValid(out string error, bool allowNoOutput = false)
+    internal bool IsConsumerValid(out string error)
     {
         if (!IsPublisherValid(out error))
         {
             return false;
         }
 
-        // Only consumers that explicitly publish elsewhere may omit the normal output queue.
-        if (!allowNoOutput && !HasOutput)
-        {
-            error = "RabbitMq OutputQueue must not be empty for consumers unless explicitly disabled at registration.";
-            return false;
-        }
-
+        // OutputQueue is optional: a consumer whose handler publishes elsewhere has no output.
         if (string.IsNullOrWhiteSpace(EffectiveDeadLetterQueue))
         {
             error = "RabbitMq DeadLetterQueue must not be empty for consumers.";

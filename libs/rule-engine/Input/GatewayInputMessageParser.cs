@@ -109,8 +109,8 @@ public static class GatewayInputMessageParser
 [JsonSerializable(typeof(GatewayMatchInputDto))]
 internal sealed partial class GatewayInputJsonSerializerContext : JsonSerializerContext;
 
-// Deliberately separate from the legacy gateway DTO: relaxing this boundary must not alter
-// another service's input contract. JsonElement defers pipeline-specific type validation.
+// The matcher validates its required fields here. JsonElement defers pipeline-specific
+// type validation until a selected contract needs those values.
 internal sealed class GatewayMatchInputDto
 {
     [JsonPropertyName("id")]

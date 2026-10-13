@@ -46,7 +46,7 @@ tests/
 
 `libs/common-dtos` contains DTO contracts shared by multiple apps. `libs/observability` is the central OpenTelemetry contract and host bootstrap. The RabbitMQ, Projection Mapper, and Elasticsearch libraries own their dependency instrumentation while using that common contract.
 
-`apps/unified-gateway` implements the Catalog & Contracts Foundation: a validated catalog keyed by pipeline ID, ASD/Algo payload preparation and per-pipeline extra JSON data. It exposes health and metrics only; pipeline metadata routes are removed. HTTP/RabbitMQ settings describe future destinations; this application does not consume or send messages. Transport, dispatch, retries, rule matching and snapshots belong to later tickets. The Rules API is unchanged. See [its README](apps/unified-gateway/README.md) for configuration, validation, observability and Nx commands.
+`apps/unified-gateway` consumes image updates, matches independently refreshed pipeline rules, and dispatches FindAir/DeepWisdom payloads through RabbitMQ or HTTP. Each pipeline configures its destination and arbitrary extra JSON data in the shared `pipelinecatalog.json`, which also supplies pipeline names and contracts to the Rules API. The gateway exposes health and metrics; pipeline metadata and rule management routes belong to the Rules API. See [its README](apps/unified-gateway/README.md) for configuration, validation, observability and Nx commands.
 
 Tile Builder and Embedder implementations are not present in this repository; their current integration boundary is represented by RabbitMQ DTOs and the publisher/consumer applications.
 
