@@ -1,0 +1,971 @@
+{
+  "source": "https://github.com/elastic/kibana/blob/v8.4.1/test/functional/fixtures/kbn_archiver/dashboard/current/kibana.json",
+  "notes": [
+    "Research reference only, not an import file. Objects retain fixture names and fields; replace them before use.",
+    "Nested JSON strings are decoded for generator convenience; re-serialize visState, uiStateJSON, searchSourceJSON, panelsJSON and optionsJSON for saved objects NDJSON.",
+    "Schemas are extracted from the official Kibana v8.4.1 fixture, not a newer export with altered version numbers.",
+    "Dashboard panels use panelRefName=panel_1 and reference.name=1:panel_1 where 1 is panelIndex.",
+    "The official fixture metadata predates 8.4.1; target Kibana applies supported forward migrations on import."
+  ],
+  "templates": {
+    "metric": {
+      "attributes": {
+        "description": "",
+        "kibanaSavedObjectMeta": {
+          "searchSourceJSON": {
+            "filter": [],
+            "query": {
+              "query": "",
+              "language": "lucene"
+            },
+            "indexRefName": "kibanaSavedObjectMeta.searchSourceJSON.index"
+          }
+        },
+        "title": "Rendering Test: metric",
+        "uiStateJSON": {},
+        "version": 1,
+        "visState": {
+          "title": "Rendering Test: metric",
+          "type": "metric",
+          "params": {
+            "addTooltip": true,
+            "addLegend": false,
+            "type": "metric",
+            "metric": {
+              "percentageMode": false,
+              "useRanges": false,
+              "colorSchema": "Green to Red",
+              "metricColorMode": "None",
+              "colorsRange": [
+                {
+                  "from": 0,
+                  "to": 10000
+                }
+              ],
+              "labels": {
+                "show": true
+              },
+              "invertColors": false,
+              "style": {
+                "bgFill": "#000",
+                "bgColor": false,
+                "labelColor": false,
+                "subText": "",
+                "fontSize": 60
+              }
+            }
+          },
+          "aggs": [
+            {
+              "id": "1",
+              "enabled": true,
+              "type": "cardinality",
+              "schema": "metric",
+              "params": {
+                "field": "bytes"
+              }
+            }
+          ]
+        }
+      },
+      "coreMigrationVersion": "8.0.1",
+      "id": "11ae2bd0-3dcc-11e8-8660-4d65aa086b3c",
+      "migrationVersion": {
+        "visualization": "8.0.0"
+      },
+      "references": [
+        {
+          "id": "0bf35f60-3dc9-11e8-8660-4d65aa086b3c",
+          "name": "kibanaSavedObjectMeta.searchSourceJSON.index",
+          "type": "index-pattern"
+        }
+      ],
+      "type": "visualization"
+    },
+    "pie": {
+      "attributes": {
+        "description": "",
+        "kibanaSavedObjectMeta": {
+          "searchSourceJSON": {
+            "filter": [],
+            "query": {
+              "query": "",
+              "language": "lucene"
+            },
+            "indexRefName": "kibanaSavedObjectMeta.searchSourceJSON.index"
+          }
+        },
+        "title": "Rendering Test: pie",
+        "uiStateJSON": {},
+        "version": 1,
+        "visState": {
+          "title": "Rendering Test: pie",
+          "type": "pie",
+          "params": {
+            "type": "pie",
+            "addTooltip": true,
+            "addLegend": true,
+            "legendPosition": "right",
+            "isDonut": true,
+            "labels": {
+              "show": false,
+              "values": true,
+              "last_level": true,
+              "truncate": 100
+            },
+            "palette": {
+              "type": "palette",
+              "name": "kibana_palette"
+            },
+            "distinctColors": true
+          },
+          "aggs": [
+            {
+              "id": "1",
+              "enabled": true,
+              "type": "count",
+              "schema": "metric",
+              "params": {}
+            },
+            {
+              "id": "2",
+              "enabled": true,
+              "type": "terms",
+              "schema": "segment",
+              "params": {
+                "field": "bytes",
+                "otherBucket": false,
+                "otherBucketLabel": "Other",
+                "missingBucket": false,
+                "missingBucketLabel": "Missing",
+                "size": 5,
+                "order": "desc",
+                "orderBy": "1"
+              }
+            }
+          ]
+        }
+      },
+      "coreMigrationVersion": "8.0.1",
+      "id": "3fe22200-3dcb-11e8-8660-4d65aa086b3c",
+      "migrationVersion": {
+        "visualization": "8.0.0"
+      },
+      "references": [
+        {
+          "id": "0bf35f60-3dc9-11e8-8660-4d65aa086b3c",
+          "name": "kibanaSavedObjectMeta.searchSourceJSON.index",
+          "type": "index-pattern"
+        }
+      ],
+      "type": "visualization"
+    },
+    "horizontal_bar": {
+      "attributes": {
+        "description": "",
+        "kibanaSavedObjectMeta": {
+          "searchSourceJSON": {
+            "filter": [],
+            "query": {
+              "query": "",
+              "language": "lucene"
+            },
+            "indexRefName": "kibanaSavedObjectMeta.searchSourceJSON.index"
+          }
+        },
+        "title": "Rendering Test: bar",
+        "uiStateJSON": {},
+        "version": 1,
+        "visState": {
+          "title": "Rendering Test: bar",
+          "type": "horizontal_bar",
+          "params": {
+            "type": "histogram",
+            "grid": {
+              "categoryLines": false,
+              "style": {
+                "color": "#eee"
+              }
+            },
+            "categoryAxes": [
+              {
+                "id": "CategoryAxis-1",
+                "type": "category",
+                "position": "left",
+                "show": true,
+                "style": {},
+                "scale": {
+                  "type": "linear"
+                },
+                "labels": {
+                  "show": true,
+                  "rotate": 0,
+                  "filter": false,
+                  "truncate": 200
+                },
+                "title": {}
+              }
+            ],
+            "valueAxes": [
+              {
+                "id": "ValueAxis-1",
+                "name": "LeftAxis-1",
+                "type": "value",
+                "position": "bottom",
+                "show": true,
+                "style": {},
+                "scale": {
+                  "type": "linear",
+                  "mode": "normal"
+                },
+                "labels": {
+                  "show": true,
+                  "rotate": 75,
+                  "filter": true,
+                  "truncate": 100
+                },
+                "title": {
+                  "text": "Count"
+                }
+              }
+            ],
+            "seriesParams": [
+              {
+                "show": true,
+                "type": "histogram",
+                "mode": "normal",
+                "data": {
+                  "label": "Count",
+                  "id": "1"
+                },
+                "valueAxis": "ValueAxis-1",
+                "drawLinesBetweenPoints": true,
+                "showCircles": true
+              }
+            ],
+            "addTooltip": true,
+            "addLegend": true,
+            "legendPosition": "right",
+            "times": [],
+            "addTimeMarker": false,
+            "palette": {
+              "type": "palette",
+              "name": "kibana_palette"
+            },
+            "isVislibVis": true,
+            "detailedTooltip": true
+          },
+          "aggs": [
+            {
+              "id": "1",
+              "enabled": true,
+              "type": "count",
+              "schema": "metric",
+              "params": {}
+            },
+            {
+              "id": "2",
+              "enabled": true,
+              "type": "date_histogram",
+              "schema": "segment",
+              "params": {
+                "field": "@timestamp",
+                "interval": "auto",
+                "min_doc_count": 1,
+                "extended_bounds": {}
+              }
+            },
+            {
+              "id": "3",
+              "enabled": true,
+              "type": "terms",
+              "schema": "group",
+              "params": {
+                "field": "geo.src",
+                "otherBucket": false,
+                "otherBucketLabel": "Other",
+                "missingBucket": false,
+                "missingBucketLabel": "Missing",
+                "size": 3,
+                "order": "desc",
+                "orderBy": "1"
+              }
+            }
+          ]
+        }
+      },
+      "coreMigrationVersion": "8.0.1",
+      "id": "3525b840-3dcb-11e8-8660-4d65aa086b3c",
+      "migrationVersion": {
+        "visualization": "8.0.0"
+      },
+      "references": [
+        {
+          "id": "0bf35f60-3dc9-11e8-8660-4d65aa086b3c",
+          "name": "kibanaSavedObjectMeta.searchSourceJSON.index",
+          "type": "index-pattern"
+        }
+      ],
+      "type": "visualization"
+    },
+    "area": {
+      "attributes": {
+        "description": "",
+        "kibanaSavedObjectMeta": {
+          "searchSourceJSON": {
+            "filter": [
+              {
+                "meta": {
+                  "negate": true,
+                  "disabled": false,
+                  "alias": null,
+                  "type": "phrase",
+                  "key": "geo.src",
+                  "value": "CN",
+                  "params": {
+                    "query": "CN",
+                    "type": "phrase"
+                  },
+                  "indexRefName": "kibanaSavedObjectMeta.searchSourceJSON.filter[0].meta.index"
+                },
+                "query": {
+                  "match": {
+                    "geo.src": {
+                      "query": "CN",
+                      "type": "phrase"
+                    }
+                  }
+                },
+                "$state": {
+                  "store": "appState"
+                }
+              }
+            ],
+            "query": {
+              "query": "",
+              "language": "lucene"
+            },
+            "indexRefName": "kibanaSavedObjectMeta.searchSourceJSON.index"
+          }
+        },
+        "title": "Rendering Test: area with not filter",
+        "uiStateJSON": {},
+        "version": 1,
+        "visState": {
+          "title": "Rendering Test: area with not filter",
+          "type": "area",
+          "params": {
+            "type": "area",
+            "grid": {
+              "categoryLines": false,
+              "style": {
+                "color": "#eee"
+              }
+            },
+            "categoryAxes": [
+              {
+                "id": "CategoryAxis-1",
+                "type": "category",
+                "position": "bottom",
+                "show": true,
+                "style": {},
+                "scale": {
+                  "type": "linear"
+                },
+                "labels": {
+                  "show": true,
+                  "truncate": 100,
+                  "filter": true
+                },
+                "title": {}
+              }
+            ],
+            "valueAxes": [
+              {
+                "id": "ValueAxis-1",
+                "name": "LeftAxis-1",
+                "type": "value",
+                "position": "left",
+                "show": true,
+                "style": {},
+                "scale": {
+                  "type": "linear",
+                  "mode": "normal"
+                },
+                "labels": {
+                  "show": true,
+                  "rotate": 0,
+                  "filter": false,
+                  "truncate": 100
+                },
+                "title": {
+                  "text": "Count"
+                }
+              }
+            ],
+            "seriesParams": [
+              {
+                "show": "true",
+                "type": "area",
+                "mode": "stacked",
+                "data": {
+                  "label": "Count",
+                  "id": "1"
+                },
+                "drawLinesBetweenPoints": true,
+                "showCircles": true,
+                "interpolate": "linear",
+                "valueAxis": "ValueAxis-1"
+              }
+            ],
+            "addTooltip": true,
+            "addLegend": true,
+            "legendPosition": "right",
+            "times": [],
+            "addTimeMarker": false,
+            "palette": {
+              "type": "palette",
+              "name": "kibana_palette"
+            },
+            "isVislibVis": true,
+            "detailedTooltip": true,
+            "fittingFunction": "zero"
+          },
+          "aggs": [
+            {
+              "id": "1",
+              "enabled": true,
+              "type": "count",
+              "schema": "metric",
+              "params": {}
+            },
+            {
+              "id": "2",
+              "enabled": true,
+              "type": "date_histogram",
+              "schema": "segment",
+              "params": {
+                "field": "@timestamp",
+                "interval": "auto",
+                "min_doc_count": 1,
+                "extended_bounds": {}
+              }
+            },
+            {
+              "id": "3",
+              "enabled": true,
+              "type": "filters",
+              "schema": "group",
+              "params": {
+                "filters": [
+                  {
+                    "input": {
+                      "query": "bytes:>1000",
+                      "language": "lucene"
+                    },
+                    "label": ""
+                  },
+                  {
+                    "input": {
+                      "query": "bytes:>10",
+                      "language": "lucene"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "coreMigrationVersion": "8.0.1",
+      "id": "e6140540-3dca-11e8-8660-4d65aa086b3c",
+      "migrationVersion": {
+        "visualization": "8.0.0"
+      },
+      "references": [
+        {
+          "id": "0bf35f60-3dc9-11e8-8660-4d65aa086b3c",
+          "name": "kibanaSavedObjectMeta.searchSourceJSON.index",
+          "type": "index-pattern"
+        },
+        {
+          "id": "0bf35f60-3dc9-11e8-8660-4d65aa086b3c",
+          "name": "kibanaSavedObjectMeta.searchSourceJSON.filter[0].meta.index",
+          "type": "index-pattern"
+        }
+      ],
+      "type": "visualization"
+    },
+    "table": {
+      "attributes": {
+        "description": "",
+        "kibanaSavedObjectMeta": {
+          "searchSourceJSON": {
+            "filter": [],
+            "query": {
+              "query": "",
+              "language": "lucene"
+            },
+            "indexRefName": "kibanaSavedObjectMeta.searchSourceJSON.index"
+          }
+        },
+        "title": "Rendering Test: datatable",
+        "uiStateJSON": {
+          "vis": {
+            "params": {
+              "sort": {
+                "columnIndex": null,
+                "direction": null
+              }
+            }
+          }
+        },
+        "version": 1,
+        "visState": {
+          "title": "Rendering Test: datatable",
+          "type": "table",
+          "params": {
+            "perPage": 10,
+            "showPartialRows": false,
+            "showMeticsAtAllLevels": false,
+            "sort": {
+              "columnIndex": null,
+              "direction": null
+            },
+            "showTotal": false,
+            "totalFunc": "sum",
+            "showToolbar": true
+          },
+          "aggs": [
+            {
+              "id": "1",
+              "enabled": true,
+              "type": "count",
+              "schema": "metric",
+              "params": {}
+            },
+            {
+              "id": "2",
+              "enabled": true,
+              "type": "terms",
+              "schema": "bucket",
+              "params": {
+                "field": "clientip",
+                "otherBucket": false,
+                "otherBucketLabel": "Other",
+                "missingBucket": false,
+                "missingBucketLabel": "Missing",
+                "size": 5,
+                "order": "desc",
+                "orderBy": "1"
+              }
+            }
+          ]
+        }
+      },
+      "coreMigrationVersion": "8.0.1",
+      "id": "4b5d6ef0-3dcb-11e8-8660-4d65aa086b3c",
+      "migrationVersion": {
+        "visualization": "8.0.0"
+      },
+      "references": [
+        {
+          "id": "0bf35f60-3dc9-11e8-8660-4d65aa086b3c",
+          "name": "kibanaSavedObjectMeta.searchSourceJSON.index",
+          "type": "index-pattern"
+        }
+      ],
+      "type": "visualization"
+    },
+    "top_hits_table": {
+      "attributes": {
+        "description": "",
+        "kibanaSavedObjectMeta": {
+          "searchSourceJSON": {
+            "filter": [],
+            "query": {
+              "query": "",
+              "language": "lucene"
+            },
+            "indexRefName": "kibanaSavedObjectMeta.searchSourceJSON.index"
+          }
+        },
+        "title": "Filter Bytes Test: Data table top hit with significant terms geo.src",
+        "uiStateJSON": {
+          "vis": {
+            "params": {
+              "sort": {
+                "columnIndex": null,
+                "direction": null
+              }
+            }
+          }
+        },
+        "version": 1,
+        "visState": {
+          "title": "Filter Bytes Test: Data table top hit with significant terms geo.src",
+          "type": "table",
+          "params": {
+            "perPage": 10,
+            "showPartialRows": false,
+            "showMeticsAtAllLevels": false,
+            "sort": {
+              "columnIndex": null,
+              "direction": null
+            },
+            "showTotal": false,
+            "totalFunc": "sum",
+            "showToolbar": true
+          },
+          "aggs": [
+            {
+              "id": "1",
+              "enabled": true,
+              "type": "top_hits",
+              "schema": "metric",
+              "params": {
+                "field": "bytes",
+                "aggregate": "average",
+                "size": 1,
+                "sortField": "@timestamp",
+                "sortOrder": "desc"
+              }
+            },
+            {
+              "id": "2",
+              "enabled": true,
+              "type": "significant_terms",
+              "schema": "bucket",
+              "params": {
+                "field": "geo.src",
+                "size": 10
+              }
+            }
+          ]
+        }
+      },
+      "coreMigrationVersion": "8.0.1",
+      "id": "7ff2c4c0-4191-11e8-bb13-d53698fb349a",
+      "migrationVersion": {
+        "visualization": "8.0.0"
+      },
+      "references": [
+        {
+          "id": "0bf35f60-3dc9-11e8-8660-4d65aa086b3c",
+          "name": "kibanaSavedObjectMeta.searchSourceJSON.index",
+          "type": "index-pattern"
+        }
+      ],
+      "type": "visualization"
+    },
+    "markdown": {
+      "attributes": {
+        "description": "",
+        "kibanaSavedObjectMeta": {
+          "searchSourceJSON": {}
+        },
+        "title": "Rendering Test: markdown",
+        "uiStateJSON": {},
+        "version": 1,
+        "visState": {
+          "title": "Rendering Test: markdown",
+          "type": "markdown",
+          "params": {
+            "fontSize": 20,
+            "openLinksInNewTab": false,
+            "markdown": "I'm a markdown!"
+          },
+          "aggs": []
+        }
+      },
+      "coreMigrationVersion": "8.0.1",
+      "id": "4c0f47e0-3dcd-11e8-8660-4d65aa086b3c",
+      "migrationVersion": {
+        "visualization": "8.0.0"
+      },
+      "references": [],
+      "type": "visualization"
+    },
+    "input_control_vis": {
+      "attributes": {
+        "description": "",
+        "kibanaSavedObjectMeta": {
+          "searchSourceJSON": {}
+        },
+        "title": "Rendering Test: input control",
+        "uiStateJSON": {},
+        "version": 1,
+        "visState": {
+          "title": "Rendering Test: input control",
+          "type": "input_control_vis",
+          "params": {
+            "controls": [
+              {
+                "id": "1523481142694",
+                "fieldName": "bytes",
+                "parent": "",
+                "label": "Bytes Input List",
+                "type": "list",
+                "options": {
+                  "type": "terms",
+                  "multiselect": true,
+                  "size": 5,
+                  "order": "desc"
+                },
+                "indexPatternRefName": "control_0_index_pattern"
+              },
+              {
+                "id": "1523481163654",
+                "fieldName": "bytes",
+                "parent": "",
+                "label": "Bytes range",
+                "type": "range",
+                "options": {
+                  "decimalPlaces": 0,
+                  "step": 1
+                },
+                "indexPatternRefName": "control_1_index_pattern"
+              },
+              {
+                "id": "1523481176519",
+                "fieldName": "sound.keyword",
+                "parent": "",
+                "label": "Animal sounds",
+                "type": "list",
+                "options": {
+                  "type": "terms",
+                  "multiselect": true,
+                  "size": 5,
+                  "order": "desc"
+                },
+                "indexPatternRefName": "control_2_index_pattern"
+              }
+            ],
+            "updateFiltersOnChange": false,
+            "useTimeFilter": false,
+            "pinFilters": false
+          },
+          "aggs": []
+        }
+      },
+      "coreMigrationVersion": "8.0.1",
+      "id": "2d1b1620-3dcd-11e8-8660-4d65aa086b3c",
+      "migrationVersion": {
+        "visualization": "8.0.0"
+      },
+      "references": [
+        {
+          "id": "0bf35f60-3dc9-11e8-8660-4d65aa086b3c",
+          "name": "control_0_index_pattern",
+          "type": "index-pattern"
+        },
+        {
+          "id": "0bf35f60-3dc9-11e8-8660-4d65aa086b3c",
+          "name": "control_1_index_pattern",
+          "type": "index-pattern"
+        },
+        {
+          "id": "a0f483a0-3dc9-11e8-8660-4d65aa086b3c",
+          "name": "control_2_index_pattern",
+          "type": "index-pattern"
+        }
+      ],
+      "type": "visualization"
+    },
+    "search": {
+      "attributes": {
+        "columns": [
+          "agent",
+          "bytes",
+          "clientip"
+        ],
+        "description": "",
+        "hits": 0,
+        "kibanaSavedObjectMeta": {
+          "searchSourceJSON": {
+            "highlightAll": true,
+            "version": true,
+            "query": {
+              "language": "lucene",
+              "query": ""
+            },
+            "filter": [],
+            "indexRefName": "kibanaSavedObjectMeta.searchSourceJSON.index"
+          }
+        },
+        "sort": [
+          [
+            "@timestamp",
+            "desc"
+          ]
+        ],
+        "title": "Rendering Test: saved search",
+        "version": 1
+      },
+      "coreMigrationVersion": "8.0.1",
+      "id": "be5accf0-3dca-11e8-8660-4d65aa086b3c",
+      "migrationVersion": {
+        "search": "8.0.0"
+      },
+      "references": [
+        {
+          "id": "0bf35f60-3dc9-11e8-8660-4d65aa086b3c",
+          "name": "kibanaSavedObjectMeta.searchSourceJSON.index",
+          "type": "index-pattern"
+        }
+      ],
+      "type": "search"
+    },
+    "dashboard": {
+      "attributes": {
+        "description": "",
+        "hits": 0,
+        "kibanaSavedObjectMeta": {
+          "searchSourceJSON": {
+            "query": {
+              "query": "",
+              "language": "lucene"
+            },
+            "filter": [],
+            "highlightAll": true,
+            "version": true
+          }
+        },
+        "optionsJSON": {
+          "darkTheme": false,
+          "useMargins": true,
+          "hidePanelTitles": false
+        },
+        "panelsJSON": [
+          {
+            "version": "7.3.0",
+            "type": "visualization",
+            "gridData": {
+              "w": 24,
+              "h": 15,
+              "x": 0,
+              "y": 0,
+              "i": "1"
+            },
+            "panelIndex": "1",
+            "embeddableConfig": {
+              "enhancements": {}
+            },
+            "panelRefName": "panel_1"
+          },
+          {
+            "version": "7.3.0",
+            "type": "visualization",
+            "gridData": {
+              "w": 24,
+              "h": 15,
+              "x": 24,
+              "y": 0,
+              "i": "2"
+            },
+            "panelIndex": "2",
+            "embeddableConfig": {
+              "enhancements": {}
+            },
+            "panelRefName": "panel_2"
+          }
+        ],
+        "timeRestore": false,
+        "title": "couple panels",
+        "version": 1
+      },
+      "coreMigrationVersion": "8.0.1",
+      "id": "2ae34a60-3dd4-11e8-b2b9-5d5dc1715159",
+      "migrationVersion": {
+        "dashboard": "8.0.1"
+      },
+      "references": [
+        {
+          "id": "145ced90-3dcb-11e8-8660-4d65aa086b3c",
+          "name": "1:panel_1",
+          "type": "visualization"
+        },
+        {
+          "id": "e2023110-3dcb-11e8-8660-4d65aa086b3c",
+          "name": "2:panel_2",
+          "type": "visualization"
+        }
+      ],
+      "type": "dashboard"
+    },
+    "dynamic_options_input_control": {
+      "attributes": {
+        "description": "",
+        "kibanaSavedObjectMeta": {
+          "searchSourceJSON": {
+            "query": {
+              "query": "",
+              "language": "kuery"
+            },
+            "filter": []
+          }
+        },
+        "title": "dynamic options input control",
+        "uiStateJSON": {},
+        "version": 1,
+        "visState": {
+          "title": "dynamic options input control",
+          "type": "input_control_vis",
+          "params": {
+            "controls": [
+              {
+                "id": "1559759127876",
+                "fieldName": "geo.src",
+                "parent": "",
+                "label": "",
+                "type": "list",
+                "options": {
+                  "type": "terms",
+                  "multiselect": true,
+                  "dynamicOptions": true,
+                  "size": 5,
+                  "order": "desc"
+                },
+                "indexPatternRefName": "control_0_index_pattern"
+              }
+            ],
+            "updateFiltersOnChange": false,
+            "useTimeFilter": false,
+            "pinFilters": false
+          },
+          "aggs": []
+        }
+      },
+      "coreMigrationVersion": "7.14.0",
+      "id": "64983230-87bf-11e9-a991-3b492a7c3e09",
+      "migrationVersion": {
+        "visualization": "7.14.0"
+      },
+      "references": [
+        {
+          "id": "logstash-*",
+          "name": "control_0_index_pattern",
+          "type": "index-pattern"
+        }
+      ],
+      "type": "visualization"
+    }
+  },
+  "aggregation_examples": {
+    "percentiles": {
+      "source": "https://github.com/elastic/kibana/blob/v8.4.1/src/plugins/data/common/search/aggs/metrics/percentiles.ts",
+      "aggregation": {
+        "id": "1",
+        "enabled": true,
+        "type": "percentiles",
+        "schema": "metric",
+        "params": {
+          "field": "duration_ms",
+          "percents": [
+            95
+          ]
+        }
+      }
+    }
+  }
+}

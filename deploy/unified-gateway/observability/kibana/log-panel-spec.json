@@ -1,0 +1,294 @@
+{
+  "schemaVersion": 1,
+  "title": "Unified gateway log panel semantics",
+  "sourceIndexPattern": "logs-unified_gateway-*",
+  "baseKql": "service.name: \"unified-gateway\"",
+  "timeField": "@timestamp",
+  "description": "Implementation-backed suggestions for dashboard authors. This file is a semantic specification, not a Kibana saved object import.",
+  "sources": [
+    "apps/unified-gateway/UnifiedGatewayLog.cs",
+    "apps/unified-gateway/Source/SourceMessageHandler.cs",
+    "apps/unified-gateway/Source/SourceMessageTelemetry.cs",
+    "apps/unified-gateway/Dispatch/DispatchTelemetry.cs",
+    "apps/unified-gateway/Processing/PipelineWorkPreparer.cs",
+    "apps/unified-gateway/Rules/RuleLoadTelemetry.cs",
+    "libs/rule-engine/Rules/RuleEvaluationLogging.cs",
+    "libs/rabbitmq-client/RabbitMqLog.cs",
+    "libs/rabbitmq-client/RabbitMqOutcomeRouter.cs",
+    "libs/observability/EcsLogDocumentSerializer.cs"
+  ],
+  "importantConstraints": [
+    "Counts are observed exported log events. Logs can be filtered or dropped; they are not billing or exact-once business counters.",
+    "event.code is a string. RabbitMQ low-number event codes must be scoped by logger because .NET framework logs reuse numbers such as 103 and 105.",
+    "event6021 is one completed source handling attempt after parsing/preparation/dispatch. It excludes early missing-gridType filter6022, parse rejection6020, thrown handler exceptions and cancellation. Retries emit additional attempts.",
+    "event6021 has no pipeline.id: do not apply pipeline.id globally to source-wide panels. Dispatch and rule evaluation panels have pipeline.id.",
+    "event6001 successful delivery is Debug and has no findair.outcome field. Classify successes by event.code6001. Failure6002 is Warning and has findair.outcome retry or rejected.",
+    "Source success means handler success. An attempt with no matching rules may succeed with zero dispatches. Dispatch delivered means transport accepted it, not that the downstream algorithm completed.",
+    "Full source retries can resend previously delivered dispatch units. Distinct messaging.message.id on dispatch events is an approximate unique dispatch identity count, not an exact-once throughput measure.",
+    "event6022 includes source-wide, pipeline and run filtering. A message can produce several filter events and still dispatch work. Never label all event6022 counts as dropped messages.",
+    "rule loaded/rejected/retained count fields are snapshots, not increments. Use last value per pipeline and service.instance.id; do not sum over refreshes or replicas.",
+    "event6012 rule detail logs are capped at 10 per load. Their count is not the total number of rejected rules. Repeated refreshes report the same bad rule again.",
+    "Rule evaluation matched IDs and missed ID arrays may be truncated by the exporter MaxCollectionCount (32 by default). Numeric miss counts remain the reliable per-evaluation totals. A rule records its first failed matching condition only.",
+    "event106 confirms a successful broker nack without requeue for dead-letter routing. It does not prove the configured DLQ stored the message or measure current queue depth.",
+    "Pipeline IDs are configuration keys, conventionally FindAir and DeepWisdom; service.name may be overridden. Replace the base service filter if deployed with a different name.",
+    "service.environment in the supplied Integration screenshot is Integration with a capital I, but data_stream.namespace is integration. Use data_stream.namespace for the log environment selector.",
+    "Custom string aggregation fields may be mapped as keyword or text plus .keyword depending on installed templates. Inspect actual field capabilities before building aggregations.",
+    "Source/dispatch logs have no duration field. Use traces for latency and never invent a log duration or sum framework timings."
+  ],
+  "debugLoggingConfiguration": {
+    "Logging__EcsHttp__LogLevel__ImagingPipeline.UnifiedGateway": "Debug",
+    "description": "Enables gateway Debug events for Logstash (6001 delivery, 6011 refresh, 6022 filters), without turning every framework logger to Debug. The EcsHttp provider-specific level can otherwise override a global Debug setting."
+  },
+  "recommendedControls": [
+    { "field": "data_stream.namespace", "scope": "logs", "label": "Log environment" },
+    { "field": "service.instance.id", "scope": "logs", "label": "Gateway instance" },
+    { "field": "kubernetes.pod.name", "scope": "logs", "label": "Pod", "optional": true },
+    { "field": "pipeline.id", "scope": "pipeline_panels_only", "label": "Pipeline", "warning": "A global pipeline filter hides source-wide logs, retries and DLQ events." }
+  ],
+  "panels": [
+    {
+      "id": "logs_source_attempts",
+      "title": "Completed source attempts",
+      "visualization": "metric",
+      "kql": "event.code: \"6021\"",
+      "metric": "count",
+      "description": "Source handler attempts that reached completion; retries count again. Excludes early filters and parse failures."
+    },
+    {
+      "id": "logs_source_outcomes",
+      "title": "Source attempt outcomes over time",
+      "visualization": "stacked_bar",
+      "kql": "event.code: \"6021\"",
+      "metric": "count",
+      "timeBucket": "@timestamp",
+      "breakdown": "findair.outcome",
+      "values": ["success", "retry", "rejected"],
+      "description": "Handler outcomes, not final downstream completion. No pipeline.id filter."
+    },
+    {
+      "id": "logs_source_fanout",
+      "title": "Dispatch units per completed source attempt",
+      "visualization": "line",
+      "kql": "event.code: \"6021\"",
+      "metrics": [
+        { "aggregation": "average", "field": "unified_gateway.dispatch.units.count", "label": "Average units" },
+        { "aggregation": "max", "field": "unified_gateway.dispatch.units.count", "label": "Maximum units" }
+      ],
+      "timeBucket": "@timestamp",
+      "description": "Counts prepared dispatch outcomes plus invalid preparations; zero includes messages with no matching runs."
+    },
+    {
+      "id": "logs_dispatch_attempts",
+      "title": "Dispatch attempts by pipeline and result [Debug needed for delivered]",
+      "visualization": "stacked_bar",
+      "kql": "event.code: (\"6001\" or \"6002\")",
+      "metric": "count",
+      "breakdown": "pipeline.id",
+      "seriesFilters": [
+        { "label": "Delivered", "kql": "event.code: \"6001\"" },
+        { "label": "Retryable failure", "kql": "event.code: \"6002\" and findair.outcome: \"retry\"" },
+        { "label": "Rejected", "kql": "event.code: \"6002\" and findair.outcome: \"rejected\"" }
+      ],
+      "description": "Transport attempt result, not algorithm completion; delivery events require gateway Debug logging."
+    },
+    {
+      "id": "logs_dispatch_failed",
+      "title": "Failed dispatch attempts",
+      "visualization": "metric",
+      "kql": "event.code: \"6002\"",
+      "metric": "count"
+    },
+    {
+      "id": "logs_dispatch_errors",
+      "title": "Dispatch failures by pipeline and category",
+      "visualization": "table",
+      "kql": "event.code: \"6002\"",
+      "metric": "count",
+      "rows": ["pipeline.id", "pipeline.transport", "findair.error.category", "findair.outcome"],
+      "description": "error.type is an exception class; findair.error.category is the stable failure classification."
+    },
+    {
+      "id": "logs_http_failure_status",
+      "title": "HTTP dispatch failure status codes",
+      "visualization": "horizontal_bar",
+      "kql": "event.code: \"6002\" and http.response.status_code: *",
+      "metric": "count",
+      "breakdown": "http.response.status_code",
+      "description": "Only failures with an HTTP response. Timeouts/connection failures may have no status code. Successful HTTP codes are available on spans, not delivery logs."
+    },
+    {
+      "id": "logs_retries",
+      "title": "Source retry schedules by attempt",
+      "visualization": "stacked_bar",
+      "kql": "event.code: \"105\" and log.logger: \"ImagingPipeline.RabbitMqClient.RabbitMqOutcomeRouter\"",
+      "metric": "count",
+      "timeBucket": "@timestamp",
+      "breakdown": "findair.retry.attempt",
+      "description": "Successful retry publication plus source acknowledgement. Each retry is counted; does not have pipeline.id."
+    },
+    {
+      "id": "logs_dead_letter",
+      "title": "Source dead-letter routing events",
+      "visualization": "metric",
+      "kql": "event.code: \"106\" and log.logger: \"ImagingPipeline.RabbitMqClient.RabbitMqOutcomeRouter\"",
+      "metric": "count",
+      "description": "Broker nack without requeue completed. This is not a DLQ depth or proof of downstream DLQ receipt."
+    },
+    {
+      "id": "logs_dead_letter_reasons",
+      "title": "Dead-letter routing reasons",
+      "visualization": "horizontal_bar",
+      "kql": "event.code: \"106\" and log.logger: \"ImagingPipeline.RabbitMqClient.RabbitMqOutcomeRouter\"",
+      "metric": "count",
+      "breakdown": "labels.reason",
+      "expectedValues": ["non-retryable failure", "retry disabled", "retry attempts exhausted"],
+      "description": "Additional retry-header validation reasons can appear. The field is labels.reason, not error.message."
+    },
+    {
+      "id": "logs_source_validation",
+      "title": "Source validation rejections by code",
+      "visualization": "horizontal_bar",
+      "kql": "event.code: \"6020\"",
+      "metric": "count",
+      "breakdown": "error.code",
+      "description": "Common input parse/context validation failure. Pipeline-specific preparation rejections are separate logs."
+    },
+    {
+      "id": "logs_contract_validation",
+      "title": "Pipeline work preparation failures",
+      "visualization": "table",
+      "kql": "log.logger: \"ImagingPipeline.UnifiedGateway.Processing.PipelineWorkPreparer\" and log.level: (\"warning\" or \"error\")",
+      "metric": "count",
+      "rows": ["pipeline.id", "labels.contract_id", "log.level"],
+      "description": "Warning indicates contract input rejection; Error indicates an exception during preparation. ErrorCount is labels.error_count. These logs have event.code0, so category is essential."
+    },
+    {
+      "id": "logs_filters",
+      "title": "Filter events by reason [Debug needed]",
+      "visualization": "horizontal_bar",
+      "kql": "event.code: \"6022\"",
+      "metric": "count",
+      "breakdown": "unified_gateway.filter.reason",
+      "expectedValues": ["grid_type_not_updated", "no_enabled_pipelines", "no_matching_rules", "duplicate_run"],
+      "description": "Filter event count with mixed source/pipeline/run granularity. It must not be labelled dropped source messages."
+    },
+    {
+      "id": "logs_grid_filter",
+      "title": "Source attempts skipped: gridType not updated [Debug needed]",
+      "visualization": "metric",
+      "kql": "event.code: \"6022\" and unified_gateway.filter.reason: \"grid_type_not_updated\"",
+      "metric": "count",
+      "description": "One early filter event per handling attempt missing gridType in updatedFields; returned success without parsing or dispatch."
+    },
+    {
+      "id": "logs_pipeline_no_matches",
+      "title": "No matching rules by pipeline [Debug needed]",
+      "visualization": "stacked_bar",
+      "kql": "event.code: \"6022\" and unified_gateway.filter.reason: \"no_matching_rules\"",
+      "metric": "count",
+      "timeBucket": "@timestamp",
+      "breakdown": "pipeline.id",
+      "description": "One event per evaluated pipeline with zero matched rules. Other pipelines may still receive work."
+    },
+    {
+      "id": "logs_rule_evaluations",
+      "title": "Image-rule evaluations by pipeline",
+      "visualization": "stacked_bar",
+      "kql": "event.code: \"7002\" and log.logger: \"ImagingPipeline.UnifiedGateway.Source.SourceMessageHandler\"",
+      "metric": "count",
+      "timeBucket": "@timestamp",
+      "breakdown": "pipeline.id",
+      "description": "One event per source attempt and pipeline; not one event per individual rule. Retries repeat evaluations."
+    },
+    {
+      "id": "logs_rule_misses",
+      "title": "Rule comparison misses by first failed condition",
+      "visualization": "stacked_bar",
+      "kql": "event.code: \"7002\" and log.logger: \"ImagingPipeline.UnifiedGateway.Source.SourceMessageHandler\"",
+      "breakdown": "pipeline.id",
+      "metrics": [
+        { "aggregation": "sum", "field": "unified_gateway.rules.missed.photo_age.count", "label": "Photo age" },
+        { "aggregation": "sum", "field": "unified_gateway.rules.missed.sensor.count", "label": "Sensor" },
+        { "aggregation": "sum", "field": "unified_gateway.rules.missed.resolution.count", "label": "Resolution" },
+        { "aggregation": "sum", "field": "unified_gateway.rules.missed.geometry.count", "label": "Geometry" }
+      ],
+      "description": "Counts rule comparisons across image attempts, not missed images or unique rules. First failed condition only."
+    },
+    {
+      "id": "logs_rule_snapshot",
+      "title": "Latest observed rule counts per pipeline and instance [Debug needed for refresh]",
+      "visualization": "table",
+      "kql": "event.code: (\"6010\" or \"6011\")",
+      "rows": ["pipeline.id", "service.instance.id"],
+      "metrics": [
+        { "aggregation": "last_value", "sortBy": "@timestamp", "field": "unified_gateway.rules.loaded.count", "label": "Loaded in last successful snapshot" },
+        { "aggregation": "last_value", "sortBy": "@timestamp", "field": "unified_gateway.rules.rejected.count", "label": "Rejected in last successful snapshot" },
+        { "aggregation": "max", "field": "@timestamp", "label": "Last successful snapshot logged" }
+      ],
+      "description": "Latest observation inside selected time range, not guaranteed current state. Refresh6011 is Debug. Never sum snapshots or replicas. All-rules-rejected loads do not emit6010/6011; see failure6013."
+    },
+    {
+      "id": "logs_rule_load_failures",
+      "title": "Rule load failures by pipeline",
+      "visualization": "stacked_bar",
+      "kql": "event.code: \"6013\"",
+      "metric": "count",
+      "timeBucket": "@timestamp",
+      "breakdown": "pipeline.id",
+      "description": "Previous rules remain active during failed refreshes; startup failure prevents service startup. Retained count is a snapshot."
+    },
+    {
+      "id": "logs_rule_rejection_examples",
+      "title": "Rule rejection examples (up to 10 per load)",
+      "visualization": "saved_search",
+      "kql": "event.code: \"6012\"",
+      "columns": ["@timestamp", "pipeline.id", "findair.rule.id", "unified_gateway.rule.rejection.reason", "error.message", "service.instance.id"],
+      "sort": ["@timestamp", "desc"],
+      "description": "Diagnostic examples, not all rejected rules. The same rule may appear on every refresh."
+    },
+    {
+      "id": "logs_severity",
+      "title": "Exported log volume by severity",
+      "visualization": "stacked_bar",
+      "kql": "",
+      "metric": "count",
+      "timeBucket": "@timestamp",
+      "breakdown": "log.level",
+      "description": "Exported logs, not message throughput. This shows logging volume and warning/error spikes."
+    },
+    {
+      "id": "logs_broker_recovery",
+      "title": "RabbitMQ connection and consumer disruptions",
+      "visualization": "stacked_bar",
+      "kql": "log.logger: ImagingPipeline.RabbitMqClient.* and event.code: (\"109\" or \"110\" or \"111\" or \"112\" or \"113\" or \"115\")",
+      "metric": "count",
+      "timeBucket": "@timestamp",
+      "seriesFilters": [
+        { "label": "Connection failed", "kql": "event.code: \"109\"" },
+        { "label": "Connection shutdown", "kql": "event.code: \"110\"" },
+        { "label": "Callback error", "kql": "event.code: \"111\"" },
+        { "label": "Recovered", "kql": "event.code: \"112\"" },
+        { "label": "Recovery failed", "kql": "event.code: \"113\"" },
+        { "label": "Consumer restart", "kql": "event.code: \"115\"" }
+      ]
+    },
+    {
+      "id": "logs_investigation",
+      "title": "Recent gateway events and trace correlation",
+      "visualization": "saved_search",
+      "kql": "log.logger: ImagingPipeline.UnifiedGateway.* or log.logger: ImagingPipeline.RabbitMqClient.*",
+      "columns": ["@timestamp", "log.level", "event.code", "pipeline.id", "message", "messaging.message.id", "messaging.message.conversation_id", "findair.image.id", "findair.retry.attempt", "trace.id", "span.id"],
+      "sort": ["@timestamp", "desc"],
+      "description": "Search by image ID to follow evaluation across pipelines; source ID may appear as messaging.message.id or conversation_id on dispatch logs. A trace ID enables correlation with APM traces when the corresponding span was sampled and exported."
+    },
+    {
+      "id": "logs_recent_errors",
+      "title": "Recent warnings and errors",
+      "visualization": "saved_search",
+      "kql": "log.level: (\"warning\" or \"error\" or \"critical\")",
+      "columns": ["@timestamp", "log.level", "pipeline.id", "event.code", "message", "findair.error.category", "error.code", "error.type", "error.message", "messaging.message.id", "trace.id"],
+      "sort": ["@timestamp", "desc"],
+      "description": "A broad diagnostic table that retains exception details and message/trace identifiers."
+    }
+  ]
+}

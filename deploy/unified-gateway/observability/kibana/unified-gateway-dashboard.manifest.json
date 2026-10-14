@@ -1,0 +1,735 @@
+{
+  "targetKibana": "8.15.x",
+  "savedObjectSchemaSource": "8.4.1",
+  "dashboardId": "2e5f9e8b-89e1-5d16-87da-74b49a7c4dd0",
+  "dataViewId": "747eaddd-3792-533b-8fba-5a00df7c2ed5",
+  "service": "unified-gateway",
+  "logs": "logs-unified_gateway-*",
+  "traces": "traces-apm*,apm-*",
+  "space": "default",
+  "basePath": "",
+  "savedObjectCount": 50,
+  "panelCount": 48,
+  "panels": [
+    {
+      "id": "15ade04b-cca9-5d62-81c8-2264194dee29",
+      "type": "visualization",
+      "title": "Unified Gateway",
+      "query": "",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 0,
+        "w": 48,
+        "h": 6,
+        "i": "1"
+      }
+    },
+    {
+      "id": "63f4740a-e407-58dc-a7ef-d8f8653969e5",
+      "type": "visualization",
+      "title": "Environment and instance",
+      "query": "",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 6,
+        "w": 48,
+        "h": 5,
+        "i": "2"
+      }
+    },
+    {
+      "id": "d3916c53-b6c9-5b61-a6a8-81ca88308ff3",
+      "type": "visualization",
+      "title": "Source processing and delivery",
+      "query": "",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 11,
+        "w": 48,
+        "h": 4,
+        "i": "3"
+      }
+    },
+    {
+      "id": "b691e9fc-445c-532d-b105-d383dc43d710",
+      "type": "visualization",
+      "title": "Completed source attempts",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6021\")",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 15,
+        "w": 12,
+        "h": 6,
+        "i": "4"
+      }
+    },
+    {
+      "id": "94b59834-ec0e-5db6-a19f-4b34f161a1d9",
+      "type": "visualization",
+      "title": "Distinct processed images ≈",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6021\")",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 12,
+        "y": 15,
+        "w": 12,
+        "h": 6,
+        "i": "5"
+      }
+    },
+    {
+      "id": "0036b86e-c9ef-5d7a-9173-42a69836ae7e",
+      "type": "visualization",
+      "title": "Invalid source inputs",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6020\")",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 24,
+        "y": 15,
+        "w": 12,
+        "h": 6,
+        "i": "6"
+      }
+    },
+    {
+      "id": "c8da2e32-2dbe-54ab-827f-e50481930328",
+      "type": "visualization",
+      "title": "Failed dispatch attempts",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6002\")",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 36,
+        "y": 15,
+        "w": 12,
+        "h": 6,
+        "i": "7"
+      }
+    },
+    {
+      "id": "b3704c05-3e8a-56c3-bc6f-60179165fc19",
+      "type": "visualization",
+      "title": "Source attempt outcomes over time",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6021\")",
+      "description": "One event6021 per completed source attempt; excludes early filters and parse rejections.",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 10,
+        "i": "8"
+      }
+    },
+    {
+      "id": "44f2dcb6-2be3-5c6b-983c-a1c0665edfce",
+      "type": "visualization",
+      "title": "Source attempt outcome mix",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6021\")",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 24,
+        "y": 21,
+        "w": 24,
+        "h": 10,
+        "i": "9"
+      }
+    },
+    {
+      "id": "dfa5e32d-5c48-562c-869b-f891030a1f34",
+      "type": "visualization",
+      "title": "Dispatch units reported by source attempts",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6021\")",
+      "description": "Derived from source summary; available at Information level. Retries count again.",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 31,
+        "w": 24,
+        "h": 10,
+        "i": "10"
+      }
+    },
+    {
+      "id": "ce4eafb1-c25c-5ff8-9476-8b7457b4d0b3",
+      "type": "visualization",
+      "title": "Fan-out per source attempt",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6021\")",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 24,
+        "y": 31,
+        "w": 24,
+        "h": 10,
+        "i": "11"
+      }
+    },
+    {
+      "id": "6b349e64-82c8-541a-ac99-a27242d8983f",
+      "type": "visualization",
+      "title": "Dispatch attempts by pipeline [Debug for success]",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6001\" or \"6002\")",
+      "description": "Delivered dispatch event6001 needs gateway Debug export. Failed6002 does not.",
+      "requiresGatewayDebug": true,
+      "grid": {
+        "x": 0,
+        "y": 41,
+        "w": 24,
+        "h": 10,
+        "i": "12"
+      }
+    },
+    {
+      "id": "02b3cab7-2eb6-5e65-a7e7-469dfca97d04",
+      "type": "visualization",
+      "title": "Dispatch failures by pipeline and category",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6002\")",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 24,
+        "y": 41,
+        "w": 24,
+        "h": 10,
+        "i": "13"
+      }
+    },
+    {
+      "id": "9d974fbf-660e-5661-8736-02ad6a1df36c",
+      "type": "visualization",
+      "title": "Filter decisions [Debug]",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6022\")",
+      "description": "Mixed source/pipeline/run decisions; not a unique dropped-message count.",
+      "requiresGatewayDebug": true,
+      "grid": {
+        "x": 0,
+        "y": 51,
+        "w": 24,
+        "h": 10,
+        "i": "14"
+      }
+    },
+    {
+      "id": "832cc67d-6293-53e2-b1c8-0d53fe3a7d5a",
+      "type": "visualization",
+      "title": "Invalid source inputs by validation code",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6020\")",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 24,
+        "y": 51,
+        "w": 24,
+        "h": 10,
+        "i": "15"
+      }
+    },
+    {
+      "id": "2a1fecba-0c16-5d5d-8604-b117db8efa24",
+      "type": "visualization",
+      "title": "Retry and dead-letter routing events",
+      "query": "ug.signal: \"logs\" and log.logger: \"ImagingPipeline.RabbitMqClient.RabbitMqOutcomeRouter\" and ug.event_code: (\"105\" or \"106\")",
+      "description": "Successful routing operations from the outcome router. Not queue depth or confirmation that a DLQ stored the message.",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 61,
+        "w": 24,
+        "h": 10,
+        "i": "16"
+      }
+    },
+    {
+      "id": "a2b0c59c-89f6-5e76-9bdc-f6d8fa5d4d37",
+      "type": "visualization",
+      "title": "Failed HTTP dispatches by response code",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6002\") and ug.transport: \"http\"",
+      "description": "Timeouts and connection failures without a response code are absent from this chart.",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 24,
+        "y": 61,
+        "w": 24,
+        "h": 10,
+        "i": "17"
+      }
+    },
+    {
+      "id": "ac034f70-6108-5e8a-bb5b-c9e5b6e761e9",
+      "type": "visualization",
+      "title": "Processed attempts by sensor",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6021\")",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 71,
+        "w": 24,
+        "h": 10,
+        "i": "18"
+      }
+    },
+    {
+      "id": "fb15b6f8-e49a-555e-b528-14e5d086ee3b",
+      "type": "visualization",
+      "title": "Exported application logs by severity",
+      "query": "ug.signal: \"logs\"",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 24,
+        "y": 71,
+        "w": 24,
+        "h": 10,
+        "i": "19"
+      }
+    },
+    {
+      "id": "999b12a4-ccdd-5fe5-a70d-bd4575f906da",
+      "type": "visualization",
+      "title": "RabbitMQ connection and consumer events",
+      "query": "ug.signal: \"logs\" and log.logger: ImagingPipeline.RabbitMqClient.* and ug.event_code: (\"109\" or \"110\" or \"111\" or \"112\" or \"113\" or \"114\" or \"115\")",
+      "description": "Exported connection lifecycle events, including shutdown during rollout; not an availability percentage or outage duration.",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 81,
+        "w": 48,
+        "h": 10,
+        "i": "20"
+      }
+    },
+    {
+      "id": "13f5799c-77c7-5068-980f-cefcf8bb1fb1",
+      "type": "visualization",
+      "title": "Rule health",
+      "query": "",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 91,
+        "w": 48,
+        "h": 4,
+        "i": "21"
+      }
+    },
+    {
+      "id": "298f1b5e-2c33-5d47-bf14-52822c1527c9",
+      "type": "visualization",
+      "title": "Rule-matching misses by pipeline",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"7002\")",
+      "description": "Exact numeric miss counts over exported per-image/per-pipeline evaluation events.",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 95,
+        "w": 24,
+        "h": 10,
+        "i": "22"
+      }
+    },
+    {
+      "id": "ba86690b-003b-5c8c-a854-ceff515f205b",
+      "type": "visualization",
+      "title": "Rule load failures over time",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6013\")",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 24,
+        "y": 95,
+        "w": 24,
+        "h": 10,
+        "i": "23"
+      }
+    },
+    {
+      "id": "1a5de8b3-dbfd-5984-a334-555caed61e82",
+      "type": "visualization",
+      "title": "Latest rule cache snapshots [Debug for refresh]",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6010\" or \"6011\")",
+      "description": "Startup snapshots are Information; periodic snapshots require Debug. A short time range can be empty if only startup snapshots were exported.",
+      "requiresGatewayDebug": true,
+      "grid": {
+        "x": 0,
+        "y": 105,
+        "w": 48,
+        "h": 12,
+        "i": "24"
+      }
+    },
+    {
+      "id": "5944a6d5-b21e-5a1f-ba30-9da2433fe030",
+      "type": "visualization",
+      "title": "Rejected-rule detail events by reason",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6012\")",
+      "description": "Diagnostic details are capped at10 per load; repeated refreshes can repeat a rejection. This is not the total rejected-rule count.",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 117,
+        "w": 24,
+        "h": 10,
+        "i": "25"
+      }
+    },
+    {
+      "id": "c4a5ce20-cce3-5ecf-84e2-4dbe12d1c751",
+      "type": "visualization",
+      "title": "Contract validation and preparation errors",
+      "query": "ug.signal: \"logs\" and log.logger: \"ImagingPipeline.UnifiedGateway.Processing.PipelineWorkPreparer\" and ug.log_level: (\"warning\" or \"error\" or \"critical\")",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 24,
+        "y": 117,
+        "w": 24,
+        "h": 10,
+        "i": "26"
+      }
+    },
+    {
+      "id": "73082772-73e8-5c95-8342-af5f7adfbc34",
+      "type": "visualization",
+      "title": "Trace performance",
+      "query": "",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 127,
+        "w": 48,
+        "h": 4,
+        "i": "27"
+      }
+    },
+    {
+      "id": "30f51cd4-f40e-51f8-b9dc-1e9386f6fb27",
+      "type": "visualization",
+      "title": "Sampled source delivery attempts",
+      "query": "ug.signal: \"traces\" and ug.operation: \"rabbitmq handler\"",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 131,
+        "w": 12,
+        "h": 6,
+        "i": "28"
+      }
+    },
+    {
+      "id": "c965a36a-694a-5fd6-bd8e-e7be1d438d96",
+      "type": "visualization",
+      "title": "Sampled handler failure share",
+      "query": "ug.signal: \"traces\" and ug.operation: \"rabbitmq handler\"",
+      "description": "Failures include retries/rejections/cancellation; denominator is known success/failure outcomes, not final lost messages.",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 12,
+        "y": 131,
+        "w": 12,
+        "h": 6,
+        "i": "29"
+      }
+    },
+    {
+      "id": "132e280d-12db-5f21-bee5-0ad67f2f3d30",
+      "type": "visualization",
+      "title": "Handler latency — milliseconds",
+      "query": "ug.signal: \"traces\" and ug.operation: \"rabbitmq handler\"",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 24,
+        "y": 131,
+        "w": 24,
+        "h": 6,
+        "i": "30"
+      }
+    },
+    {
+      "id": "c5c398eb-bd9f-5b79-bc04-6aaf33eb61ba",
+      "type": "visualization",
+      "title": "Sampled delivery attempts by result",
+      "query": "ug.signal: \"traces\" and ug.operation: \"rabbitmq handler\"",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 137,
+        "w": 24,
+        "h": 10,
+        "i": "31"
+      }
+    },
+    {
+      "id": "ecc5a01f-ddab-530f-91ab-98f8f6a6f510",
+      "type": "visualization",
+      "title": "Handler latency percentiles — ms",
+      "query": "ug.signal: \"traces\" and ug.operation: \"rabbitmq handler\"",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 24,
+        "y": 137,
+        "w": 24,
+        "h": 10,
+        "i": "32"
+      }
+    },
+    {
+      "id": "6c1fbf42-d666-54fa-8640-112d53b16404",
+      "type": "visualization",
+      "title": "Dispatch p95 latency by pipeline — ms",
+      "query": "ug.signal: \"traces\" and ug.operation: \"unified_gateway.dispatch\"",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 147,
+        "w": 24,
+        "h": 10,
+        "i": "33"
+      }
+    },
+    {
+      "id": "e2191dc0-7e5c-5298-9ecf-b4636a9f2565",
+      "type": "visualization",
+      "title": "Sampled dispatch outcomes",
+      "query": "ug.signal: \"traces\" and ug.operation: \"unified_gateway.dispatch\"",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 24,
+        "y": 147,
+        "w": 24,
+        "h": 10,
+        "i": "34"
+      }
+    },
+    {
+      "id": "f535dc0c-4595-5610-9d97-10d66f15a93b",
+      "type": "visualization",
+      "title": "Sampled contract preparation outcomes",
+      "query": "ug.signal: \"traces\" and ug.operation: \"unified_gateway.contract.prepare\"",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 157,
+        "w": 24,
+        "h": 10,
+        "i": "35"
+      }
+    },
+    {
+      "id": "a08b96d1-cc52-5866-b2aa-d9f71ee618d4",
+      "type": "visualization",
+      "title": "Preparation p95 latency by pipeline — ms",
+      "query": "ug.signal: \"traces\" and ug.operation: \"unified_gateway.contract.prepare\"",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 24,
+        "y": 157,
+        "w": 24,
+        "h": 10,
+        "i": "36"
+      }
+    },
+    {
+      "id": "c4a91366-39d2-5310-8c2a-05cb1e251685",
+      "type": "visualization",
+      "title": "Sampled source deliveries by retry attempt",
+      "query": "ug.signal: \"traces\" and ug.operation: \"rabbitmq handler\"",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 167,
+        "w": 24,
+        "h": 10,
+        "i": "37"
+      }
+    },
+    {
+      "id": "89502261-d3e4-5504-bbc5-318d60eda7d9",
+      "type": "visualization",
+      "title": "Sampled HTTP dispatch response codes",
+      "query": "ug.signal: \"traces\" and ug.operation: \"unified_gateway.dispatch\" and ug.transport: \"http\"",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 24,
+        "y": 167,
+        "w": 24,
+        "h": 10,
+        "i": "38"
+      }
+    },
+    {
+      "id": "800a7b0f-233c-5ebd-8894-3d77e84b3afe",
+      "type": "visualization",
+      "title": "Operation latency breakdown — ms",
+      "query": "ug.signal: \"traces\" and ug.duration_ms: *",
+      "description": "Includes handler, dispatch, preparation and instrumented dependencies. Durations overlap; no sum or end-to-end claim.",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 177,
+        "w": 48,
+        "h": 12,
+        "i": "39"
+      }
+    },
+    {
+      "id": "a93b7aa6-4747-5d33-bd73-0df5e3f4c063",
+      "type": "visualization",
+      "title": "Investigate an image, failure or slow trace",
+      "query": "",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 189,
+        "w": 48,
+        "h": 6,
+        "i": "40"
+      }
+    },
+    {
+      "id": "c102f534-2899-565e-8c69-9968f2b8aa60",
+      "type": "search",
+      "title": "Recent warnings and errors",
+      "query": "ug.signal: \"logs\" and ug.log_level: (\"warning\" or \"error\" or \"critical\")",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 195,
+        "w": 48,
+        "h": 12,
+        "i": "41"
+      }
+    },
+    {
+      "id": "0729a138-dfff-5224-951f-d3fbba097883",
+      "type": "search",
+      "title": "Slowest sampled source deliveries",
+      "query": "ug.signal: \"traces\" and ug.operation: \"rabbitmq handler\" and ug.duration_ms: *",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 207,
+        "w": 48,
+        "h": 12,
+        "i": "42"
+      }
+    },
+    {
+      "id": "7bddd698-d889-57d5-ae66-003f855396a8",
+      "type": "search",
+      "title": "Slowest sampled dispatch attempts",
+      "query": "ug.signal: \"traces\" and ug.operation: \"unified_gateway.dispatch\" and ug.duration_ms: *",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 219,
+        "w": 48,
+        "h": 12,
+        "i": "43"
+      }
+    },
+    {
+      "id": "4b51aa9a-61a1-5a17-badc-600d80d0a609",
+      "type": "search",
+      "title": "Recent failed trace operations",
+      "query": "ug.signal: \"traces\" and event.outcome: \"failure\"",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 231,
+        "w": 48,
+        "h": 12,
+        "i": "44"
+      }
+    },
+    {
+      "id": "9f023ac8-f10a-5f70-ae6f-ac60e467f0f5",
+      "type": "search",
+      "title": "Recent source outcomes and dispatch totals",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6021\")",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 243,
+        "w": 48,
+        "h": 12,
+        "i": "45"
+      }
+    },
+    {
+      "id": "b1720fc5-59e3-5702-828f-669a367f4a31",
+      "type": "search",
+      "title": "Recent rejected rules and reasons",
+      "query": "ug.signal: \"logs\" and ug.event_code: (\"6012\")",
+      "description": "Rule detail events are capped at ten per load and can repeat across refreshes.",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 255,
+        "w": 48,
+        "h": 12,
+        "i": "46"
+      }
+    },
+    {
+      "id": "56aa578c-1f89-5076-84a0-6ca75a5089bf",
+      "type": "search",
+      "title": "Gateway log timeline — filter by image, message or trace ID",
+      "query": "ug.signal: \"logs\"",
+      "description": "All exported gateway logs, newest first. Use the KQL bar to correlate an image or trace across processing stages.",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 267,
+        "w": 48,
+        "h": 15,
+        "i": "47"
+      }
+    },
+    {
+      "id": "85797685-482f-5ebb-aff6-73d670a1cbee",
+      "type": "visualization",
+      "title": "Reading this dashboard",
+      "query": "",
+      "description": "",
+      "requiresGatewayDebug": false,
+      "grid": {
+        "x": 0,
+        "y": 282,
+        "w": 48,
+        "h": 9,
+        "i": "48"
+      }
+    }
+  ]
+}

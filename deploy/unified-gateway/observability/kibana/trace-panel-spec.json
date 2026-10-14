@@ -1,0 +1,301 @@
+{
+  "schemaVersion": 1,
+  "title": "Unified gateway trace panel semantics",
+  "description": "Implementation-backed dashboard suggestions for Elastic APM 8.15. This is a semantic specification, not a saved object import. The companion generator supplies the ug.* runtime fields.",
+  "sourceIndexPattern": "traces-apm*,apm-*",
+  "baseKql": "service.name: \"unified-gateway\" and processor.event: (\"span\" or \"transaction\")",
+  "timeField": "@timestamp",
+  "serviceNameConfigurable": true,
+  "sources": [
+    "apps/unified-gateway/Source/SourceMessageHandler.cs",
+    "apps/unified-gateway/Source/SourceMessageTelemetry.cs",
+    "apps/unified-gateway/Processing/PipelineWorkPreparer.cs",
+    "apps/unified-gateway/Dispatch/DispatchTelemetry.cs",
+    "apps/unified-gateway/Dispatch/HttpDispatchTransport.cs",
+    "libs/rabbitmq-client/RabbitMqConsumer.cs",
+    "libs/rabbitmq-client/RabbitMqNativeTracing.cs",
+    "libs/elasticsearch-client/ElasticsearchOperationTelemetry.cs",
+    "libs/observability/PipelineSpanScope.cs",
+    "libs/observability/PipelineStageScope.cs",
+    "libs/observability/TelemetryNames.cs",
+    "libs/observability/TelemetrySpanExtensions.cs",
+    "libs/observability/ObservabilityHostBuilderExtensions.cs"
+  ],
+  "primaryReferences": [
+    {
+      "url": "https://github.com/elastic/apm-server/blob/v8.15.3/go.mod",
+      "purpose": "APM Server 8.15.3 pins apm-data v1.11.0."
+    },
+    {
+      "url": "https://github.com/elastic/apm-data/blob/v1.11.0/input/otlp/traces.go",
+      "purpose": "OTLP root, Server and Consumer spans become transactions; other children become spans. Outcome and semantic attribute mappings are defined here."
+    },
+    {
+      "url": "https://github.com/elastic/apm-data/blob/v1.11.0/input/otlp/metadata.go",
+      "purpose": "Resource fields, underscore-normalized labels, numeric_labels, and boolean labels encoded as strings."
+    },
+    {
+      "url": "https://www.elastic.co/guide/en/observability/8.15/apm-breaking.html",
+      "purpose": "Packaged ingest converts event.duration nanoseconds into span.duration.us or transaction.duration.us and removes event.duration."
+    },
+    {
+      "url": "https://github.com/rabbitmq/rabbitmq-dotnet-client/blob/v7.2.1/projects/RabbitMQ.Client/Impl/RabbitMQActivitySource.cs",
+      "purpose": "Native deliver Consumer and publish Producer operation names when UseRoutingKeyAsOperationName is false."
+    },
+    {
+      "url": "https://www.elastic.co/guide/en/elasticsearch/painless/8.15/painless-runtime-fields-context.html",
+      "purpose": "Runtime scripts can read params._source as a Map/List tree; keyword uses emit(String), double uses emit(double), and null must not be emitted."
+    },
+    {
+      "url": "https://www.elastic.co/guide/en/elasticsearch/reference/8.15/runtime-mapping-fields.html",
+      "purpose": "Source-based runtime fields avoid requiring doc values, at higher query cost than indexed or doc-value fields."
+    },
+    {
+      "url": "https://github.com/elastic/kibana/blob/v8.15.3/x-pack/plugins/observability_solution/apm/public/components/routing/apm_route_config.tsx",
+      "purpose": "Trace link route and optional rangeFrom/rangeTo query parameters."
+    },
+    {
+      "url": "https://github.com/elastic/kibana/blob/v8.15.3/x-pack/plugins/observability_solution/apm/public/components/app/trace_link/index.tsx",
+      "purpose": "Trace links locate the root transaction, falling back to the trace waterfall; omitted range covers epoch through now."
+    }
+  ],
+  "importantConstraints": [
+    "Counts are sampled recorded delivery or dispatch attempts, not exact business totals or unique messages. Retries add attempts.",
+    "Filter source traffic to rabbitmq handler. Counting all transactions also includes native deliver, root Elasticsearch work, and possibly HTTP requests.",
+    "Native deliver can show success when a child handler returns a handled retry or rejection; use rabbitmq handler outcome for processing KPIs.",
+    "Handler failures include retry, rejected input, and cancellation. Do not label these permanent message loss.",
+    "Handler duration includes outcome completion (ACK/retry/DLQ), but excludes time waiting in the broker queue.",
+    "A successful dispatch means transport accepted the request/message; it does not measure downstream algorithm completion.",
+    "Durations are inclusive. Summing handler, dispatch and child transport durations double-counts elapsed work.",
+    "There is no unified_gateway.process or unified_gateway.consume span. PipelineStageScope emits metrics only.",
+    "Rule loading has no dedicated gateway span. Elasticsearch operations are traced but do not include the full rule validation/cache-refresh duration.",
+    "Custom attributes do not automatically inherit to child spans. Pipeline ID exists on preparation and dispatch, while handler can fan out to multiple pipelines.",
+    "A global pipeline filter hides source handler traces, native transport spans and rule-search spans. Use pipeline filtering only on the relevant panels.",
+    "Image, area and sensor tags are added to the handler only after parsing succeeds; filtered and invalid input traces can lack them. A global image filter hides preparation/dispatch traces that do not inherit those tags. Locate the source image first, then filter by trace.id to inspect the entire trace.",
+    "The supplied deployment uses service.environment Integration while log namespace is integration. Normalize environment values to lowercase for cross-signal filtering.",
+    "The trace data view defaults to traces-apm*,apm-* for current streams and legacy APM indices. Restrict every trace panel to processor.event span/transaction so legacy aggregated metric/error documents cannot inflate counts.",
+    "Use the actual deployed service.name if OTEL_SERVICE_NAME overrides unified-gateway.",
+    "Source-based runtime fields require _source and can cost more than indexed fields. Keep useful time windows and normalize physical fields at ingest for very large deployments."
+  ],
+  "runtimeFieldSemantics": {
+    "ug.operation": {
+      "type": "keyword",
+      "description": "Use span.name for processor.event=span and transaction.name for processor.event=transaction. Do not use the parent transaction name as the operation of a child span."
+    },
+    "ug.duration_ms": {
+      "type": "double",
+      "description": "For the document's event type, read span.duration.us or transaction.duration.us and divide by 1000. Fall back to event.duration divided by 1000000 only if no legacy duration exists."
+    },
+    "ug.environment": {
+      "type": "keyword",
+      "description": "Lowercase log data_stream.namespace or trace service.environment. Prefer service.environment for traces; trace stream namespace can be default even when application environment is Integration."
+    },
+    "sourceTraversal": "Read params._source with null/type guards. Support both literal dotted keys and nested Map objects. Do not emit null, objects, or arrays into scalar keyword/double fields."
+  },
+  "fieldMappings": [
+    { "otel": "pipeline.id", "elastic": "labels.pipeline_id", "scope": "preparation, dispatch", "type": "keyword" },
+    { "otel": "pipeline.transport", "elastic": "labels.pipeline_transport", "scope": "dispatch", "type": "keyword", "values": ["rabbitmq", "http"] },
+    { "otel": "pipeline.contract", "elastic": "labels.pipeline_contract", "scope": "preparation", "type": "keyword" },
+    { "otel": "pipeline.outcome", "elastic": "labels.pipeline_outcome", "scope": "preparation", "type": "keyword", "values": ["prepared", "invalid", "failed", "disabled"] },
+    { "otel": "findair.outcome", "elastic": "labels.findair_outcome", "scope": "dispatch", "type": "keyword", "values": ["success", "retry", "rejected", "cancelled"] },
+    { "otel": "findair.error.category", "elastic": "labels.findair_error_category", "scope": "failed handler/dispatch/dependency", "type": "keyword" },
+    { "otel": "error.type", "elastic": "labels.error_type", "scope": "error classification", "type": "keyword" },
+    { "otel": "findair.retry.attempt", "elastic": "numeric_labels.findair_retry_attempt", "scope": "handler", "type": "double" },
+    { "otel": "messaging.message.id", "elastic": "labels.messaging_message_id", "scope": "handler and dispatch; IDs have different meaning", "type": "keyword" },
+    { "otel": "messaging.message.conversation_id", "elastic": "labels.messaging_message_conversation_id", "scope": "handler", "type": "keyword" },
+    { "otel": "messaging.message.body.size", "elastic": "numeric_labels.messaging_message_body_size", "scope": "handler/native messaging", "type": "double" },
+    { "otel": "messaging.rabbitmq.message.redelivered", "elastic": "labels.messaging_rabbitmq_message_redelivered", "scope": "handler", "type": "keyword", "values": ["true", "false"] },
+    { "otel": "findair.image.id", "elastic": "labels.findair_image_id", "scope": "parsed handler", "type": "keyword" },
+    { "otel": "findair.sensor.name", "elastic": "labels.findair_sensor_name", "scope": "parsed handler", "type": "keyword" },
+    { "otel": "findair.area.name", "elastic": "labels.findair_area_name", "scope": "parsed handler", "type": "keyword" },
+    { "otel": "http.response.status_code", "elastic": "http.response.status_code", "scope": "HTTP dispatch/transport", "type": "long" },
+    { "otel": "db.collection.name", "elastic": "labels.db_collection_name", "scope": "Elasticsearch rule search", "type": "keyword" },
+    { "otel": "db.operation.name", "elastic": "labels.db_operation_name", "scope": "Elasticsearch rule search", "type": "keyword" },
+    { "otel": "ActivitySource.Name", "elastic": "service.framework.name", "scope": "instrumentation scope", "type": "keyword" },
+    { "otel": "deployment.environment", "elastic": "service.environment", "scope": "resource", "type": "keyword" },
+    { "otel": "k8s.pod.name", "elastic": "kubernetes.pod.name", "scope": "resource", "type": "keyword" },
+    { "otel": "service.instance.id", "elastic": "service.node.name", "scope": "resource", "type": "keyword" }
+  ],
+  "operations": [
+    { "name": "rabbitmq handler", "kind": "Internal", "preferredScope": "FindAir.RabbitMq", "unit": "source delivery attempt" },
+    { "name": "unified_gateway.contract.prepare", "kind": "Internal", "preferredScope": "ImagingPipeline.UnifiedGateway", "unit": "matched run preparation" },
+    { "name": "unified_gateway.dispatch", "kind": "Internal", "preferredScope": "ImagingPipeline.UnifiedGateway", "unit": "outgoing dispatch attempt" },
+    { "name": "deliver", "kind": "Consumer", "preferredScope": "RabbitMQ.Client.Subscriber", "unit": "native delivery" },
+    { "name": "publish", "kind": "Producer", "preferredScope": "RabbitMQ.Client.Publisher", "unit": "native broker publish; includes retry/DLQ traffic" },
+    { "namePattern": "search <index>", "kind": "Client", "preferredScope": "FindAir.Elasticsearch", "unit": "Elasticsearch search" }
+  ],
+  "traceLink": {
+    "field": "trace.id",
+    "pathTemplate": "/app/apm/link-to/trace/{{value}}",
+    "optionalQueryParameters": ["rangeFrom", "rangeTo"],
+    "spaceAndBasePath": "Prefix Kibana's configured base path and /s/<space-id> for a non-default Space. The path has no hash fragment.",
+    "withoutRange": "Kibana 8.15 searches epoch through current time, avoiding a misleading no-trace result when opening an older dashboard event.",
+    "requirements": "APM access and APM trace index configuration covering the indexed trace. A manual or unsampled trace ID in a log is not proof the trace was retained."
+  },
+  "panels": [
+    {
+      "id": "traces_source_attempts",
+      "title": "Sampled source delivery attempts",
+      "visualization": "metric",
+      "kql": "ug.operation: \"rabbitmq handler\"",
+      "metric": "count"
+    },
+    {
+      "id": "traces_source_failure_rate",
+      "title": "Source attempt failure percentage",
+      "visualization": "metric",
+      "kql": "ug.operation: \"rabbitmq handler\"",
+      "metric": "count(event.outcome=failure) / count(all matching handlers)",
+      "format": "percent",
+      "description": "Includes retry, rejection and cancellation. Sampled attempts, not permanent message loss."
+    },
+    {
+      "id": "traces_source_latency",
+      "title": "Source processing latency p50 / p95 / p99",
+      "visualization": "line",
+      "kql": "ug.operation: \"rabbitmq handler\"",
+      "metric": "percentiles(ug.duration_ms, [50,95,99])",
+      "timeBucket": "@timestamp",
+      "unit": "ms"
+    },
+    {
+      "id": "traces_source_outcomes",
+      "title": "Source delivery attempts over time",
+      "visualization": "stacked_bar",
+      "kql": "ug.operation: \"rabbitmq handler\"",
+      "metric": "count",
+      "timeBucket": "@timestamp",
+      "breakdown": "event.outcome"
+    },
+    {
+      "id": "traces_source_retries",
+      "title": "Source delivery retry attempts",
+      "visualization": "bar",
+      "kql": "ug.operation: \"rabbitmq handler\"",
+      "metric": "count",
+      "breakdown": "numeric_labels.findair_retry_attempt"
+    },
+    {
+      "id": "traces_source_errors",
+      "title": "Source failure categories",
+      "visualization": "bar",
+      "kql": "ug.operation: \"rabbitmq handler\" and event.outcome: \"failure\"",
+      "metric": "count",
+      "breakdown": "labels.findair_error_category"
+    },
+    {
+      "id": "traces_dispatch_attempts",
+      "title": "Dispatch attempts by pipeline and transport",
+      "visualization": "stacked_bar",
+      "kql": "ug.operation: \"unified_gateway.dispatch\"",
+      "metric": "count",
+      "timeBucket": "@timestamp",
+      "breakdowns": ["labels.pipeline_id", "labels.pipeline_transport"]
+    },
+    {
+      "id": "traces_dispatch_outcomes",
+      "title": "Dispatch attempt outcomes",
+      "visualization": "stacked_bar",
+      "kql": "ug.operation: \"unified_gateway.dispatch\"",
+      "metric": "count",
+      "breakdowns": ["labels.pipeline_id", "labels.findair_outcome"]
+    },
+    {
+      "id": "traces_dispatch_latency",
+      "title": "Dispatch p95 latency by pipeline",
+      "visualization": "line",
+      "kql": "ug.operation: \"unified_gateway.dispatch\"",
+      "metric": "percentile(ug.duration_ms,95)",
+      "timeBucket": "@timestamp",
+      "breakdown": "labels.pipeline_id",
+      "unit": "ms"
+    },
+    {
+      "id": "traces_http_status",
+      "title": "HTTP dispatch response codes",
+      "visualization": "bar",
+      "kql": "ug.operation: \"unified_gateway.dispatch\" and labels.pipeline_transport: \"http\"",
+      "metric": "count",
+      "breakdown": "http.response.status_code",
+      "description": "Transport failures before a response have no HTTP status and are shown separately in failure categories."
+    },
+    {
+      "id": "traces_dispatch_errors",
+      "title": "Dispatch failure categories by pipeline",
+      "visualization": "table",
+      "kql": "ug.operation: \"unified_gateway.dispatch\" and event.outcome: \"failure\"",
+      "metric": "count",
+      "breakdowns": ["labels.pipeline_id", "labels.findair_error_category"]
+    },
+    {
+      "id": "traces_preparation_outcomes",
+      "title": "Contract preparation outcomes",
+      "visualization": "stacked_bar",
+      "kql": "ug.operation: \"unified_gateway.contract.prepare\"",
+      "metric": "count",
+      "breakdowns": ["labels.pipeline_id", "labels.pipeline_outcome"]
+    },
+    {
+      "id": "traces_preparation_latency",
+      "title": "Contract preparation p95 latency",
+      "visualization": "line",
+      "kql": "ug.operation: \"unified_gateway.contract.prepare\"",
+      "metric": "percentile(ug.duration_ms,95)",
+      "timeBucket": "@timestamp",
+      "breakdown": "labels.pipeline_id",
+      "unit": "ms"
+    },
+    {
+      "id": "traces_rule_search_latency",
+      "title": "Elasticsearch rule-search p95 latency",
+      "visualization": "line",
+      "kql": "service.framework.name: \"FindAir.Elasticsearch\" and labels.db_operation_name: \"search\"",
+      "metric": "percentile(ug.duration_ms,95)",
+      "timeBucket": "@timestamp",
+      "breakdown": "labels.db_collection_name",
+      "unit": "ms",
+      "description": "Measures Elasticsearch requests, not full rule refresh/validation duration."
+    },
+    {
+      "id": "traces_rule_search_failures",
+      "title": "Elasticsearch rule-search failures",
+      "visualization": "table",
+      "kql": "service.framework.name: \"FindAir.Elasticsearch\" and labels.db_operation_name: \"search\" and event.outcome: \"failure\"",
+      "metric": "count",
+      "breakdowns": ["labels.db_collection_name", "labels.error_type"]
+    },
+    {
+      "id": "traces_slow_handlers",
+      "title": "Slow source delivery attempts",
+      "visualization": "saved_search",
+      "kql": "ug.operation: \"rabbitmq handler\"",
+      "sort": [{ "ug.duration_ms": "desc" }],
+      "columns": ["@timestamp", "ug.duration_ms", "event.outcome", "numeric_labels.findair_retry_attempt", "labels.findair_image_id", "labels.findair_sensor_name", "trace.id"]
+    },
+    {
+      "id": "traces_slow_dispatches",
+      "title": "Slow dispatch attempts",
+      "visualization": "saved_search",
+      "kql": "ug.operation: \"unified_gateway.dispatch\"",
+      "sort": [{ "ug.duration_ms": "desc" }],
+      "columns": ["@timestamp", "labels.pipeline_id", "labels.pipeline_transport", "ug.duration_ms", "labels.findair_outcome", "http.response.status_code", "trace.id"]
+    },
+    {
+      "id": "traces_recent_failures",
+      "title": "Recent failed operations",
+      "visualization": "saved_search",
+      "kql": "event.outcome: \"failure\"",
+      "sort": [{ "@timestamp": "desc" }],
+      "columns": ["@timestamp", "ug.operation", "labels.pipeline_id", "ug.duration_ms", "labels.findair_error_category", "labels.error_type", "trace.id"]
+    },
+    {
+      "id": "traces_operation_latency",
+      "title": "Operation volume and latency",
+      "visualization": "table",
+      "kql": "ug.operation: *",
+      "metrics": ["count", "average(ug.duration_ms)", "percentile(ug.duration_ms,95)", "max(ug.duration_ms)"],
+      "breakdown": "ug.operation",
+      "description": "Compare operation timings; do not add inclusive parent and child durations."
+    }
+  ]
+}
