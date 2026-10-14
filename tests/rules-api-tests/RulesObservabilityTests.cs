@@ -42,21 +42,12 @@ public sealed class RulesObservabilityTests
         });
         meterListener.Start();
 
-        var repository = new InMemoryRuleRepository();
-        repository.Add(new RuleDto
-        {
-            Id = ruleId,
-            RuleName = "observed-rule",
-            AlgorithmNames = [AlgorithmName.FindAir],
-            MinimumResolution = 1,
-            MaximumResolution = 2,
-            Area = "test",
-            LocationWkt = "POINT (1 1)"
-        });
-        using var factory = new RulesApiFactory(repository);
+        var store = new InMemoryIndexStore();
+        store.Add("asd-integ-pipeline-index", ruleId, new PipelineRuleDocument { RuleName = "observed-rule", MatchAll = true });
+        using var factory = new RulesApiFactory(store);
         using var client = factory.CreateClient();
 
-        var response = await client.GetAsync($"/rules/{ruleId}");
+        var response = await client.GetAsync($"/pipelines/asd/rules/{ruleId}");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var activity = Assert.Single(

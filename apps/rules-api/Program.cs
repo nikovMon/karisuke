@@ -51,7 +51,7 @@ public sealed class Program
                 var totalErrorsCount = context.ModelState.Values
                     .Sum(value => value.Errors.Count);
 
-                var operation = RulesOperationFilter.ResolveRequestOperation(context.HttpContext.Request);
+                var operation = RulesOperationFilter.ResolveActionOperation(context.ActionDescriptor.RouteValues["action"]);
                 RulesTelemetry.RecordValidationFailure(operation);
                 if (Activity.Current?.IsAllDataRequested == true)
                 {
@@ -94,7 +94,6 @@ public sealed class Program
             .Bind(builder.Configuration.GetSection(RulesElasticsearchOptions.SectionName))
             .Validate(options => options.IsValid(out _), "Rules Elasticsearch settings are invalid.")
             .ValidateOnStart();
-        builder.Services.AddSingleton<RuleService>();
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddSingleton<RuleAuditWriter>();
         builder.Services.AddSingleton<PipelineRuleService>();

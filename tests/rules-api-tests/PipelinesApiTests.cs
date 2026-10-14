@@ -21,7 +21,7 @@ public sealed class PipelinesApiTests
     [Fact]
     public async Task GetAllListsTheShippedCatalogWithoutTransportSettings()
     {
-        using var factory = new RulesApiFactory(new InMemoryRuleRepository());
+        using var factory = new RulesApiFactory(new InMemoryIndexStore());
         using var client = factory.CreateClient();
 
         var response = await client.GetAsync("/pipelines");
@@ -39,7 +39,7 @@ public sealed class PipelinesApiTests
     [Fact]
     public async Task GetByIdReturnsOnePipelineOrNotFound()
     {
-        using var factory = new RulesApiFactory(new InMemoryRuleRepository());
+        using var factory = new RulesApiFactory(new InMemoryIndexStore());
         using var client = factory.CreateClient();
 
         var found = await client.GetFromJsonAsync<PipelineResponse>("/pipelines/FindAir");

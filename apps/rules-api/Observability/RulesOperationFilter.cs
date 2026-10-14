@@ -107,66 +107,6 @@ internal sealed class RulesOperationFilter : IAsyncActionFilter
         }
     }
 
-    internal static RulesOperation ResolveRequestOperation(HttpRequest request)
-    {
-        var path = WithoutPipelinePrefix(request.Path.Value ?? string.Empty);
-        if (HttpMethods.IsPost(request.Method))
-        {
-            return RulesOperation.Create;
-        }
-
-        if (HttpMethods.IsDelete(request.Method))
-        {
-            return RulesOperation.Delete;
-        }
-
-        if (HttpMethods.IsPatch(request.Method))
-        {
-            if (path.EndsWith("/activity", StringComparison.OrdinalIgnoreCase))
-            {
-                return RulesOperation.SetActivity;
-            }
-
-            if (path.EndsWith("/bulk", StringComparison.OrdinalIgnoreCase))
-            {
-                return RulesOperation.BulkUpdate;
-            }
-
-            if (path.Contains("/sensors/add", StringComparison.OrdinalIgnoreCase))
-            {
-                return RulesOperation.AddSensor;
-            }
-
-            if (path.Contains("/sensors/remove", StringComparison.OrdinalIgnoreCase))
-            {
-                return RulesOperation.RemoveSensor;
-            }
-
-            return RulesOperation.Update;
-        }
-
-        if (path.Contains("/name/", StringComparison.OrdinalIgnoreCase))
-        {
-            return RulesOperation.GetByName;
-        }
-
-        return path.TrimEnd('/').Count(character => character == '/') > 1
-            ? RulesOperation.GetById
-            : RulesOperation.Search;
-    }
-
-    private static string WithoutPipelinePrefix(string path)
-    {
-        const string prefix = "/pipelines/";
-        if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return path;
-        }
-
-        var rulesStart = path.IndexOf('/', prefix.Length);
-        return rulesStart < 0 ? path : path[rulesStart..];
-    }
-
     private static void RecordException(
         Activity? activity,
         RulesOperation operation,
@@ -195,7 +135,7 @@ internal sealed class RulesOperationFilter : IAsyncActionFilter
             error: error);
     }
 
-    private static RulesOperation ResolveActionOperation(string? actionName) => actionName switch
+    internal static RulesOperation ResolveActionOperation(string? actionName) => actionName switch
     {
         "GetAll" => RulesOperation.Search,
         "GetById" => RulesOperation.GetById,
@@ -247,10 +187,9 @@ internal sealed class RulesOperationFilter : IAsyncActionFilter
     private static long GetDocumentCount(IActionResult? result, int statusCode) => result switch
     {
         ObjectResult { Value: BulkOperationResult bulk } => bulk.SuccessIds.Count,
-        ObjectResult { Value: IReadOnlyCollection<RuleDto> rules } => rules.Count,
         ObjectResult { Value: IReadOnlyCollection<string> names } => names.Count,
         ObjectResult { Value: IReadOnlyCollection<PipelineRuleDocument> rules } => rules.Count,
-        ObjectResult { Value: RuleDto or PipelineRuleDocument } => 1,
+        ObjectResult { Value: PipelineRuleDocument } => 1,
         _ when statusCode == StatusCodes.Status204NoContent => 1,
         _ => 0
     };
