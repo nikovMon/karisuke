@@ -116,12 +116,28 @@ public sealed class SourceMessageHandlerTests
         Assert.Equal("Source message processed.", processed.Message);
         Assert.Equal(2, processed.Fields[TelemetryAttributeNames.DispatchUnitCount]);
         Assert.Equal(0, processed.Fields[TelemetryAttributeNames.DispatchFailedCount]);
+        Assert.Equal(2, processed.Fields[TelemetryAttributeNames.DispatchDeliveredCount]);
         Assert.Equal("success", processed.Fields[TelemetryAttributeNames.PipelineOutcome]);
         Assert.Equal(2, handlerSpan.GetTagItem(TelemetryAttributeNames.DispatchUnitCount));
         Assert.Equal(0, handlerSpan.GetTagItem(TelemetryAttributeNames.DispatchFailedCount));
+        Assert.Equal(2, handlerSpan.GetTagItem(TelemetryAttributeNames.DispatchDeliveredCount));
         var duplicate = Assert.Single(gateway.Logger.Entries, entry => entry.EventId == 6022);
         Assert.Equal(LogLevel.Debug, duplicate.Level);
         Assert.Equal("duplicate_run", duplicate.Fields[TelemetryAttributeNames.FilterReason]);
+    }
+
+    [Fact]
+    public async Task UnitThatCannotBePreparedCountsAsFailedAndNotDelivered()
+    {
+        await using var gateway = await Gateway.StartAsync([Rule("rule-a")]);
+        using var handlerSpan = new Activity("rabbitmq handler").Start();
+
+        await gateway.Handler.HandleAsync(ModifiedMessage(json => json.Remove("imageUrl")));
+
+        Assert.Empty(gateway.Transport.Sent);
+        Assert.Equal(1, handlerSpan.GetTagItem(TelemetryAttributeNames.DispatchUnitCount));
+        Assert.Equal(1, handlerSpan.GetTagItem(TelemetryAttributeNames.DispatchFailedCount));
+        Assert.Equal(0, handlerSpan.GetTagItem(TelemetryAttributeNames.DispatchDeliveredCount));
     }
 
     [Fact]
