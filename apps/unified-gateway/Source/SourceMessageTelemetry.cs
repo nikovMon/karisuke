@@ -57,7 +57,7 @@ internal sealed class SourceMessageTelemetry : IDisposable
         _imageScope = _logger.BeginTelemetryScope(context);
     }
 
-    /// <summary>Logs how many units were sent and how many failed, and classifies the message.</summary>
+    /// <summary>Logs and tags the current span with how many units were sent and how many failed, and classifies the message.</summary>
     public void Completed(IReadOnlyList<DispatchOutcome> outcomes, int invalidUnitCount, RabbitMqMessageProcessingResult result)
     {
         var delivered = outcomes.Count(outcome => outcome.Status == DispatchStatus.Delivered);
@@ -82,11 +82,19 @@ internal sealed class SourceMessageTelemetry : IDisposable
                 break;
         }
 
+        var unitCount = outcomes.Count + invalidUnitCount;
+        var failedCount = outcomes.Count - delivered + invalidUnitCount;
+        if (Activity.Current?.IsAllDataRequested == true)
+        {
+            Activity.Current.SetTag(TelemetryAttributeNames.DispatchUnitCount, unitCount);
+            Activity.Current.SetTag(TelemetryAttributeNames.DispatchFailedCount, failedCount);
+        }
+
         using (_logger.BeginScope(new KeyValuePair<string, object?>[]
                {
                    new(TelemetryAttributeNames.PipelineOutcome, outcome.Value()),
-                   new(TelemetryAttributeNames.DispatchUnitCount, outcomes.Count + invalidUnitCount),
-                   new(TelemetryAttributeNames.DispatchFailedCount, outcomes.Count - delivered + invalidUnitCount)
+                   new(TelemetryAttributeNames.DispatchUnitCount, unitCount),
+                   new(TelemetryAttributeNames.DispatchFailedCount, failedCount)
                }))
         {
             _logger.SourceMessageProcessed();

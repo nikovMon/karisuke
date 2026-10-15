@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -90,6 +91,7 @@ public sealed class SourceMessageHandlerTests
         var rule = Rule("rule-a");
         rule.RunParams = [RunParams("tenant-1"), RunParams("tenant-2"), RunParams("tenant-1")];
         await using var gateway = await Gateway.StartAsync([rule, Rule("elsewhere", "POLYGON ((50 50, 51 50, 51 51, 50 51, 50 50))")]);
+        using var handlerSpan = new Activity("rabbitmq handler").Start();
 
         var result = await gateway.Handler.HandleAsync(Message());
 
@@ -115,6 +117,8 @@ public sealed class SourceMessageHandlerTests
         Assert.Equal(2, processed.Fields[TelemetryAttributeNames.DispatchUnitCount]);
         Assert.Equal(0, processed.Fields[TelemetryAttributeNames.DispatchFailedCount]);
         Assert.Equal("success", processed.Fields[TelemetryAttributeNames.PipelineOutcome]);
+        Assert.Equal(2, handlerSpan.GetTagItem(TelemetryAttributeNames.DispatchUnitCount));
+        Assert.Equal(0, handlerSpan.GetTagItem(TelemetryAttributeNames.DispatchFailedCount));
         var duplicate = Assert.Single(gateway.Logger.Entries, entry => entry.EventId == 6022);
         Assert.Equal(LogLevel.Debug, duplicate.Level);
         Assert.Equal("duplicate_run", duplicate.Fields[TelemetryAttributeNames.FilterReason]);
