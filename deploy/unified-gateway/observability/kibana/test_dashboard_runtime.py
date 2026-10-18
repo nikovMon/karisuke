@@ -42,10 +42,10 @@ def request(endpoint, method, path, body=None):
         raise RuntimeError(f"{method} {path}: HTTP {exc.code}\n{detail}") from exc
 
 
-def fixtures():
+def fixtures(service):
     log = {
         "@timestamp": "2026-10-18T10:00:00Z",
-        "service": {"name": "unified-gateway", "environment": "Integration", "instance": {"id": "gw-int-1"}},
+        "service": {"name": service, "environment": "Integration", "instance": {"id": "gw-int-1"}},
         "data_stream": {"namespace": "integration"},
         "log": {"level": "Debug"}, "event": {"code": "6021", "outcome": "success"},
         "pipeline": {"id": "FindAir", "transport": "RabbitMq"},
@@ -75,7 +75,7 @@ def fixtures():
     }
     span = {
         "@timestamp": "2026-10-18T10:01:00Z",
-        "service": {"name": "unified-gateway", "environment": "Production", "node": {"name": "gw-prod-1"}},
+        "service": {"name": service, "environment": "Production", "node": {"name": "gw-prod-1"}},
         "data_stream": {"namespace": "default"}, "processor": {"event": "span"},
         "span": {"name": "unified_gateway.dispatch", "duration": {"us": 1500}},
         "transaction": {"name": "parent-name-must-not-replace-span-name"}, "event": {"outcome": "failure"},
@@ -94,7 +94,7 @@ def fixtures():
     }
     transaction = {
         "@timestamp": "2026-10-18T10:02:00Z",
-        "service": {"name": "unified-gateway", "environment": "Development"},
+        "service": {"name": service, "environment": "Development"},
         "processor": {"event": "transaction"},
         "transaction": {"name": "rabbitmq handler", "duration": {"us": 9000}},
         "event": {"outcome": "success"},
@@ -104,7 +104,7 @@ def fixtures():
         "duration_ms": 9.0, "trace_failure": 0.0, "outcome": "success",
     }
     flat = {
-        "@timestamp": "2026-10-18T10:03:00Z", "service.name": "unified-gateway",
+        "@timestamp": "2026-10-18T10:03:00Z", "service.name": service,
         "service.environment": "Integration", "processor.event": "span", "span.name": "unified_gateway.contract.prepare",
         "event.duration": 1230000, "labels.pipeline_outcome": "prepared",
         "labels.http_response_status_code": "201", "labels.findair_retry_attempt": "4",
@@ -113,13 +113,13 @@ def fixtures():
         "environment": "integration", "signal": "traces", "operation": "unified_gateway.contract.prepare",
         "duration_ms": 1.23, "outcome": "prepared", "http_status": 201, "retry_attempt": 4,
     }
-    missing = {"@timestamp": "2026-10-18T10:04:00Z", "service": {"name": "unified-gateway"}}
+    missing = {"@timestamp": "2026-10-18T10:04:00Z", "service": {"name": service}}
     other_service = json.loads(json.dumps(log))
-    other_service["service"]["name"] = "another-service"
+    other_service["service"]["name"] = service + " (other service)"
     no_service = {"@timestamp": "2026-10-18T10:05:00Z", "log": {"level": "Information"}}
-    zero_delivered = {"@timestamp": "2026-10-18T10:06:00Z", "service": {"name": "unified-gateway"},
+    zero_delivered = {"@timestamp": "2026-10-18T10:06:00Z", "service": {"name": service},
                       "unified_gateway": {"dispatch": {"units": {"count": 2}, "failed": {"count": 2}}}}
-    negative_delivered = {"@timestamp": "2026-10-18T10:07:00Z", "service": {"name": "unified-gateway"},
+    negative_delivered = {"@timestamp": "2026-10-18T10:07:00Z", "service": {"name": service},
                           "unified_gateway": {"dispatch": {"units": {"count": 2}, "failed": {"count": 3}}}}
     return {"log": (log, log_expected), "span": (span, span_expected), "transaction": (transaction, transaction_expected),
             "flat": (flat, flat_expected), "missing": (missing, {}), "other-service": (other_service, {}),
@@ -134,11 +134,23 @@ def check_search(response):
     return response
 
 
+def dashboard_service(objects):
+    dashboard = next(obj for obj in objects if obj["type"] == "dashboard")
+    source = json.loads(dashboard["attributes"]["kibanaSavedObjectMeta"]["searchSourceJSON"])
+    query = source["query"]["query"]
+    prefix = "service.name: "
+    assert source["query"]["language"] == "kuery" and query.startswith(prefix), "Expected an exact service.name dashboard query"
+    service = json.loads(query[len(prefix):])
+    assert isinstance(service, str) and service, "Expected a nonempty configured service.name"
+    return service
+
+
 def run(endpoint, bundle):
     objects = [json.loads(line) for line in bundle.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
     view = next(obj for obj in objects if obj["type"] == "index-pattern")
     runtime = json.loads(view["attributes"]["runtimeFieldMap"])
-    samples = fixtures()
+    service = dashboard_service(objects)
+    samples = fixtures(service)
     covered = {"ug." + key for _, expected in samples.values() for key in expected}
     assert covered == set(runtime), f"Uncovered runtime fields: {set(runtime) - covered}; stale expectations: {covered - set(runtime)}"
     version = request(endpoint, "GET", "/")["version"]["number"]
@@ -147,7 +159,8 @@ def run(endpoint, bundle):
     try:
         request(endpoint, "PUT", "/" + index, {"settings": {"number_of_shards": 1, "number_of_replicas": 0},
                 "mappings": {"properties": {"@timestamp": {"type": "date"},
-                                            "service": {"properties": {"name": {"type": "keyword"}}}}}})
+                                            "service": {"properties": {"name": {"type": "keyword"},
+                                                                        "environment": {"type": "keyword"}}}}}})
         created = True
         for doc_id, (document, _) in samples.items():
             request(endpoint, "PUT", f"/{index}/_doc/{doc_id}", document)
@@ -168,6 +181,18 @@ def run(endpoint, bundle):
             expected = {"ug." + key: [value] for key, value in samples[hit["_id"]][1].items()}
             actual = hit.get("fields", {})
             assert actual == expected, f"Document {hit['_id']}\nExpected: {expected}\nActual: {actual}"
+
+        # The native Service environment control uses this indexed field directly,
+        # preserving its original case while respecting the exact service filter.
+        environments = search({"size": 0, "query": {"term": {"service.name": service}}, "aggs": {
+            "options": {"terms": {"field": "service.environment"}},
+        }})["aggregations"]["options"]["buckets"]
+        assert {bucket["key"]: bucket["doc_count"] for bucket in environments} == {
+            "Integration": 2, "Development": 1, "Production": 1}, environments
+        filtered = search({"size": len(samples), "_source": False, "query": {"bool": {"filter": [
+            {"term": {"service.name": service}}, {"term": {"service.environment": "Integration"}},
+        ]}}})
+        assert {hit["_id"] for hit in filtered["hits"]["hits"]} == {"log", "flat"}, filtered
 
         log_aggs = search({"size": 0, "query": {"term": {"ug.signal": "logs"}}, "aggs": {
             "pipelines": {"terms": {"field": "ug.pipeline"}, "aggs": {
@@ -198,7 +223,7 @@ def run(endpoint, bundle):
         for value in trace_aggs["latency"]["values"].values():
             assert math.isfinite(value) and 1.23 <= value <= 9, trace_aggs
         print(f"PASS: Elasticsearch {version}; {len(runtime)} runtime fields; {len(samples)} synthetic documents; "
-              "signal filters, terms, sums, averages, percentiles, and latest-value top_hits.")
+              f"service {service!r}; environment control, signal filters, terms, sums, averages, percentiles, and latest-value top_hits.")
     finally:
         if created:
             request(endpoint, "DELETE", "/" + index)

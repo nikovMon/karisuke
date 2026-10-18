@@ -9,7 +9,7 @@ The generated bundle targets Kibana 8.15, assuming it matches the verified Elast
 1. Open the intended Kibana Space. The supplied trace links use the `default` Space; regenerate for another Space before import.
 2. Open **Stack Management > Saved Objects > Import**.
 3. Select [unified-gateway-dashboard.ndjson](unified-gateway-dashboard.ndjson). Import the complete file so its dashboard, visualizations, searches, and dedicated data view stay together.
-4. If replacing an earlier import of this bundle, allow overwrite for its objects. Their IDs are stable. A differently configured build uses the same IDs and replaces the same dashboard in that Space; it does not create another independent dashboard.
+4. If replacing an earlier import of this bundle, allow overwrite for all its objects, including the data view. Their IDs are stable. A differently configured build uses the same IDs and replaces the same dashboard in that Space; it does not create another independent dashboard.
 5. Open **Dashboards > Unified Gateway | Operations, Logs & Traces**.
 6. Select the environment from the modern **Controls** bar and start with **Last 1 hour**. The Gateway instance list narrows to the selected environment. Refresh is initially paused. Generate some gateway activity and refresh manually.
 7. Check a source event, a trace latency panel, and a trace-ID link. Empty Debug panels require the logging change below; an empty trace panel requires checking raw APM data.
@@ -18,9 +18,15 @@ Import requires the appropriate Saved Objects Management privilege. Kibana migra
 
 The bundle creates its own data view. It does not change the existing default data view, Elasticsearch mappings, retention, Logstash configuration, or any application service.
 
+This build uses the confirmed deployed `service.name` value **`Unified Gateway`**, including its spaces and casing. Reimport the complete bundle with overwrite to update the dashboard and panel queries as well as the data view's runtime-field service guards. Changing only the dashboard's search bar leaves the older embedded service filters in place. Reload afterward and clear any old service-name filter chips or control selections before selecting an environment.
+
 ### Controls and the Lens editing prompt
 
-Environment and Gateway instance are native Kibana options-list Controls. They respect the dashboard's query, filters, and time range; multiple selections are allowed. The environment selection narrows the following instance control. The updated dashboard removes the deprecated **Environment and instance** input-control panel. Import with overwrite and reload the dashboard to apply the replacement. See [Kibana Controls](https://www.elastic.co/guide/en/kibana/8.15/add-controls.html).
+Environment, Service environment, and Gateway instance are native Kibana options-list Controls. They respect the dashboard's query, filters, and time range; multiple selections are allowed. Each selection narrows the following controls. The updated dashboard removes the deprecated **Environment and instance** input-control panel. Import with overwrite and reload the dashboard to apply the replacement. See [Kibana Controls](https://www.elastic.co/guide/en/kibana/8.15/add-controls.html).
+
+**Service environment** uses the indexed `service.environment` field directly. Values retain their stored casing: `Integration` and `integration` are separate options. Selecting a value filters both logs and traces to documents with that exact value; documents missing this field are excluded. **Environment** still uses the normalized `ug.environment` field described below. If both controls have selections, documents must match both filters.
+
+To add the Service environment control directly to an existing dashboard, choose **Edit > Controls > Add control**, select **Unified Gateway — logs and traces**, set **Field** to `service.environment` and **Label** to `Service environment`, then **Save and close** and save the dashboard. Place it between Environment and Gateway instance to use the same filtering order as the import bundle.
 
 The pink **Try with Lens** / **Convert to Lens** dot is an optional editing prompt on supported aggregation-based charts. It is not a data error or a deprecation warning. Save the dashboard and leave Edit mode to hide that prompt during normal viewing. Lens conversion is optional; this update preserves the existing chart calculations. See [supported aggregation-based panels](https://www.elastic.co/guide/en/kibana/8.15/add-aggregation-based-visualization-panels.html) and the [8.15 Lens action's Edit-mode condition](https://github.com/elastic/kibana/blob/v8.15.0/src/plugins/visualizations/public/actions/edit_in_lens_action.tsx#L135-L152).
 
@@ -34,7 +40,7 @@ The earlier `ug.delivered_units` script called `Math.max`, whose Painless return
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| Service | `unified-gateway` | Exact deployed `service.name`, including any `OTEL_SERVICE_NAME` override |
+| Service | `Unified Gateway` | Exact deployed `service.name`, including any `OTEL_SERVICE_NAME` override |
 | Logs | `logs-unified_gateway-*` | Development, integration, and production gateway streams accessible from this cluster |
 | Traces | `traces-apm*,apm-*` | Raw APM spans and transactions in current or legacy APM indices |
 | Time | `@timestamp` | Shared dashboard time filter |
@@ -116,7 +122,7 @@ python deploy/unified-gateway/observability/kibana/build_dashboard.py
 Example with deployment-specific values:
 
 ```text
-python deploy/unified-gateway/observability/kibana/build_dashboard.py --service unified-gateway --logs "logs-unified_gateway-*" --traces "traces-apm*,apm-*" --space observability --base-path /kibana
+python deploy/unified-gateway/observability/kibana/build_dashboard.py --service "Unified Gateway" --logs "logs-unified_gateway-*" --traces "traces-apm*,apm-*" --space observability --base-path /kibana
 ```
 
 `--space` is the Space ID from its URL, not its display name. `--base-path` excludes `/s/<space-id>`; the generator adds that itself. Use `--output <file.ndjson>` to select another output location. The adjacent manifest records the configuration and panel queries used to generate that bundle.
@@ -135,7 +141,7 @@ To compile and execute the Painless scripts, start a disposable **local Elastics
 python deploy/unified-gateway/observability/kibana/test_dashboard_runtime.py --url http://127.0.0.1:19215
 ```
 
-This integration check creates a uniquely named `ug-dashboard-smoke-<uuid>` index, writes nine synthetic documents, and deletes that exact index afterward. It accepts only loopback URLs and must use a local test instance. It verifies all 33 runtime fields, missing values, service isolation, log/APM aliases, durations, zero/negative delivered-count clamping, signal filtering, terms, sums, averages, percentiles, and latest-value `top_hits`. The original bundle reproduces the double-to-long compile failure; the corrected bundle passes on Elasticsearch 8.15.0. This check executes Elasticsearch queries, not Kibana's UI or KQL parser.
+This integration check creates a uniquely named `ug-dashboard-smoke-<uuid>` index, writes nine synthetic documents using the bundle's configured service name, and deletes that exact index afterward. It accepts only loopback URLs and must use a local test instance. It verifies all 33 runtime fields, missing values, service isolation, Service environment options and filtering across logs and traces, log/APM aliases, durations, zero/negative delivered-count clamping, signal filtering, terms, sums, averages, percentiles, and latest-value `top_hits`. The original bundle reproduces the double-to-long compile failure; the corrected bundle passes on Elasticsearch 8.15.0. This check executes Elasticsearch queries, not Kibana's UI or KQL parser.
 
 The `ug.*` data-view runtime fields read `_source` to normalize custom fields across log and APM documents and avoid dependence on dynamic `.keyword` mappings. They do not rewrite indexed documents. Runtime aggregations cost more than indexed-field aggregations: start with one environment and a short time range, and avoid aggressive refresh over all historical traces. `_source` and runtime-field queries must be available in the deployment. For sustained high-volume use, validate live mappings and replace expensive normalization with indexed fields.
 

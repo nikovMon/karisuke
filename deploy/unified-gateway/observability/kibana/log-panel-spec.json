@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "title": "Unified gateway log panel semantics",
   "sourceIndexPattern": "logs-unified_gateway-*",
-  "baseKql": "service.name: \"unified-gateway\"",
+  "baseKql": "service.name: \"Unified Gateway\"",
   "timeField": "@timestamp",
   "description": "Implementation-backed suggestions for dashboard authors. This file is a semantic specification, not a Kibana saved object import.",
   "sources": [

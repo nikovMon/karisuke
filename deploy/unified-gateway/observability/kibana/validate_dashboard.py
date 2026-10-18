@@ -199,8 +199,8 @@ def check_controls(dashboard, field_map, view_id, manifest):
     require(ignore == {"ignoreFilters": False, "ignoreQuery": False, "ignoreTimerange": False, "ignoreValidations": False},
             "Dashboard controls must respect the dashboard query, filters, time range, and selection validation")
     controls = nested(group.get("panelsJSON"), dict, "dashboard.controlGroupInput.panelsJSON")
-    require(len(controls) == 2, "Expected environment and instance controls")
-    expected_fields = {0: "ug.environment", 1: "ug.instance"}
+    require(len(controls) == 3, "Expected normalized environment, service environment, and instance controls")
+    expected_fields = {0: "ug.environment", 1: "service.environment", 2: "ug.instance"}
     refs = {r["name"]: r for r in dashboard["references"]}
     used_refs = set()
     catalog = []

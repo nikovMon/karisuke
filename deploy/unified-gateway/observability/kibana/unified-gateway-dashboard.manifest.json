@@ -6,7 +6,7 @@
   },
   "dashboardId": "2e5f9e8b-89e1-5d16-87da-74b49a7c4dd0",
   "dataViewId": "747eaddd-3792-533b-8fba-5a00df7c2ed5",
-  "service": "unified-gateway",
+  "service": "Unified Gateway",
   "logs": "logs-unified_gateway-*",
   "traces": "traces-apm*,apm-*",
   "space": "default",
@@ -720,7 +720,7 @@
       }
     }
   ],
-  "controlCount": 2,
+  "controlCount": 3,
   "controls": [
     {
       "id": "ug-control-0",
@@ -729,10 +729,16 @@
       "order": 0
     },
     {
+      "id": "ug-control-2",
+      "fieldName": "service.environment",
+      "title": "Service environment",
+      "order": 1
+    },
+    {
       "id": "ug-control-1",
       "fieldName": "ug.instance",
       "title": "Gateway instance",
-      "order": 1
+      "order": 2
     }
   ]
 }

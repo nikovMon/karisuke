@@ -3,7 +3,7 @@
   "title": "Unified gateway trace panel semantics",
   "description": "Implementation-backed dashboard suggestions for Elastic APM 8.15. This is a semantic specification, not a saved object import. The companion generator supplies the ug.* runtime fields.",
   "sourceIndexPattern": "traces-apm*,apm-*",
-  "baseKql": "service.name: \"unified-gateway\" and processor.event: (\"span\" or \"transaction\")",
+  "baseKql": "service.name: \"Unified Gateway\" and processor.event: (\"span\" or \"transaction\")",
   "timeField": "@timestamp",
   "serviceNameConfigurable": true,
   "sources": [
@@ -74,7 +74,7 @@
     "Image, area and sensor tags are added to the handler only after parsing succeeds; filtered and invalid input traces can lack them. A global image filter hides preparation/dispatch traces that do not inherit those tags. Locate the source image first, then filter by trace.id to inspect the entire trace.",
     "The supplied deployment uses service.environment Integration while log namespace is integration. Normalize environment values to lowercase for cross-signal filtering.",
     "The trace data view defaults to traces-apm*,apm-* for current streams and legacy APM indices. Restrict every trace panel to processor.event span/transaction so legacy aggregated metric/error documents cannot inflate counts.",
-    "Use the actual deployed service.name if OTEL_SERVICE_NAME overrides unified-gateway.",
+    "The confirmed deployed service.name is Unified Gateway. Regenerate with the actual deployed service.name if OTEL_SERVICE_NAME changes it.",
     "Source-based runtime fields require _source and can cost more than indexed fields. Keep useful time windows and normalize physical fields at ingest for very large deployments."
   ],
   "runtimeFieldSemantics": {

@@ -17,6 +17,7 @@ import uuid
 HERE = Path(__file__).resolve().parent
 ID_NAMESPACE = uuid.UUID("f05cc998-13e6-42c9-a3cb-96b61a5d291f")
 INDEX_REF = "kibanaSavedObjectMeta.searchSourceJSON.index"
+DEFAULT_SERVICE_NAME = "Unified Gateway"
 
 
 def dumps(value):
@@ -43,7 +44,7 @@ GET_VALUE = """def read(def root, String path) {
 """
 
 
-def runtime_fields(service="unified-gateway"):
+def runtime_fields(service=DEFAULT_SERVICE_NAME):
     result = {}
 
     def add(name, kind, body):
@@ -159,6 +160,7 @@ class Builder:
         fields = []
         physical = {
             "@timestamp": ("date", "date"), "service.name": ("string", "keyword"),
+            "service.environment": ("string", "keyword"),
             "trace.id": ("string", "keyword"), "span.id": ("string", "keyword"),
             "transaction.id": ("string", "keyword"), "processor.event": ("string", "keyword"),
             "event.outcome": ("string", "keyword"), "log.logger": ("string", "keyword"),
@@ -231,8 +233,12 @@ class Builder:
 
     def controls(self):
         controls = {}
-        for i, (field, label) in enumerate([("ug.environment", "Environment"), ("ug.instance", "Gateway instance")]):
-            control_id = f"ug-control-{i}"
+        # Preserve existing control IDs when inserting controls into the chain.
+        for i, (control_id, field, label) in enumerate([
+            ("ug-control-0", "ug.environment", "Environment"),
+            ("ug-control-2", "service.environment", "Service environment"),
+            ("ug-control-1", "ug.instance", "Gateway instance"),
+        ]):
             controls[control_id] = {
                 "type": "optionsListControl", "order": i, "width": "medium", "grow": True,
                 "explicitInput": {"id": control_id, "fieldName": field, "title": label,
@@ -496,7 +502,7 @@ def serialize_object(obj):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--service", default="unified-gateway", help="Exact deployed service.name / OTEL_SERVICE_NAME")
+    parser.add_argument("--service", default=DEFAULT_SERVICE_NAME, help="Exact deployed service.name / OTEL_SERVICE_NAME")
     parser.add_argument("--logs", default="logs-unified_gateway-*", help="Elasticsearch log pattern")
     parser.add_argument("--traces", default="traces-apm*,apm-*", help="Current and legacy Elastic APM indices; trace panels select raw spans/transactions")
     parser.add_argument("--space", default="default", help="Kibana Space ID used by APM trace links")
