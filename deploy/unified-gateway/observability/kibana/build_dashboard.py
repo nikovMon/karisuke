@@ -130,7 +130,9 @@ for (String path : ['findair.outcome', 'labels.findair_outcome', 'pipeline.outco
     add("delivered_units", "long", """def planned = read(params._source, 'unified_gateway.dispatch.units.count');
 def failed = read(params._source, 'unified_gateway.dispatch.failed.count');
 if (planned instanceof Number && failed instanceof Number) {
-  emit(Math.max(0L, planned.longValue() - failed.longValue()));
+  // Painless Math.max returns double; this runtime field must emit a long.
+  long delivered = planned.longValue() - failed.longValue();
+  emit(delivered > 0L ? delivered : 0L);
 }
 """)
     return result

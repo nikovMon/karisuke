@@ -2,7 +2,7 @@
 
 The dashboard combines unified gateway logs with Elastic APM traces. It covers source handling, FindAir and DeepWisdom dispatch, validation, retries, filtering, rule health, sampled latency, and investigations by image or trace ID.
 
-The generated bundle targets Kibana 8.15, assuming it matches the verified Elasticsearch 8.15.0 deployment. Its saved-object schemas come from compatible Elastic Kibana 8.4.1 fixtures, which Kibana 8.15 migrates on import. The supplied files have not been imported into or rendered in the live Kibana instance. Local validation cannot confirm live data mappings, permissions, or collector transformations.
+The generated bundle targets Kibana 8.15, assuming it matches the verified Elasticsearch 8.15.0 deployment. Its saved-object schemas come from compatible Elastic Kibana 8.4.1 fixtures, which Kibana 8.15 migrates on import. The corrected runtime scripts and aggregations have been executed against a local Elasticsearch 8.15.0 instance with synthetic data. Live Kibana rendering, deployment-specific mappings, permissions, and collector transformations still require verification in the target environment.
 
 ## Import
 
@@ -17,6 +17,12 @@ The generated bundle targets Kibana 8.15, assuming it matches the verified Elast
 Import requires the appropriate Saved Objects Management privilege. Kibana migrates supported older saved objects during import, but imports from newer versions into older Kibana versions are unsupported. See [Elastic's saved-object import documentation](https://www.elastic.co/guide/en/kibana/8.15/managing-saved-objects.html).
 
 The bundle creates its own data view. It does not change the existing default data view, Elasticsearch mappings, retention, Logstash configuration, or any application service.
+
+### Repair an earlier import with a runtime-field error
+
+If every panel fails with `[esaggs]` and the details say `Cannot cast from [double] to [long]` at `emit(Math.max(...))`, reimport the corrected `unified-gateway-dashboard.ndjson` with **Overwrite existing objects** enabled, including the data view. Reload the dashboard afterward. Stable object IDs let the corrected runtime field replace the earlier definition.
+
+The earlier `ug.delivered_units` script called `Math.max`, whose Painless return type is `double`, and passed its result to `emit(long)`. The replacement calculates and clamps the count using `long` values. Elasticsearch compiles all supplied runtime mappings, so this one invalid definition could prevent unrelated panels from running. No reindexing or gateway restart is needed. See the [Painless Math API](https://www.elastic.co/guide/en/elasticsearch/painless/8.15/painless-api-reference-shared-java-lang.html).
 
 ## Data and deployment settings
 
@@ -117,6 +123,14 @@ python deploy/unified-gateway/observability/kibana/validate_dashboard.py
 
 The optional positional argument selects another NDJSON file; `--manifest` selects its manifest explicitly. `--target-version` defaults to `8.4.1`, the oldest fixture schema compatibility target, even though this deployment targets Kibana 8.15. The validator checks nested JSON, references, migration metadata, panel layout, field definitions, aggregation wiring, service/signal scoping, and manifest agreement. It does not execute KQL or Painless or test live Kibana importing and rendering.
 
+To compile and execute the Painless scripts, start a disposable **local Elasticsearch 8.15.0** instance and run:
+
+```text
+python deploy/unified-gateway/observability/kibana/test_dashboard_runtime.py --url http://127.0.0.1:19215
+```
+
+This integration check creates a uniquely named `ug-dashboard-smoke-<uuid>` index, writes nine synthetic documents, and deletes that exact index afterward. It accepts only loopback URLs and must use a local test instance. It verifies all 33 runtime fields, missing values, service isolation, log/APM aliases, durations, zero/negative delivered-count clamping, signal filtering, terms, sums, averages, percentiles, and latest-value `top_hits`. The original bundle reproduces the double-to-long compile failure; the corrected bundle passes on Elasticsearch 8.15.0. This check executes Elasticsearch queries, not Kibana's UI or KQL parser.
+
 The `ug.*` data-view runtime fields read `_source` to normalize custom fields across log and APM documents and avoid dependence on dynamic `.keyword` mappings. They do not rewrite indexed documents. Runtime aggregations cost more than indexed-field aggregations: start with one environment and a short time range, and avoid aggressive refresh over all historical traces. `_source` and runtime-field queries must be available in the deployment. For sustained high-volume use, validate live mappings and replace expensive normalization with indexed fields.
 
 ## Files
@@ -126,6 +140,7 @@ The `ug.*` data-view runtime fields read `_source` to normalize custom fields ac
 | `unified-gateway-dashboard.ndjson` | Complete Kibana import bundle |
 | `unified-gateway-dashboard.manifest.json` | Generated settings, object IDs, and panel queries |
 | `build_dashboard.py` | Reproducible generator with configurable service, indices, Space, and base path |
+| `test_dashboard_runtime.py` | Executes runtime scripts and aggregations on synthetic documents in a local Elasticsearch instance |
 | `validate_dashboard.py` | Offline saved-object structure and telemetry-query consistency checks |
 | `schema-reference.json` | Saved-object examples sourced from Elastic's versioned Kibana fixtures |
 | `log-panel-spec.json` | Log event semantics and panel candidates checked against the gateway implementation |
