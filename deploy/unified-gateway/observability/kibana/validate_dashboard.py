@@ -4,8 +4,9 @@
 Uses only the Python standard library. This validates references, nested JSON,
 layout, data-view fields, aggregation wiring, and service/signal scoping. It does
 not execute Painless/KQL or replace an import/render check in a live Kibana.
-The serialization rules are pinned to the Kibana v8.4.1 source linked in
-schema-reference.json.
+The visualization serialization rules are pinned in schema-reference.json;
+modern dashboard controls use the Kibana v8.15.0 source references packaged
+alongside the dashboard.
 """
 from __future__ import annotations
 
@@ -126,24 +127,12 @@ def check_visualization(obj, field_map, view_id):
     nested(obj["attributes"]["uiStateJSON"], dict, f"{title}.uiStateJSON")
     require(state.get("title") == title, f"{title}: visState title disagrees with saved object")
     kind = state.get("type")
-    require(kind in XY_TYPES | {"metric", "pie", "table", "markdown", "input_control_vis"},
+    require(kind != "input_control_vis", f"{title}: deprecated input controls must use the dashboard control group")
+    require(kind in XY_TYPES | {"metric", "pie", "table", "markdown"},
             f"{title}: unsupported visualization type {kind}")
     if kind == "markdown":
         require(state.get("aggs") == [] and obj["references"] == [], f"{title}: markdown retained fixture dependencies")
         require(isinstance(state.get("params", {}).get("markdown"), str), f"{title}: missing Markdown")
-        return ""
-    if kind == "input_control_vis":
-        controls = state["params"]["controls"]
-        require(controls, f"{title}: empty controls")
-        control_ids = [c["id"] for c in controls]
-        require(len(control_ids) == len(set(control_ids)), f"{title}: duplicate control IDs")
-        for control in controls:
-            field = control["fieldName"]
-            require(field in field_map and field_map[field]["aggregatable"], f"{title}: control field {field} cannot aggregate")
-            ref = control["indexPatternRefName"]
-            require(any(r == {"type": "index-pattern", "id": view_id, "name": ref} for r in obj["references"]),
-                    f"{title}: broken control data-view reference {ref}")
-        require(state["params"].get("useTimeFilter") is True, f"{title}: controls must respect selected time range")
         return ""
     query = check_source(obj, field_map, view_id)
     aggs = state.get("aggs", [])
@@ -200,7 +189,55 @@ def check_visualization(obj, field_map, view_id):
     return query
 
 
-def validate(objects, manifest, target=(8, 4, 1)):
+def check_controls(dashboard, field_map, view_id, manifest):
+    group = dashboard["attributes"].get("controlGroupInput")
+    require(isinstance(group, dict), "Dashboard must have a modern controlGroupInput object")
+    require(group.get("controlStyle") == "oneLine", "Dashboard controls must use the compact one-line style")
+    require(group.get("chainingSystem") == "HIERARCHICAL", "Instance options must follow the environment selection")
+    require(group.get("showApplySelections") is False, "Dashboard control selections must apply immediately")
+    ignore = nested(group.get("ignoreParentSettingsJSON"), dict, "dashboard.controlGroupInput.ignoreParentSettingsJSON")
+    require(ignore == {"ignoreFilters": False, "ignoreQuery": False, "ignoreTimerange": False, "ignoreValidations": False},
+            "Dashboard controls must respect the dashboard query, filters, time range, and selection validation")
+    controls = nested(group.get("panelsJSON"), dict, "dashboard.controlGroupInput.panelsJSON")
+    require(len(controls) == 2, "Expected environment and instance controls")
+    expected_fields = {0: "ug.environment", 1: "ug.instance"}
+    refs = {r["name"]: r for r in dashboard["references"]}
+    used_refs = set()
+    catalog = []
+    orders = set()
+    for control_id, control in controls.items():
+        require(control.get("type") == "optionsListControl", f"Control {control_id}: expected modern options-list type")
+        order = control.get("order")
+        require(type(order) is int and order in expected_fields and order not in orders,
+                f"Control {control_id}: duplicate or invalid control order")
+        orders.add(order)
+        require(control.get("width") == "medium" and control.get("grow") is True,
+                f"Control {control_id}: unexpected layout settings")
+        explicit = control.get("explicitInput", {})
+        require(explicit.get("id") == control_id, f"Control {control_id}: input identity differs from control-map key")
+        field_name = explicit.get("fieldName")
+        require(field_name == expected_fields[order], f"Control {control_id}: wrong field or chaining order")
+        field = field_map.get(field_name, {})
+        require(field.get("type") == "string" and field.get("aggregatable") is True and field.get("searchable") is True,
+                f"Control {control_id}: {field_name} must be a searchable, aggregatable string field")
+        require(isinstance(explicit.get("title"), str) and explicit["title"].strip(),
+                f"Control {control_id}: missing display title")
+        require(explicit.get("selectedOptions") == [], f"Control {control_id}: unexpected preselected options")
+        require(explicit.get("searchTechnique") == "prefix", f"Control {control_id}: unexpected search technique")
+        require(explicit.get("enhancements") == {}, f"Control {control_id}: unexpected enhancement state")
+        require("dataViewId" not in explicit, f"Control {control_id}: data view must be extracted into saved-object references")
+        ref_name = f"controlGroup_{control_id}:optionsListDataView"
+        require(refs.get(ref_name) == {"name": ref_name, "type": "index-pattern", "id": view_id},
+                f"Control {control_id}: missing shared data-view reference {ref_name}")
+        used_refs.add(ref_name)
+        catalog.append({"id": control_id, "fieldName": field_name, "title": explicit["title"], "order": order})
+    catalog.sort(key=lambda item: item["order"])
+    require(manifest.get("controlCount") == len(controls), "Manifest control count disagrees with dashboard")
+    require(manifest.get("controls") == catalog, "Manifest control catalog disagrees with dashboard")
+    return used_refs
+
+
+def validate(objects, manifest, target=(8, 15, 0)):
     require(objects, "Empty NDJSON import")
     by_key = {(o.get("type"), o.get("id")): o for o in objects}
     require(len(by_key) == len(objects), "Duplicate saved-object type/ID")
@@ -219,6 +256,7 @@ def validate(objects, manifest, target=(8, 4, 1)):
     require(len(views) == len(dashboards) == 1, "Expected one combined data view and one dashboard")
     view, dashboard = views[0], dashboards[0]
     field_map, runtime = check_view(view)
+    control_refs = check_controls(dashboard, field_map, view["id"], manifest)
     a = dashboard["attributes"]
     source = nested(a["kibanaSavedObjectMeta"]["searchSourceJSON"], dict, "dashboard.searchSourceJSON")
     expected_query = "service.name: " + json.dumps(manifest["service"], ensure_ascii=False, separators=(",", ":"))
@@ -231,6 +269,7 @@ def validate(objects, manifest, target=(8, 4, 1)):
     indexes = [p["panelIndex"] for p in panels]
     require(len(indexes) == len(set(indexes)), "Duplicate dashboard panel indexes")
     refs = {r["name"]: r for r in dashboard["references"]}
+    used_refs = set(control_refs)
     queries = {}
     rectangles = []
     reached = {(dashboard["type"], dashboard["id"]), (view["type"], view["id"])}
@@ -239,6 +278,7 @@ def validate(objects, manifest, target=(8, 4, 1)):
         name = f"{panel_index}:{panel['panelRefName']}"
         require(name in refs, f"Panel {panel_index}: missing prefixed dashboard reference {name}")
         ref = refs[name]
+        used_refs.add(name)
         require(ref["type"] == panel["type"], f"Panel {panel_index}: wrong referenced type")
         obj = by_key[(ref["type"], ref["id"])]
         reached.add((ref["type"], ref["id"]))
@@ -266,7 +306,8 @@ def validate(objects, manifest, target=(8, 4, 1)):
             raise InvalidDashboard(f"Unexpected panel type {obj['type']}")
         queries[obj["id"]] = query
     require(reached == set(by_key), "Import contains orphan saved objects")
-    require(len(refs) == len(panels), "Dashboard contains stale fixture references")
+    require(set(refs) == used_refs, "Dashboard contains stale fixture references")
+    require(len(refs) == len(panels) + len(control_refs), "Panel and control references must be distinct")
     require(manifest["savedObjectCount"] == len(objects) and manifest["panelCount"] == len(panels),
             "Manifest counts disagree with NDJSON")
     require(manifest["dashboardId"] == dashboard["id"] and manifest["dataViewId"] == view["id"],
@@ -276,7 +317,7 @@ def validate(objects, manifest, target=(8, 4, 1)):
         scoped_query = f"({expected_query}) and ({row['query']})" if row["query"] else ""
         require(row["id"] in queries and scoped_query == queries[row["id"]],
                 f"Manifest query mismatch for {row['title']}")
-    return {"objects": len(objects), "panels": len(panels), "runtimeFields": len(runtime),
+    return {"objects": len(objects), "panels": len(panels), "controls": len(control_refs), "runtimeFields": len(runtime),
             "visualizationTypes": dict(Counter(json.loads(o["attributes"]["visState"])["type"]
                                                for o in objects if o["type"] == "visualization"))}
 
@@ -285,7 +326,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("file", nargs="?", type=Path, default=HERE / "unified-gateway-dashboard.ndjson")
     parser.add_argument("--manifest", type=Path, help="Defaults to the matching .manifest.json file")
-    parser.add_argument("--target-version", default="8.4.1", help="Oldest supported Kibana for migration checks")
+    parser.add_argument("--target-version", default="8.15.0", help="Oldest supported Kibana for migration checks")
     args = parser.parse_args()
     try:
         objects = [json.loads(line) for line in args.file.read_text(encoding="utf-8-sig").splitlines() if line.strip()]

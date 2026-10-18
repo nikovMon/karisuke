@@ -2,7 +2,7 @@
 
 The dashboard combines unified gateway logs with Elastic APM traces. It covers source handling, FindAir and DeepWisdom dispatch, validation, retries, filtering, rule health, sampled latency, and investigations by image or trace ID.
 
-The generated bundle targets Kibana 8.15, assuming it matches the verified Elasticsearch 8.15.0 deployment. Its saved-object schemas come from compatible Elastic Kibana 8.4.1 fixtures, which Kibana 8.15 migrates on import. The corrected runtime scripts and aggregations have been executed against a local Elasticsearch 8.15.0 instance with synthetic data. Live Kibana rendering, deployment-specific mappings, permissions, and collector transformations still require verification in the target environment.
+The generated bundle targets Kibana 8.15, assuming it matches the verified Elasticsearch 8.15.0 deployment. The dashboard and modern Controls use Kibana 8.15 schemas; chart and saved-search schemas come from compatible Elastic Kibana 8.4.1 fixtures, which Kibana 8.15 migrates on import. The corrected runtime scripts and aggregations have been executed against a local Elasticsearch 8.15.0 instance with synthetic data. Live Kibana rendering, deployment-specific mappings, permissions, and collector transformations still require verification in the target environment.
 
 ## Import
 
@@ -11,12 +11,18 @@ The generated bundle targets Kibana 8.15, assuming it matches the verified Elast
 3. Select [unified-gateway-dashboard.ndjson](unified-gateway-dashboard.ndjson). Import the complete file so its dashboard, visualizations, searches, and dedicated data view stay together.
 4. If replacing an earlier import of this bundle, allow overwrite for its objects. Their IDs are stable. A differently configured build uses the same IDs and replaces the same dashboard in that Space; it does not create another independent dashboard.
 5. Open **Dashboards > Unified Gateway | Operations, Logs & Traces**.
-6. Select the environment and start with **Last 1 hour**. Refresh is initially paused. Generate some gateway activity and refresh manually.
+6. Select the environment from the modern **Controls** bar and start with **Last 1 hour**. The Gateway instance list narrows to the selected environment. Refresh is initially paused. Generate some gateway activity and refresh manually.
 7. Check a source event, a trace latency panel, and a trace-ID link. Empty Debug panels require the logging change below; an empty trace panel requires checking raw APM data.
 
 Import requires the appropriate Saved Objects Management privilege. Kibana migrates supported older saved objects during import, but imports from newer versions into older Kibana versions are unsupported. See [Elastic's saved-object import documentation](https://www.elastic.co/guide/en/kibana/8.15/managing-saved-objects.html).
 
 The bundle creates its own data view. It does not change the existing default data view, Elasticsearch mappings, retention, Logstash configuration, or any application service.
+
+### Controls and the Lens editing prompt
+
+Environment and Gateway instance are native Kibana options-list Controls. They respect the dashboard's query, filters, and time range; multiple selections are allowed. The environment selection narrows the following instance control. The updated dashboard removes the deprecated **Environment and instance** input-control panel. Import with overwrite and reload the dashboard to apply the replacement. See [Kibana Controls](https://www.elastic.co/guide/en/kibana/8.15/add-controls.html).
+
+The pink **Try with Lens** / **Convert to Lens** dot is an optional editing prompt on supported aggregation-based charts. It is not a data error or a deprecation warning. Save the dashboard and leave Edit mode to hide that prompt during normal viewing. Lens conversion is optional; this update preserves the existing chart calculations. See [supported aggregation-based panels](https://www.elastic.co/guide/en/kibana/8.15/add-aggregation-based-visualization-panels.html) and the [8.15 Lens action's Edit-mode condition](https://github.com/elastic/kibana/blob/v8.15.0/src/plugins/visualizations/public/actions/edit_in_lens_action.tsx#L135-L152).
 
 ### Repair an earlier import with a runtime-field error
 
@@ -121,7 +127,7 @@ Validate a generated bundle with:
 python deploy/unified-gateway/observability/kibana/validate_dashboard.py
 ```
 
-The optional positional argument selects another NDJSON file; `--manifest` selects its manifest explicitly. `--target-version` defaults to `8.4.1`, the oldest fixture schema compatibility target, even though this deployment targets Kibana 8.15. The validator checks nested JSON, references, migration metadata, panel layout, field definitions, aggregation wiring, service/signal scoping, and manifest agreement. It does not execute KQL or Painless or test live Kibana importing and rendering.
+The optional positional argument selects another NDJSON file; `--manifest` selects its manifest explicitly. `--target-version` defaults to `8.15.0`. The validator checks nested JSON, references, migration metadata, panel layout, field definitions, aggregation wiring, service/signal scoping, modern Controls, and manifest agreement. It rejects deprecated input-control visualizations. It does not execute KQL or Painless or test live Kibana importing and rendering.
 
 To compile and execute the Painless scripts, start a disposable **local Elasticsearch 8.15.0** instance and run:
 

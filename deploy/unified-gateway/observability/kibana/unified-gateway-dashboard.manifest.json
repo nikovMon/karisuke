@@ -1,6 +1,9 @@
 {
   "targetKibana": "8.15.x",
-  "savedObjectSchemaSource": "8.4.1",
+  "savedObjectSchemaSources": {
+    "dashboard": "8.15.0",
+    "visualizationsAndSearches": "8.4.1"
+  },
   "dashboardId": "2e5f9e8b-89e1-5d16-87da-74b49a7c4dd0",
   "dataViewId": "747eaddd-3792-533b-8fba-5a00df7c2ed5",
   "service": "unified-gateway",
@@ -8,8 +11,8 @@
   "traces": "traces-apm*,apm-*",
   "space": "default",
   "basePath": "",
-  "savedObjectCount": 50,
-  "panelCount": 48,
+  "savedObjectCount": 49,
+  "panelCount": 47,
   "panels": [
     {
       "id": "15ade04b-cca9-5d62-81c8-2264194dee29",
@@ -27,21 +30,6 @@
       }
     },
     {
-      "id": "63f4740a-e407-58dc-a7ef-d8f8653969e5",
-      "type": "visualization",
-      "title": "Environment and instance",
-      "query": "",
-      "description": "",
-      "requiresGatewayDebug": false,
-      "grid": {
-        "x": 0,
-        "y": 6,
-        "w": 48,
-        "h": 5,
-        "i": "2"
-      }
-    },
-    {
       "id": "d3916c53-b6c9-5b61-a6a8-81ca88308ff3",
       "type": "visualization",
       "title": "Source processing and delivery",
@@ -50,10 +38,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 11,
+        "y": 6,
         "w": 48,
         "h": 4,
-        "i": "3"
+        "i": "2"
       }
     },
     {
@@ -65,10 +53,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 15,
+        "y": 10,
         "w": 12,
         "h": 6,
-        "i": "4"
+        "i": "3"
       }
     },
     {
@@ -80,10 +68,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 12,
-        "y": 15,
+        "y": 10,
         "w": 12,
         "h": 6,
-        "i": "5"
+        "i": "4"
       }
     },
     {
@@ -95,10 +83,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 24,
-        "y": 15,
+        "y": 10,
         "w": 12,
         "h": 6,
-        "i": "6"
+        "i": "5"
       }
     },
     {
@@ -110,10 +98,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 36,
-        "y": 15,
+        "y": 10,
         "w": 12,
         "h": 6,
-        "i": "7"
+        "i": "6"
       }
     },
     {
@@ -125,10 +113,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 21,
+        "y": 16,
         "w": 24,
         "h": 10,
-        "i": "8"
+        "i": "7"
       }
     },
     {
@@ -140,10 +128,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 24,
-        "y": 21,
+        "y": 16,
         "w": 24,
         "h": 10,
-        "i": "9"
+        "i": "8"
       }
     },
     {
@@ -155,10 +143,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 31,
+        "y": 26,
         "w": 24,
         "h": 10,
-        "i": "10"
+        "i": "9"
       }
     },
     {
@@ -170,10 +158,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 24,
-        "y": 31,
+        "y": 26,
         "w": 24,
         "h": 10,
-        "i": "11"
+        "i": "10"
       }
     },
     {
@@ -185,10 +173,10 @@
       "requiresGatewayDebug": true,
       "grid": {
         "x": 0,
-        "y": 41,
+        "y": 36,
         "w": 24,
         "h": 10,
-        "i": "12"
+        "i": "11"
       }
     },
     {
@@ -200,10 +188,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 24,
-        "y": 41,
+        "y": 36,
         "w": 24,
         "h": 10,
-        "i": "13"
+        "i": "12"
       }
     },
     {
@@ -215,10 +203,10 @@
       "requiresGatewayDebug": true,
       "grid": {
         "x": 0,
-        "y": 51,
+        "y": 46,
         "w": 24,
         "h": 10,
-        "i": "14"
+        "i": "13"
       }
     },
     {
@@ -230,10 +218,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 24,
-        "y": 51,
+        "y": 46,
         "w": 24,
         "h": 10,
-        "i": "15"
+        "i": "14"
       }
     },
     {
@@ -245,10 +233,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 61,
+        "y": 56,
         "w": 24,
         "h": 10,
-        "i": "16"
+        "i": "15"
       }
     },
     {
@@ -260,10 +248,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 24,
-        "y": 61,
+        "y": 56,
         "w": 24,
         "h": 10,
-        "i": "17"
+        "i": "16"
       }
     },
     {
@@ -275,10 +263,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 71,
+        "y": 66,
         "w": 24,
         "h": 10,
-        "i": "18"
+        "i": "17"
       }
     },
     {
@@ -290,10 +278,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 24,
-        "y": 71,
+        "y": 66,
         "w": 24,
         "h": 10,
-        "i": "19"
+        "i": "18"
       }
     },
     {
@@ -305,10 +293,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 81,
+        "y": 76,
         "w": 48,
         "h": 10,
-        "i": "20"
+        "i": "19"
       }
     },
     {
@@ -320,10 +308,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 91,
+        "y": 86,
         "w": 48,
         "h": 4,
-        "i": "21"
+        "i": "20"
       }
     },
     {
@@ -335,10 +323,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 95,
+        "y": 90,
         "w": 24,
         "h": 10,
-        "i": "22"
+        "i": "21"
       }
     },
     {
@@ -350,10 +338,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 24,
-        "y": 95,
+        "y": 90,
         "w": 24,
         "h": 10,
-        "i": "23"
+        "i": "22"
       }
     },
     {
@@ -365,10 +353,10 @@
       "requiresGatewayDebug": true,
       "grid": {
         "x": 0,
-        "y": 105,
+        "y": 100,
         "w": 48,
         "h": 12,
-        "i": "24"
+        "i": "23"
       }
     },
     {
@@ -380,10 +368,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 117,
+        "y": 112,
         "w": 24,
         "h": 10,
-        "i": "25"
+        "i": "24"
       }
     },
     {
@@ -395,10 +383,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 24,
-        "y": 117,
+        "y": 112,
         "w": 24,
         "h": 10,
-        "i": "26"
+        "i": "25"
       }
     },
     {
@@ -410,10 +398,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 127,
+        "y": 122,
         "w": 48,
         "h": 4,
-        "i": "27"
+        "i": "26"
       }
     },
     {
@@ -425,10 +413,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 131,
+        "y": 126,
         "w": 12,
         "h": 6,
-        "i": "28"
+        "i": "27"
       }
     },
     {
@@ -440,10 +428,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 12,
-        "y": 131,
+        "y": 126,
         "w": 12,
         "h": 6,
-        "i": "29"
+        "i": "28"
       }
     },
     {
@@ -455,10 +443,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 24,
-        "y": 131,
+        "y": 126,
         "w": 24,
         "h": 6,
-        "i": "30"
+        "i": "29"
       }
     },
     {
@@ -470,10 +458,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 137,
+        "y": 132,
         "w": 24,
         "h": 10,
-        "i": "31"
+        "i": "30"
       }
     },
     {
@@ -485,10 +473,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 24,
-        "y": 137,
+        "y": 132,
         "w": 24,
         "h": 10,
-        "i": "32"
+        "i": "31"
       }
     },
     {
@@ -500,10 +488,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 147,
+        "y": 142,
         "w": 24,
         "h": 10,
-        "i": "33"
+        "i": "32"
       }
     },
     {
@@ -515,10 +503,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 24,
-        "y": 147,
+        "y": 142,
         "w": 24,
         "h": 10,
-        "i": "34"
+        "i": "33"
       }
     },
     {
@@ -530,10 +518,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 157,
+        "y": 152,
         "w": 24,
         "h": 10,
-        "i": "35"
+        "i": "34"
       }
     },
     {
@@ -545,10 +533,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 24,
-        "y": 157,
+        "y": 152,
         "w": 24,
         "h": 10,
-        "i": "36"
+        "i": "35"
       }
     },
     {
@@ -560,10 +548,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 167,
+        "y": 162,
         "w": 24,
         "h": 10,
-        "i": "37"
+        "i": "36"
       }
     },
     {
@@ -575,10 +563,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 24,
-        "y": 167,
+        "y": 162,
         "w": 24,
         "h": 10,
-        "i": "38"
+        "i": "37"
       }
     },
     {
@@ -590,10 +578,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 177,
+        "y": 172,
         "w": 48,
         "h": 12,
-        "i": "39"
+        "i": "38"
       }
     },
     {
@@ -605,10 +593,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 189,
+        "y": 184,
         "w": 48,
         "h": 6,
-        "i": "40"
+        "i": "39"
       }
     },
     {
@@ -620,10 +608,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 195,
+        "y": 190,
         "w": 48,
         "h": 12,
-        "i": "41"
+        "i": "40"
       }
     },
     {
@@ -635,10 +623,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 207,
+        "y": 202,
         "w": 48,
         "h": 12,
-        "i": "42"
+        "i": "41"
       }
     },
     {
@@ -650,10 +638,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 219,
+        "y": 214,
         "w": 48,
         "h": 12,
-        "i": "43"
+        "i": "42"
       }
     },
     {
@@ -665,10 +653,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 231,
+        "y": 226,
         "w": 48,
         "h": 12,
-        "i": "44"
+        "i": "43"
       }
     },
     {
@@ -680,10 +668,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 243,
+        "y": 238,
         "w": 48,
         "h": 12,
-        "i": "45"
+        "i": "44"
       }
     },
     {
@@ -695,10 +683,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 255,
+        "y": 250,
         "w": 48,
         "h": 12,
-        "i": "46"
+        "i": "45"
       }
     },
     {
@@ -710,10 +698,10 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 267,
+        "y": 262,
         "w": 48,
         "h": 15,
-        "i": "47"
+        "i": "46"
       }
     },
     {
@@ -725,11 +713,26 @@
       "requiresGatewayDebug": false,
       "grid": {
         "x": 0,
-        "y": 282,
+        "y": 277,
         "w": 48,
         "h": 9,
-        "i": "48"
+        "i": "47"
       }
+    }
+  ],
+  "controlCount": 2,
+  "controls": [
+    {
+      "id": "ug-control-0",
+      "fieldName": "ug.environment",
+      "title": "Environment",
+      "order": 0
+    },
+    {
+      "id": "ug-control-1",
+      "fieldName": "ug.instance",
+      "title": "Gateway instance",
+      "order": 1
     }
   ]
 }

@@ -3,9 +3,12 @@
   "notes": [
     "Research reference only, not an import file. Objects retain fixture names and fields; replace them before use.",
     "Nested JSON strings are decoded for generator convenience; re-serialize visState, uiStateJSON, searchSourceJSON, panelsJSON and optionsJSON for saved objects NDJSON.",
-    "Schemas are extracted from the official Kibana v8.4.1 fixture, not a newer export with altered version numbers.",
+    "Classic visualization and saved-search schemas are extracted from the official Kibana v8.4.1 fixture; the dashboard template uses the pinned v8.15.0 fixture identified by dashboardSource. Original migration metadata is preserved.",
     "Dashboard panels use panelRefName=panel_1 and reference.name=1:panel_1 where 1 is panelIndex.",
-    "The official fixture metadata predates 8.4.1; target Kibana applies supported forward migrations on import."
+    "The official fixture metadata predates 8.4.1; target Kibana applies supported forward migrations on import.",
+    "The dashboard template is the authentic timeslider and saved search fixture (3de3c3b0-6458-11ed-9957-e76caeeb9f75) checked into v8.15.0. It retains migrationVersion.dashboard=8.6.0 and coreMigrationVersion=8.6.0; these values describe its actual saved state, not the target product version. Replace its sample controls and panel references.",
+    "Modern controls use an object-valued controlGroupInput containing string-valued panelsJSON and ignoreParentSettingsJSON. Options-list data-view references are named controlGroup_<controlId>:optionsListDataView. See controlGroupSources and controlGroupExample for pinned source provenance and the minimal state shape.",
+    "The minimal controlGroupExample derives from pinned 8.15 persistence functions and types; it is not a verbatim UI export. HIERARCHICAL uses zero-based control order, and all parent ignore flags stay false."
   ],
   "templates": {
     "metric": {
@@ -817,81 +820,71 @@
       "type": "search"
     },
     "dashboard": {
+      "id": "3de3c3b0-6458-11ed-9957-e76caeeb9f75",
+      "type": "dashboard",
       "attributes": {
-        "description": "",
-        "hits": 0,
+        "controlGroupInput": {
+          "controlStyle": "oneLine",
+          "chainingSystem": "HIERARCHICAL",
+          "panelsJSON": "{\"18122aef-6a2e-4e01-a6ce-556d2995444a\":{\"order\":0,\"width\":\"large\",\"grow\":true,\"type\":\"timeSlider\",\"explicitInput\":{\"title\":\"Time slider\",\"id\":\"18122aef-6a2e-4e01-a6ce-556d2995444a\",\"enhancements\":{}}}}",
+          "ignoreParentSettingsJSON": "{\"ignoreFilters\":false,\"ignoreQuery\":false,\"ignoreTimerange\":false,\"ignoreValidations\":false}"
+        },
         "kibanaSavedObjectMeta": {
           "searchSourceJSON": {
             "query": {
               "query": "",
-              "language": "lucene"
+              "language": "kuery"
             },
-            "filter": [],
-            "highlightAll": true,
-            "version": true
+            "filter": []
           }
         },
+        "refreshInterval": {
+          "pause": true,
+          "value": 0
+        },
+        "timeRestore": true,
         "optionsJSON": {
-          "darkTheme": false,
           "useMargins": true,
+          "syncColors": false,
+          "syncCursor": true,
+          "syncTooltips": false,
           "hidePanelTitles": false
         },
+        "description": "",
         "panelsJSON": [
           {
-            "version": "7.3.0",
-            "type": "visualization",
+            "version": "8.6.0",
+            "type": "search",
             "gridData": {
-              "w": 24,
-              "h": 15,
               "x": 0,
               "y": 0,
-              "i": "1"
-            },
-            "panelIndex": "1",
-            "embeddableConfig": {
-              "enhancements": {}
-            },
-            "panelRefName": "panel_1"
-          },
-          {
-            "version": "7.3.0",
-            "type": "visualization",
-            "gridData": {
               "w": 24,
               "h": 15,
-              "x": 24,
-              "y": 0,
-              "i": "2"
+              "i": "3d2c7037-b0af-4b9f-810f-75de6278acf2"
             },
-            "panelIndex": "2",
+            "panelIndex": "3d2c7037-b0af-4b9f-810f-75de6278acf2",
             "embeddableConfig": {
               "enhancements": {}
             },
-            "panelRefName": "panel_2"
+            "panelRefName": "panel_3d2c7037-b0af-4b9f-810f-75de6278acf2"
           }
         ],
-        "timeRestore": false,
-        "title": "couple panels",
+        "timeFrom": "2018-04-09T23:43:13.577Z",
+        "title": "timeslider and saved search",
+        "timeTo": "2018-04-14T00:40:42.233Z",
         "version": 1
-      },
-      "coreMigrationVersion": "8.0.1",
-      "id": "2ae34a60-3dd4-11e8-b2b9-5d5dc1715159",
-      "migrationVersion": {
-        "dashboard": "8.0.1"
       },
       "references": [
         {
-          "id": "145ced90-3dcb-11e8-8660-4d65aa086b3c",
-          "name": "1:panel_1",
-          "type": "visualization"
-        },
-        {
-          "id": "e2023110-3dcb-11e8-8660-4d65aa086b3c",
-          "name": "2:panel_2",
-          "type": "visualization"
+          "name": "3d2c7037-b0af-4b9f-810f-75de6278acf2:panel_3d2c7037-b0af-4b9f-810f-75de6278acf2",
+          "type": "search",
+          "id": "2b9247e0-6458-11ed-9957-e76caeeb9f75"
         }
       ],
-      "type": "dashboard"
+      "migrationVersion": {
+        "dashboard": "8.6.0"
+      },
+      "coreMigrationVersion": "8.6.0"
     },
     "dynamic_options_input_control": {
       "attributes": {
@@ -967,5 +960,39 @@
         }
       }
     }
+  },
+  "dashboardSource": "https://github.com/elastic/kibana/blob/v8.15.0/test/functional/fixtures/kbn_archiver/dashboard/current/kibana.json",
+  "controlGroupSources": {
+    "dashboard_fixture": "https://github.com/elastic/kibana/blob/v8.15.0/test/functional/fixtures/kbn_archiver/dashboard/current/kibana.json",
+    "raw_storage_and_defaults": "https://github.com/elastic/kibana/blob/v8.15.0/src/plugins/controls/common/control_group/control_group_persistence.ts",
+    "dashboard_reference_prefix": "https://github.com/elastic/kibana/blob/v8.15.0/src/plugins/dashboard/common/dashboard_container/persistable_state/dashboard_container_references.ts",
+    "control_reference_prefix": "https://github.com/elastic/kibana/blob/v8.15.0/src/plugins/controls/common/control_group/control_group_persistable_state.ts",
+    "options_list_data_view_reference": "https://github.com/elastic/kibana/blob/v8.15.0/src/plugins/controls/common/options_list/options_list_persistable_state.ts",
+    "group_types": "https://github.com/elastic/kibana/blob/v8.15.0/src/plugins/controls/common/control_group/types.ts",
+    "options_list_types_and_runtime_fields": "https://github.com/elastic/kibana/blob/v8.15.0/src/plugins/controls/common/options_list/types.ts",
+    "chaining_test": "https://github.com/elastic/kibana/blob/v8.15.0/test/functional/apps/dashboard_elements/controls/common/control_group_chaining.ts"
+  },
+  "controlGroupExample": {
+    "attributes": {
+      "controlGroupInput": {
+        "controlStyle": "oneLine",
+        "chainingSystem": "HIERARCHICAL",
+        "showApplySelections": false,
+        "ignoreParentSettingsJSON": "{\"ignoreFilters\":false,\"ignoreQuery\":false,\"ignoreTimerange\":false,\"ignoreValidations\":false}",
+        "panelsJSON": "{\"environment-control\":{\"type\":\"optionsListControl\",\"order\":0,\"width\":\"medium\",\"grow\":true,\"explicitInput\":{\"id\":\"environment-control\",\"fieldName\":\"ug.environment\",\"title\":\"Environment\",\"selectedOptions\":[],\"searchTechnique\":\"prefix\",\"enhancements\":{}}},\"instance-control\":{\"type\":\"optionsListControl\",\"order\":1,\"width\":\"medium\",\"grow\":true,\"explicitInput\":{\"id\":\"instance-control\",\"fieldName\":\"ug.instance\",\"title\":\"Instance\",\"selectedOptions\":[],\"searchTechnique\":\"prefix\",\"enhancements\":{}}}}"
+      }
+    },
+    "references": [
+      {
+        "name": "controlGroup_environment-control:optionsListDataView",
+        "type": "index-pattern",
+        "id": "YOUR_DATA_VIEW_ID"
+      },
+      {
+        "name": "controlGroup_instance-control:optionsListDataView",
+        "type": "index-pattern",
+        "id": "YOUR_DATA_VIEW_ID"
+      }
+    ]
   }
 }

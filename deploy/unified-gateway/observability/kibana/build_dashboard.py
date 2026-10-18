@@ -145,6 +145,9 @@ class Builder:
         self.objects = []
         self.panels = []
         self.catalog = []
+        self.control_catalog = []
+        self.control_references = []
+        self.control_group = {}
         self.y = 0
         self.view_id = object_id("data-view")
         self.dashboard_id = object_id("dashboard")
@@ -227,21 +230,25 @@ class Builder:
         self.row(height)
 
     def controls(self):
-        obj = self.template("input_control_vis", "controls", "Environment and instance")
-        controls = []
-        refs = []
+        controls = {}
         for i, (field, label) in enumerate([("ug.environment", "Environment"), ("ug.instance", "Gateway instance")]):
-            ref = f"control_{i}_index_pattern"
-            controls.append({"id": f"ug-control-{i}", "fieldName": field, "parent": "", "label": label,
-                             "type": "list", "options": {"type": "terms", "multiselect": True, "size": 100,
-                                                          "order": "desc", "dynamicOptions": True},
-                             "indexPatternRefName": ref})
-            refs.append({"type": "index-pattern", "id": self.view_id, "name": ref})
-        obj["attributes"]["visState"].update(title="Environment and instance", params={
-            "controls": controls, "updateFiltersOnChange": True, "useTimeFilter": True, "pinFilters": False})
-        obj["references"] = refs
-        self.add(obj, "", 0, 48, 5)
-        self.row(5)
+            control_id = f"ug-control-{i}"
+            controls[control_id] = {
+                "type": "optionsListControl", "order": i, "width": "medium", "grow": True,
+                "explicitInput": {"id": control_id, "fieldName": field, "title": label,
+                                  "selectedOptions": [], "searchTechnique": "prefix", "enhancements": {}},
+            }
+            self.control_references.append({
+                "type": "index-pattern", "id": self.view_id,
+                "name": f"controlGroup_{control_id}:optionsListDataView",
+            })
+            self.control_catalog.append({"id": control_id, "fieldName": field, "title": label, "order": i})
+        self.control_group = {
+            "controlStyle": "oneLine", "chainingSystem": "HIERARCHICAL", "showApplySelections": False,
+            "panelsJSON": dumps(controls),
+            "ignoreParentSettingsJSON": dumps({"ignoreFilters": False, "ignoreQuery": False,
+                                               "ignoreTimerange": False, "ignoreValidations": False}),
+        }
 
     def vis(self, slug, title, kind, query, metrics, buckets=(), *, x=0, w=24, h=10, description="", debug=False, stacked=False):
         template_kind = "area" if kind == "line" else kind
@@ -296,6 +303,7 @@ class Builder:
                             "FindAir and DeepWisdom operations, source attempts, rule health, sampled trace latency and correlated investigations.")
         a = obj["attributes"]
         a["panelsJSON"] = self.panels
+        a["controlGroupInput"] = self.control_group
         a["optionsJSON"] = {"useMargins": True, "hidePanelTitles": False, "syncColors": True,
                             "syncCursor": True, "syncTooltips": False}
         a["kibanaSavedObjectMeta"]["searchSourceJSON"] = {"query": {"language": "kuery", "query": self.base_query}, "filter": []}
@@ -305,7 +313,7 @@ class Builder:
         a["refreshInterval"] = {"pause": True, "value": 60000}
         obj["references"] = [
             {"type": spec["type"], "id": spec["id"], "name": f"{p['panelIndex']}:{p['panelRefName']}"}
-            for p, spec in zip(self.panels, self.catalog)]
+            for p, spec in zip(self.panels, self.catalog)] + self.control_references
         self.objects.append(obj)
         return self.objects
 
@@ -346,7 +354,7 @@ def build(args):
     prepare = operation("unified_gateway.contract.prepare")
     router = logs + ' and log.logger: "ImagingPipeline.RabbitMqClient.RabbitMqOutcomeRouter"'
 
-    b.markdown("start", "# Unified Gateway\n**Operations · FindAir · DeepWisdom**\n\nLogs describe business events. Traces explain sampled processing and transport latency. Select an environment below and use the time picker. Click a trace ID in an investigation table to open APM. **All panels are scoped to this service.**", 6)
+    b.markdown("start", "# Unified Gateway\n**Operations · FindAir · DeepWisdom**\n\nLogs describe business events. Traces explain sampled processing and transport latency. Select an environment in the Controls bar and use the time picker. Click a trace ID in an investigation table to open APM. **All panels are scoped to this service.**", 6)
     b.controls()
     b.markdown("source-overview", "## Source processing and delivery\nCounts are observed handling/dispatch **attempts**; retries can repeat work. Delivered means transport acceptance, not downstream algorithm completion.", 4)
     for x, slug, title, query, m in [
@@ -501,13 +509,16 @@ def main():
     objects = [serialize_object(o) for o in b.finish()]
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text("\n".join(dumps(o) for o in objects) + "\n", encoding="utf-8")
-    manifest = {"targetKibana": "8.15.x", "savedObjectSchemaSource": "8.4.1",
+    manifest = {"targetKibana": "8.15.x",
+                "savedObjectSchemaSources": {"dashboard": "8.15.0", "visualizationsAndSearches": "8.4.1"},
                 "dashboardId": b.dashboard_id, "dataViewId": b.view_id,
                 "service": args.service, "logs": args.logs, "traces": args.traces,
                 "space": args.space, "basePath": args.base_path, "savedObjectCount": len(objects),
-                "panelCount": len(b.catalog), "panels": b.catalog}
+                "panelCount": len(b.catalog), "panels": b.catalog,
+                "controlCount": len(b.control_catalog), "controls": b.control_catalog}
     args.output.with_suffix(".manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    print(f"Created {args.output.name}: {len(objects)} saved objects, {len(b.catalog)} dashboard panels.")
+    print(f"Created {args.output.name}: {len(objects)} saved objects, {len(b.catalog)} dashboard panels, "
+          f"{len(b.control_catalog)} dashboard controls.")
 
 
 if __name__ == "__main__":
