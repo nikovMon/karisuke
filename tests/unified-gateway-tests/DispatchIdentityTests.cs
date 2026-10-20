@@ -77,5 +77,23 @@ public sealed class DispatchIdentityTests
         Assert.ThrowsAny<ArgumentException>(() => DispatchIdentity.Create("image-a", "asd", "", Parse("{}")));
     }
 
+    [Fact]
+    public void HistoricalIdentityIsCanonicalStableWithinRunAndSeparateFromLive()
+    {
+        var parameters = Parse("""{"tenantId":"t","config":{"a":1,"b":2}}""");
+        var reordered = Parse("""{"config":{"b":2,"a":1},"tenantId":"t"}""");
+        var identity = DispatchIdentity.CreateHistorical("run-a", "image-a", "asd", "rule-a", parameters);
+
+        Assert.Matches("^[0-9a-f]{64}$", identity);
+        Assert.Equal(identity, DispatchIdentity.CreateHistorical("run-a", "image-a", "asd", "rule-a", reordered));
+        Assert.NotEqual(identity, DispatchIdentity.CreateHistorical("run-b", "image-a", "asd", "rule-a", parameters));
+        Assert.NotEqual(identity, DispatchIdentity.Create("image-a", "asd", "rule-a", parameters));
+        Assert.NotEqual(identity, DispatchIdentity.CreateHistorical("run-a", "image-b", "asd", "rule-a", parameters));
+        Assert.NotEqual(identity, DispatchIdentity.CreateHistorical("run-a", "image-a", "other", "rule-a", parameters));
+        Assert.NotEqual(identity, DispatchIdentity.CreateHistorical("run-a", "image-a", "asd", "rule-b", parameters));
+        Assert.NotEqual(identity, DispatchIdentity.CreateHistorical("run-a", "image-a", "asd", "rule-a", Parse("{}")));
+        Assert.ThrowsAny<ArgumentException>(() => DispatchIdentity.CreateHistorical("", "image-a", "asd", "rule-a", parameters));
+    }
+
     private static JsonElement Parse(string json) => JsonDocument.Parse(json).RootElement.Clone();
 }

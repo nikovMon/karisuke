@@ -11,6 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\libs\rabbitmq-client\RabbitMqClient.csproj" />
     <ProjectReference Include="..\..\libs\elasticsearch-client\ElasticsearchClient.csproj" />
     <ProjectReference Include="..\..\libs\common-dtos\ImagingPipeline.Common.Dtos.csproj" />
     <ProjectReference Include="..\..\libs\observability\ImagingPipeline.Observability.csproj" />

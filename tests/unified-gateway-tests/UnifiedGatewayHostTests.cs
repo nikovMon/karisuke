@@ -3,7 +3,9 @@ using System.Text.Json;
 using ImagingPipeline.PipelineCatalog;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.RuleEngine.Loading;
+using ImagingPipeline.UnifiedGateway.Configuration;
 using ImagingPipeline.UnifiedGateway.Dispatch;
+using ImagingPipeline.UnifiedGateway.Source;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -140,6 +142,27 @@ public sealed class UnifiedGatewayHostTests
         Assert.False(Assert.IsType<SocketsHttpHandler>(handler).AllowAutoRedirect);
         Assert.Equal(Timeout.InfiniteTimeSpan, factory.Services.GetRequiredService<IHttpClientFactory>()
             .CreateClient(HttpDispatchTransport.HttpClientName).Timeout);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task HistoricalHandlerIsWiredAndUsesTheRolloutSwitch(bool enabled)
+    {
+        using var factory = CreateFactory(new Dictionary<string, string?>
+        {
+            ["HistoricalInput:Enabled"] = enabled.ToString()
+        });
+        using var client = factory.CreateClient();
+        var handler = factory.Services.GetRequiredService<IRabbitMqMessageHandler>();
+
+        var result = await handler.HandleAsync(RabbitMqMessageEnvelope.FromUtf8(
+            """{"kind":"historical-auto-run","version":999}"""));
+
+        Assert.IsType<SourceMessageHandler>(handler);
+        Assert.Equal(enabled, factory.Services.GetRequiredService<IOptions<HistoricalInputOptions>>().Value.Enabled);
+        Assert.Equal(RabbitMqMessageFailureAction.DeadLetter, result.FailureAction);
+        Assert.Equal(enabled ? "gateway.historical_invalid_envelope" : "gateway.historical_disabled", result.Error);
     }
 
     private static WebApplicationFactory<Program> CreateFactory(Dictionary<string, string?>? settings = null) =>

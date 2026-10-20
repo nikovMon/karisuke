@@ -8,6 +8,7 @@ COPY libs/common-dtos/ImagingPipeline.Common.Dtos.csproj libs/common-dtos/
 COPY libs/observability/ImagingPipeline.Observability.csproj libs/observability/
 COPY libs/pipeline-catalog/ImagingPipeline.PipelineCatalog.csproj libs/pipeline-catalog/
 COPY libs/rabbitmq-configuration/ImagingPipeline.RabbitMqConfiguration.csproj libs/rabbitmq-configuration/
+COPY libs/rabbitmq-client/RabbitMqClient.csproj libs/rabbitmq-client/
 COPY libs/pipeline-contracts/ImagingPipeline.PipelineContracts.csproj libs/pipeline-contracts/
 COPY libs/geometry-utils/GeometryUtils.csproj libs/geometry-utils/
 COPY libs/rule-engine/ImagingPipeline.RuleEngine.csproj libs/rule-engine/
