@@ -16,8 +16,8 @@ public sealed record ActiveRule(
     double MaxResolution,
     TimeSpan? MaxPhotoAge,
     Geometry? Geometry,
-    IReadOnlyList<JsonElement> RunParams,
-    IReadOnlySet<string>? ModeSar = null);
+    IReadOnlySet<string>? ModeSar,
+    IReadOnlyList<JsonElement> RunParams);
 
 /// <summary>
 /// What one sensor must satisfy. A zero mask or a null grid-type set means no constraint.

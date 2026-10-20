@@ -63,8 +63,8 @@ public static class RuleSnapshotBuilder
             match.Resolution?.Max ?? double.PositiveInfinity,
             match.MaxPhotoAgeDays is { } days ? TimeSpan.FromDays(days) : null,
             validation.Geometry,
-            rule.RunParams!.ToArray(),
-            match.ModeSar is { } modes ? new HashSet<string>(modes, StringComparer.Ordinal) : null);
+            match.ModeSar is { } modes ? new HashSet<string>(modes, StringComparer.Ordinal) : null,
+            rule.RunParams!.ToArray());
         return true;
     }
 
