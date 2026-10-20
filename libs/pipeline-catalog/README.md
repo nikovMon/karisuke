@@ -2,7 +2,7 @@
 
 Shared configuration, contract registration validation, and rule-source resolution for the gateway and Rules API. This library performs no Elasticsearch, HTTP, or RabbitMQ I/O.
 
-The unified gateway and Rules API use the shared [`pipelinecatalog.json`](configuration/pipelinecatalog.json) with pipeline/contract IDs `FindAir` and `DeepWisdom`. `PipelineCatalogFile` selects a replacement catalog for a deployment. Existing indexes and queue names are not renamed.
+The unified gateway and Rules API use the shared [`pipelinecatalog.json`](configuration/pipelinecatalog.json) with pipeline/contract IDs `FindAir`, `DeepWisdom` and `SarAtc`. `PipelineCatalogFile` selects a replacement catalog for a deployment. Existing indexes and queue names are not renamed.
 
 `ExtraData` has no field schema: every key/value is preserved under `extraData` in the outgoing JSON body for either transport. DeepWisdom's familiar settings can also populate existing top-level fields, but are optional. Custom catalogs must use the current contract IDs; `asd` and `algo` aliases are not registered.
 
@@ -12,7 +12,7 @@ Register `IPipelineContractRegistry`, then call `services.AddPipelineCatalog(con
 
 ## Shared JSON file
 
-[`configuration/pipelinecatalog.json`](configuration/pipelinecatalog.json) holds the shared sample catalog, with FindAir and DeepWisdom pipeline entries. It is separate from host-specific observability/logging settings. The library copies it to consuming build/publish output as `pipelinecatalog.json` so it works without a repository checkout at runtime. Values for DeepWisdom are placeholders; deployments supply their own values and credentials.
+[`configuration/pipelinecatalog.json`](configuration/pipelinecatalog.json) holds the shared sample catalog, with FindAir, DeepWisdom and SarAtc pipeline entries. It is separate from host-specific observability/logging settings. The library copies it to consuming build/publish output as `pipelinecatalog.json` so it works without a repository checkout at runtime. Values for DeepWisdom and SarAtc are placeholders; deployments supply their own values and credentials. SarAtc is disabled here and publishes through a `direct` exchange on the separate `rabbitmq-hoshen` connection, to the bound queue SAR ATC consumes; each deployment enables it with real names once the broker, exchange and `sar-atc-rules-integ` index exist.
 
 `AddPipelineCatalogJsonFile(path)` is a reusable configuration extension that preserves `ExtraData` JSON types before the first load, including when used on a live `ConfigurationManager`. A minimal loading sequence for a future host is:
 

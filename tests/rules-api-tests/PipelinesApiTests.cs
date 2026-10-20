@@ -30,7 +30,11 @@ public sealed class PipelinesApiTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(
-            [new PipelineResponse("DeepWisdom", "DeepWisdom", true), new PipelineResponse("FindAir", "FindAir", true)],
+            [
+                new PipelineResponse("DeepWisdom", "DeepWisdom", true),
+                new PipelineResponse("FindAir", "FindAir", true),
+                new PipelineResponse("SarAtc", "SarAtc", false)
+            ],
             pipelines);
         Assert.DoesNotContain("transport", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("rulesIndex", json, StringComparison.OrdinalIgnoreCase);

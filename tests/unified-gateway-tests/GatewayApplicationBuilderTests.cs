@@ -168,7 +168,7 @@ public sealed class GatewayApplicationBuilderTests
         RegisterCatalog(builder);
         await using var app = builder.Build();
         var catalog = app.Services.GetRequiredService<IPipelineCatalog>();
-        Assert.Equal(["DeepWisdom", "FindAir"], catalog.GetAll().Select(pipeline => pipeline.PipelineId).Order());
+        Assert.Equal(["DeepWisdom", "FindAir", "SarAtc"], catalog.GetAll().Select(pipeline => pipeline.PipelineId).Order());
 
         Assert.All(catalog.GetAll(), pipeline => Assert.Equal(pipeline.PipelineId, pipeline.ContractId));
     }

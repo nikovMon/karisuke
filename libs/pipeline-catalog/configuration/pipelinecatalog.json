@@ -7,6 +7,13 @@
         "Username": "guest",
         "Password": "guest",
         "VirtualHost": "/"
+      },
+      "rabbitmq-hoshen": {
+        "Hostname": "replace-me-hoshen-host",
+        "Port": 5672,
+        "Username": "replace-me-user",
+        "Password": "replace-me-password",
+        "VirtualHost": "/"
       }
     },
     "Pipelines": {
@@ -55,6 +62,31 @@
             "Method": "PUT",
             "TimeoutSeconds": 20,
             "Headers": {}
+          }
+        }
+      },
+      "SarAtc": {
+        "Enabled": false,
+        "ContractId": "SarAtc",
+        "RulesIndex": "sar-atc-rules-integ",
+        "ExtraData": {},
+        "Transport": {
+          "Kind": "rabbitmq",
+          "RabbitMq": {
+            "ConnectionRef": "rabbitmq-hoshen",
+            "VirtualHost": null,
+            "Output": {
+              "QueueName": "replace-me.sar_atc.q",
+              "Arguments": {},
+              "ExchangeSettings": {
+                "ShouldBindToExchange": true,
+                "ExchangeName": "replace-me.sar_atc.x",
+                "ExchangeType": "direct",
+                "RoutingKey": "replace-me.sar_atc",
+                "Arguments": {},
+                "BindingArguments": {}
+              }
+            }
           }
         }
       }
