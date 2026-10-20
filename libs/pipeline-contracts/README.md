@@ -2,13 +2,13 @@
 
 Pure validation and payload construction for the gateway and future service consumers. This library performs no rule matching, spatial indexing, geometry intersections, network calls, or message delivery.
 
-The unified gateway uses **FindAir** (`FindAirPipelineContract`) and **DeepWisdom** (`DeepWisdomPipelineContract`). Both accept arbitrary ExtraData objects and preserve every key and JSON value under `extraData` in the outgoing body. DeepWisdom's named settings are optional; supplied values also populate the corresponding existing top-level fields. There is no required ExtraData field schema for these contracts. Empty/omitted objects add no extra property.
+The unified gateway uses **FindAir** (`FindAirPipelineContract`), **DeepWisdom** (`DeepWisdomPipelineContract`) and **SarAtc** (`SarAtcPipelineContract`). All three accept arbitrary ExtraData objects and preserve every key and JSON value under `extraData` in the outgoing body. DeepWisdom's named settings are optional; supplied values also populate the corresponding existing top-level fields. There is no required ExtraData field schema for these contracts. Empty/omitted objects add no extra property.
 
-The registered contract IDs are `FindAir` and `DeepWisdom`, with exact casing. Custom catalogs must use these names.
+The registered contract IDs are `FindAir`, `DeepWisdom` and `SarAtc`, with exact casing. Custom catalogs must use these names.
 
 Projection records type errors for pipeline-specific metadata in `PipelineDispatchContext.InputFieldErrors`. `ValidateContext(context, runParams)` checks only fields consumed by that run: FindAir checks its image metadata, while DeepWisdom checks relationship fields when `run_every_other_image` is true. The common input parser validates the fields required for rule matching.
 
-`PipelineContractRegistry` resolves explicitly registered contract IDs using ordinal comparison. Unknown IDs fail resolution. The gateway registers `FindAirPipelineContract` as `FindAir` and `DeepWisdomPipelineContract` as `DeepWisdom`. Pipeline contracts use unversioned IDs.
+`PipelineContractRegistry` resolves explicitly registered contract IDs using ordinal comparison. Unknown IDs fail resolution. The gateway registers `FindAirPipelineContract` as `FindAir`, `DeepWisdomPipelineContract` as `DeepWisdom` and `SarAtcPipelineContract` as `SarAtc`. Pipeline contracts use unversioned IDs.
 
 One FindAir run-parameter object describes one tenant dispatch:
 
@@ -76,5 +76,20 @@ In the mission request body, `customer` supplies `requestingUnit` and `displayNa
 `tasksData` contains one task with `imageId`. When `run_every_other_image` is true, its nullable `legId`, `prevOverlayId` and `nextOverlayId` come from the overlay. When `should_check_in_vip` is true, `photoTime` is assigned. Unassigned nullable properties are serialized as null. These flags describe downstream behavior; the builder does not perform alternating-image filtering or VIP checks.
 
 The factory stores the photographed legacy `DateTime.Parse(..., InvariantCulture)` result as `OverlayPhotoTime`, independently of the UTC `PhotoTime` used by FindAir. DeepWisdom prefers that clock value and otherwise uses `PhotoTime.DateTime` without another UTC conversion. Offset-bearing input follows the process timezone when parsed; matching the old deployment's timezone preserves its calendar-day behavior. A null Hebrew rule name retains the leading-space mission name rather than inventing a fallback.
+
+## SarAtc
+
+One SarAtc run-parameter object names the model and the frame metadata to send:
+
+```json
+{
+  "modelName": "replace-me-model",
+  "frameMetadata": { }
+}
+```
+
+`modelName` is a required nonempty string, with no fixed list of models. `frameMetadata` is a required JSON object, `{}` included; the contract does not look inside it and writes it to the body as stored, without escaping non-ASCII text. Unknown and duplicate run parameters are rejected. Rules may omit a location; when they set one it only filters images, because the body has no ROI.
+
+The body is `{"imageId", "modelName", "frameMetadata", "requestId"}`. `requestId` is the dispatch ID (the context's `TaskId`), so a retried dispatch sends the same value and it matches the outgoing message ID. The only header is `sar-atc-contract-version`, an **integer** `1` in `RabbitMqAttributes`. Context validation needs only the image and dispatch IDs.
 
 Roberto, warmup, HTTP status handling, retries, rule snapshots and dispatch are outside this library. The contract prepares bytes only.

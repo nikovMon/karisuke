@@ -46,7 +46,7 @@ public sealed class UnifiedGatewayHostTests
         using var client = factory.CreateClient();
 
         var catalog = factory.Services.GetRequiredService<IPipelineCatalog>();
-        Assert.Equal(2, catalog.GetAll().Count);
+        Assert.Equal(3, catalog.GetAll().Count);
         var pipeline = catalog.GetRequired("FindAir");
         Assert.Equal("FindAir", pipeline.PipelineId);
         Assert.Equal("FindAir", pipeline.ContractId);
