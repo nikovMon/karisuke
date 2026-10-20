@@ -42,7 +42,8 @@ internal static class RuleTestData
         double bestResolution = 0.7,
         string gridType = "grid-a",
         DateTimeOffset? photoTime = null,
-        string footprintWkt = "POLYGON ((1 1, 3 1, 3 3, 1 3, 1 1))") =>
+        string footprintWkt = "POLYGON ((1 1, 3 1, 3 3, 1 3, 1 1))",
+        string? modeSar = null) =>
         new(
             "image-1",
             sensorName,
@@ -56,5 +57,6 @@ internal static class RuleTestData
             photoTime ?? Now.AddDays(-1),
             GeometryUtilities.ReadWkt(footprintWkt),
             gridType,
-            "https://example.invalid/grid");
+            "https://example.invalid/grid",
+            modeSar);
 }

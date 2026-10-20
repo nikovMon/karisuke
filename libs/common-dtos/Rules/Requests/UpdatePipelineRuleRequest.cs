@@ -181,6 +181,17 @@ public sealed class RuleMatchConditionsPatch
         }
     }
 
+    [JsonPropertyName(PipelineRuleFields.ModeSar)]
+    public List<string>? ModeSar
+    {
+        get;
+        set
+        {
+            field = value;
+            _providedFields.Add(PipelineRuleFields.ModeSar);
+        }
+    }
+
     internal void ApplyTo(RuleMatchConditions match)
     {
         if (_providedFields.Contains(PipelineRuleFields.Sensors))
@@ -201,6 +212,11 @@ public sealed class RuleMatchConditionsPatch
         if (_providedFields.Contains(PipelineRuleFields.MaxPhotoAgeDays))
         {
             match.MaxPhotoAgeDays = MaxPhotoAgeDays;
+        }
+
+        if (_providedFields.Contains(PipelineRuleFields.ModeSar))
+        {
+            match.ModeSar = ModeSar;
         }
     }
 }

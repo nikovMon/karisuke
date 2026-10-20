@@ -31,6 +31,10 @@ public sealed class RuleMatcher(TimeProvider timeProvider)
             {
                 misses.Add(new RuleMiss(rule.Id, RuleMissReason.Resolution));
             }
+            else if (!MatchesModeSar(input.ModeSar, rule))
+            {
+                misses.Add(new RuleMiss(rule.Id, RuleMissReason.ModeSar));
+            }
             else if (Intersect(input.Geometry, rule.Geometry) is { } intersection)
             {
                 matches.Add(new RuleMatchResult(rule, intersection));
@@ -69,6 +73,10 @@ public sealed class RuleMatcher(TimeProvider timeProvider)
 
     private static bool MatchesResolution(double bestResolution, ActiveRule rule) =>
         bestResolution >= rule.MinResolution && bestResolution <= rule.MaxResolution;
+
+    // An image without a mode cannot match a rule that lists modes.
+    private static bool MatchesModeSar(string? modeSar, ActiveRule rule) =>
+        rule.ModeSar is null || (modeSar is not null && rule.ModeSar.Contains(modeSar));
 
     // A rule without a location covers the whole image. Intersects is a cheap test; the
     // intersection itself is computed only when it can be non-empty.

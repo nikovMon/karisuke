@@ -70,6 +70,28 @@ public sealed class GatewayInputMessageParserTests
         Assert.Equal("grid-a", malformed.GridType);
     }
 
+    [Fact]
+    public void ModeSarIsReadAsSent()
+    {
+        var input = GatewayInputMessageParser.Parse(Body(json => json["modeSAR"] = " Stripmap"));
+
+        Assert.Equal(" Stripmap", input.ModeSar);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(123)]
+    public void UnusableModeSarIsTreatedAsAbsent(object? value)
+    {
+        var input = GatewayInputMessageParser.Parse(Body(json => json["modeSAR"] = JsonValue.Create(value)));
+        var missing = GatewayInputMessageParser.Parse(Body());
+
+        Assert.Null(input.ModeSar);
+        Assert.Null(missing.ModeSar);
+    }
+
     [Theory]
     [InlineData("id")]
     [InlineData("sensorName")]

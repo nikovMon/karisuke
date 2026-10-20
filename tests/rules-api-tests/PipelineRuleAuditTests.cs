@@ -72,6 +72,16 @@ public sealed class PipelineRuleAuditTests : IDisposable
     }
 
     [Fact]
+    public async Task ModeSarChangeIsAuditedAsAMatchField()
+    {
+        var id = await CreateAsync();
+
+        await _client.PatchAsJsonAsync($"/pipelines/FindAir/rules/{id}", new { match = new { modeSAR = new[] { "A" } } });
+
+        Assert.Equal(["match.modeSAR"], Records()[1].ChangedFields);
+    }
+
+    [Fact]
     public async Task ChangedFieldsAndChangeTypeComeFromWhatActuallyChanged()
     {
         var id = await CreateAsync();

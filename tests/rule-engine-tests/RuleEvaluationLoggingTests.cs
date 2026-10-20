@@ -14,8 +14,10 @@ public sealed class RuleEvaluationLoggingTests
     {
         var otherSensor = Rule("other-sensor");
         otherSensor.Match!.Sensors = [new SensorConfig { Name = "other-camera", RegistrationQualities = [RegistrationQuality.Accurate] }];
+        var otherMode = Rule("other-mode");
+        otherMode.Match!.ModeSar = ["B"];
         var evaluation = new RuleMatcher(new FakeTimeProvider(Now))
-            .Match(Image(), [ActiveRule(Rule("hit")), ActiveRule(otherSensor)]);
+            .Match(Image(modeSar: "A"), [ActiveRule(Rule("hit")), ActiveRule(otherSensor), ActiveRule(otherMode)]);
         var logger = new ScopeRecordingLogger();
 
         logger.LogRulesEvaluated(evaluation);
@@ -27,6 +29,8 @@ public sealed class RuleEvaluationLoggingTests
         Assert.Equal(["hit"], Assert.IsType<string[]>(log.Fields[TelemetryAttributeNames.RulesMatchedIds]));
         Assert.Equal(["other-sensor"], Assert.IsType<string[]>(log.Fields[TelemetryAttributeNames.RulesMissedSensorIds]));
         Assert.Equal(1, log.Fields[TelemetryAttributeNames.RulesMissedSensorCount]);
+        Assert.Equal(["other-mode"], Assert.IsType<string[]>(log.Fields[TelemetryAttributeNames.RulesMissedModeSarIds]));
+        Assert.Equal(1, log.Fields[TelemetryAttributeNames.RulesMissedModeSarCount]);
         Assert.Equal(0, log.Fields[TelemetryAttributeNames.RulesMissedGeometryCount]);
     }
 
