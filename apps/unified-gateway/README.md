@@ -1,12 +1,12 @@
 # Unified gateway
 
-Consumes image updates, matches independently refreshed pipeline rules, prepares one unit per matched run, and dispatches through RabbitMQ or HTTP. The supported pipeline contracts are **FindAir** and **DeepWisdom**.
+Consumes image updates, matches independently refreshed pipeline rules, prepares one unit per matched run, and dispatches through RabbitMQ or HTTP. The supported pipeline contracts are **FindAir**, **DeepWisdom** and **SarAtc**.
 
 ## Catalog
 
-The gateway defaults to the shared [`pipelinecatalog.json`](../../libs/pipeline-catalog/configuration/pipelinecatalog.json), copied beside the application. Pipeline keys and contract IDs are `FindAir` and `DeepWisdom`, with exact casing. `PipelineCatalogFile` selects a complete replacement catalog; relative paths resolve against the host content root. Environment variables and command-line arguments override catalog values using the same pipeline spelling.
+The gateway defaults to the shared [`pipelinecatalog.json`](../../libs/pipeline-catalog/configuration/pipelinecatalog.json), copied beside the application. Pipeline keys and contract IDs are `FindAir`, `DeepWisdom` and `SarAtc`, with exact casing. `PipelineCatalogFile` selects a complete replacement catalog; relative paths resolve against the host content root. Environment variables and command-line arguments override catalog values using the same pipeline spelling.
 
-The gateway and Rules API use the same default catalog and contract names. Custom catalogs must use `FindAir` and `DeepWisdom` as contract IDs. Stored rule indexes and existing downstream queues retain their configured names.
+The gateway and Rules API use the same default catalog and contract names. Custom catalogs must use `FindAir`, `DeepWisdom` or `SarAtc` as contract IDs. Stored rule indexes and existing downstream queues retain their configured names.
 
 Each enabled pipeline has its own `RulesIndex`, `ExtraData`, and exactly one transport. Rule indexes are explicit deployment settings; no index is created or migrated. Startup loads every enabled pipeline before consuming. Refresh failures retain that pipeline's previous rules. A nonempty load where every rule is rejected also retains the last usable snapshot.
 

@@ -7,6 +7,7 @@ public sealed class CanonicalPipelineContractTests
     [Theory]
     [InlineData("FindAir")]
     [InlineData("DeepWisdom")]
+    [InlineData("SarAtc")]
     public void ExtraDataAcceptsArbitraryNamesAndPreservesEveryJsonType(string contractId)
     {
         var contract = Contract(contractId);
@@ -38,6 +39,7 @@ public sealed class CanonicalPipelineContractTests
     [Theory]
     [InlineData("FindAir")]
     [InlineData("DeepWisdom")]
+    [InlineData("SarAtc")]
     public void MissingAndEmptyExtraDataNeedNoNamedSettingsAndAreOmitted(string contractId)
     {
         var contract = Contract(contractId);
@@ -82,6 +84,7 @@ public sealed class CanonicalPipelineContractTests
     [InlineData("FindAir", "[]")]
     [InlineData("DeepWisdom", "null")]
     [InlineData("DeepWisdom", "42")]
+    [InlineData("SarAtc", "[]")]
     public void ExtraDataContainerMustStillBeAnObject(string contractId, string json)
     {
         var contract = Contract(contractId);
@@ -101,18 +104,26 @@ public sealed class CanonicalPipelineContractTests
         Assert.False(registry.TryGet("algo", out _));
     }
 
-    private static IPipelineContract Contract(string id) => id == "FindAir"
-        ? new FindAirPipelineContract()
-        : new DeepWisdomPipelineContract();
+    private static IPipelineContract Contract(string id) => id switch
+    {
+        "FindAir" => new FindAirPipelineContract(),
+        "SarAtc" => new SarAtcPipelineContract(),
+        _ => new DeepWisdomPipelineContract()
+    };
 
-    private static JsonElement RunParams(string id) => Json(id == "FindAir" ? """
-        {"tenantId":"tenant","algorithmNames":["FindAir"],
-         "tilingConfigs":[{"tileSizeWidth":512,"tileSizeHeight":512,"tileOverlapWidth":0,"tileOverlapHeight":0}]}
-        """ : """
-        {"customer":"customer","profile_name":"profile","hebrew_rule_name":"משימה",
-         "algorithm_name":"custom","priority":1,"username":null,
-         "run_every_other_image":false,"should_check_in_vip":false}
-        """);
+    private static JsonElement RunParams(string id) => Json(id switch
+    {
+        "FindAir" => """
+            {"tenantId":"tenant","algorithmNames":["FindAir"],
+             "tilingConfigs":[{"tileSizeWidth":512,"tileSizeHeight":512,"tileOverlapWidth":0,"tileOverlapHeight":0}]}
+            """,
+        "SarAtc" => """{"modelName":"model","frameMetadata":{}}""",
+        _ => """
+            {"customer":"customer","profile_name":"profile","hebrew_rule_name":"משימה",
+             "algorithm_name":"custom","priority":1,"username":null,
+             "run_every_other_image":false,"should_check_in_vip":false}
+            """
+    });
 
     private static PipelineDispatchContext Context() => new(
         "task", "rule", "image", Json("""{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,0]]]}"""),

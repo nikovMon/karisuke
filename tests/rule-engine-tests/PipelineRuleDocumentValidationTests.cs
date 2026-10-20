@@ -93,6 +93,39 @@ public sealed class PipelineRuleDocumentValidationTests
     }
 
     [Fact]
+    public void ModeSarIsAConditionOnItsOwn()
+    {
+        var rule = Rule();
+        rule.Match = new RuleMatchConditions { ModeSar = ["A", "B"] };
+
+        Assert.Empty(Errors(rule));
+    }
+
+    [Theory]
+    [InlineData(new string[0], "match.modeSAR cannot be empty; omit it to accept any mode")]
+    [InlineData(new[] { "A", " " }, "match.modeSAR contains empty or whitespace values")]
+    [InlineData(new[] { "A", "A" }, "match.modeSAR contains duplicate values")]
+    public void InvalidModeSarIsRejected(string[] modes, string error)
+    {
+        var rule = Rule();
+        rule.Match!.ModeSar = [.. modes];
+
+        Assert.Contains(error, Errors(rule));
+    }
+
+    [Fact]
+    public void ModeSarKeepsItsSourceSpellingInJson()
+    {
+        var rule = Rule();
+        rule.Match!.ModeSar = ["A"];
+
+        var json = JsonSerializer.Serialize(rule);
+
+        Assert.Contains("\"modeSAR\":[\"A\"]", json, StringComparison.Ordinal);
+        Assert.Equal(["A"], JsonSerializer.Deserialize<PipelineRuleDocument>(json)!.Match!.ModeSar);
+    }
+
+    [Fact]
     public void DocumentRoundTripsThroughJson()
     {
         var json = JsonSerializer.Serialize(Rule());

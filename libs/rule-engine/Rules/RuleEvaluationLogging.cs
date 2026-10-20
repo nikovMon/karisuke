@@ -22,6 +22,8 @@ public static class RuleEvaluationLogging
                    new(TelemetryAttributeNames.RulesMissedSensorCount, MissedCount(RuleMissReason.Sensor)),
                    new(TelemetryAttributeNames.RulesMissedResolutionIds, MissedIds(RuleMissReason.Resolution)),
                    new(TelemetryAttributeNames.RulesMissedResolutionCount, MissedCount(RuleMissReason.Resolution)),
+                   new(TelemetryAttributeNames.RulesMissedModeSarIds, MissedIds(RuleMissReason.ModeSar)),
+                   new(TelemetryAttributeNames.RulesMissedModeSarCount, MissedCount(RuleMissReason.ModeSar)),
                    new(TelemetryAttributeNames.RulesMissedGeometryCount, MissedCount(RuleMissReason.Geometry))
                }))
         {

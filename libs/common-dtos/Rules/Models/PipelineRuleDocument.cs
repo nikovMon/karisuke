@@ -133,9 +133,15 @@ public sealed class RuleMatchConditions
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? MaxPhotoAgeDays { get; set; }
 
+    /// <summary>Allowed SAR modes, matched exactly. Absent means any mode, including images without one.</summary>
+    [JsonPropertyName("modeSAR")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? ModeSar { get; set; }
+
     [JsonIgnore]
     public bool HasConditions =>
-        Sensors is not null || Resolution is not null || LocationWkt is not null || MaxPhotoAgeDays is not null;
+        Sensors is not null || Resolution is not null || LocationWkt is not null || MaxPhotoAgeDays is not null ||
+        ModeSar is not null;
 
     internal IEnumerable<string> Validate()
     {
@@ -169,6 +175,23 @@ public sealed class RuleMatchConditions
         if (MaxPhotoAgeDays is <= 0)
         {
             yield return "match.maxPhotoAgeDays must be greater than 0";
+        }
+
+        if (ModeSar is { Count: 0 })
+        {
+            yield return "match.modeSAR cannot be empty; omit it to accept any mode";
+        }
+        else if (ModeSar is not null)
+        {
+            if (ModeSar.Any(string.IsNullOrWhiteSpace))
+            {
+                yield return "match.modeSAR contains empty or whitespace values";
+            }
+
+            if (ModeSar.Distinct(StringComparer.Ordinal).Count() != ModeSar.Count)
+            {
+                yield return "match.modeSAR contains duplicate values";
+            }
         }
     }
 }

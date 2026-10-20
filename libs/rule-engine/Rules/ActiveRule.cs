@@ -6,7 +6,8 @@ namespace ImagingPipeline.RuleEngine.Rules;
 /// <summary>
 /// A rule prepared for matching: geometry parsed and sensor qualities turned into bitmasks once,
 /// when the snapshot is built, so matching a message allocates nothing per rule. Absent conditions
-/// are stored as "no constraint": no sensors, an open resolution range, no photo age, no geometry.
+/// are stored as "no constraint": no sensors, an open resolution range, no photo age, no geometry,
+/// no SAR modes.
 /// </summary>
 public sealed record ActiveRule(
     string Id,
@@ -15,6 +16,7 @@ public sealed record ActiveRule(
     double MaxResolution,
     TimeSpan? MaxPhotoAge,
     Geometry? Geometry,
+    IReadOnlySet<string>? ModeSar,
     IReadOnlyList<JsonElement> RunParams);
 
 /// <summary>

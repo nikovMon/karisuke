@@ -92,6 +92,25 @@ public sealed class PipelineRuleWriteApiTests
     }
 
     [Fact]
+    public async Task ModeSarIsPatchedOnItsOwnAndValidated()
+    {
+        using var factory = new RulesApiFactory(_store);
+        using var client = factory.CreateClient();
+        var id = await CreateAsync(client, "first");
+
+        var added = await client.PatchAsJsonAsync($"/pipelines/FindAir/rules/{id}", new { match = new { modeSAR = new[] { "A", "B" } } });
+        var empty = await client.PatchAsJsonAsync($"/pipelines/FindAir/rules/{id}", new { match = new { modeSAR = Array.Empty<string>() } });
+
+        Assert.Equal(HttpStatusCode.OK, added.StatusCode);
+        var rule = await added.Content.ReadFromJsonAsync<PipelineRuleDocument>();
+        Assert.Equal(["A", "B"], rule!.Match!.ModeSar);
+        Assert.Equal(Square, rule.Match.LocationWkt);
+        Assert.Equal(HttpStatusCode.BadRequest, empty.StatusCode);
+        Assert.Contains("match.modeSAR cannot be empty", await empty.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal("A", (string?)_store.Stored(AsdIndex, id)!["match"]!["modeSAR"]![0]);
+    }
+
+    [Fact]
     public async Task UpdateRemovingTheLocationAlsoRemovesTheDerivedGeoJson()
     {
         using var factory = new RulesApiFactory(_store);

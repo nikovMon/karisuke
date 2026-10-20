@@ -146,6 +146,8 @@ public static class TelemetryAttributeNames
     public const string RulesMissedSensorCount = "unified_gateway.rules.missed.sensor.count";
     public const string RulesMissedResolutionIds = "unified_gateway.rules.missed.resolution.ids";
     public const string RulesMissedResolutionCount = "unified_gateway.rules.missed.resolution.count";
+    public const string RulesMissedModeSarIds = "unified_gateway.rules.missed.mode_sar.ids";
+    public const string RulesMissedModeSarCount = "unified_gateway.rules.missed.mode_sar.count";
     public const string RulesMissedGeometryCount = "unified_gateway.rules.missed.geometry.count";
 
     // Loading one pipeline's rules.

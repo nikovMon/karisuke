@@ -31,6 +31,10 @@ public sealed class RuleMatcher(TimeProvider timeProvider)
             {
                 misses.Add(new RuleMiss(rule.Id, RuleMissReason.Resolution));
             }
+            else if (!IsAllowed(input.ModeSar, rule.ModeSar))
+            {
+                misses.Add(new RuleMiss(rule.Id, RuleMissReason.ModeSar));
+            }
             else if (Intersect(input.Geometry, rule.Geometry) is { } intersection)
             {
                 matches.Add(new RuleMatchResult(rule, intersection));
@@ -62,13 +66,16 @@ public sealed class RuleMatcher(TimeProvider timeProvider)
 
         var qualityAllowed = criteria.RegistrationQualityMask == 0 ||
             (criteria.RegistrationQualityMask & registrationQualityMask) != 0;
-        var gridTypeAllowed = criteria.AllowedGridTypes is not { Count: > 0 } ||
-            criteria.AllowedGridTypes.Contains(gridType);
-        return qualityAllowed && gridTypeAllowed;
+        return qualityAllowed && IsAllowed(gridType, criteria.AllowedGridTypes);
     }
 
     private static bool MatchesResolution(double bestResolution, ActiveRule rule) =>
         bestResolution >= rule.MinResolution && bestResolution <= rule.MaxResolution;
+
+    // A condition listing allowed values: no list allows anything, and a missing value never
+    // matches a list.
+    private static bool IsAllowed(string? value, IReadOnlySet<string>? allowed) =>
+        allowed is null || (value is not null && allowed.Contains(value));
 
     // A rule without a location covers the whole image. Intersects is a cheap test; the
     // intersection itself is computed only when it can be non-empty.

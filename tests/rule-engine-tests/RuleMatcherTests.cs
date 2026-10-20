@@ -77,6 +77,33 @@ public sealed class RuleMatcherTests
         Assert.Single(_matcher.Match(oldPhoto, [ActiveRule()]).Matches);
     }
 
+    [Theory]
+    [InlineData("A", true)]
+    [InlineData("B", true)]
+    [InlineData("C", false)]
+    [InlineData("a", false)]
+    [InlineData(null, false)]
+    public void ModeSarMustBeOneOfTheRuleModes(string? imageMode, bool matches)
+    {
+        var rule = Rule();
+        rule.Match!.ModeSar = ["A", "B"];
+
+        var evaluation = _matcher.Match(Image(modeSar: imageMode), [ActiveRule(rule)]);
+
+        Assert.Equal(matches, evaluation.Matches.Count == 1);
+        if (!matches)
+        {
+            Assert.Equal(new RuleMiss("rule-1", RuleMissReason.ModeSar), Assert.Single(evaluation.Misses));
+        }
+    }
+
+    [Fact]
+    public void RuleWithoutModeSarMatchesImagesWithOrWithoutOne()
+    {
+        Assert.Single(_matcher.Match(Image(modeSar: "A"), [ActiveRule()]).Matches);
+        Assert.Single(_matcher.Match(Image(), [ActiveRule()]).Matches);
+    }
+
     [Fact]
     public void RuleWithoutLocationCoversTheWholeImage()
     {

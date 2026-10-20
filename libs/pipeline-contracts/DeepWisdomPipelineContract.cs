@@ -3,6 +3,7 @@ using System.Collections.Frozen;
 using System.Globalization;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using static ImagingPipeline.PipelineContracts.ContractValidation;
 
 namespace ImagingPipeline.PipelineContracts;
 
@@ -139,15 +140,6 @@ public sealed class DeepWisdomPipelineContract : IPipelineContract
             ReadBoolean(value, "should_check_in_vip", errors));
     }
 
-    private static string ReadRequiredString(JsonElement value, string name, List<ContractValidationError> errors)
-    {
-        if (value.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.String &&
-            !string.IsNullOrWhiteSpace(property.GetString()))
-            return property.GetString()!;
-        errors.Add(new(name, "Must be a nonempty string."));
-        return string.Empty;
-    }
-
     private static string? ReadNullableString(JsonElement value, string name, List<ContractValidationError> errors)
     {
         if (!value.TryGetProperty(name, out var property) || property.ValueKind == JsonValueKind.Null)
@@ -172,24 +164,6 @@ public sealed class DeepWisdomPipelineContract : IPipelineContract
             return result;
         errors.Add(new(name, "Must be a 32-bit integer."));
         return 0;
-    }
-
-    private static void ValidateProperties(JsonElement value, FrozenSet<string> known, List<ContractValidationError> errors)
-    {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var property in value.EnumerateObject())
-        {
-            if (!known.Contains(property.Name))
-                errors.Add(new(property.Name, "Unknown parameter."));
-            else if (!seen.Add(property.Name))
-                errors.Add(new(property.Name, "Duplicate parameters are not allowed."));
-        }
-    }
-
-    private static void ThrowIfInvalid(List<ContractValidationError> errors, string parameterName)
-    {
-        if (errors.Count != 0)
-            throw new ArgumentException(string.Join("; ", errors.Select(error => $"{error.Field}: {error.Message}")), parameterName);
     }
 
     private sealed record DeepWisdomRunParameters(string Customer, string? ProfileName, string? HebrewRuleName,

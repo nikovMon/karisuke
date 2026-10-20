@@ -40,6 +40,7 @@ public static class GatewayInputMessageParser
         Require(input.GridType, "Input grid type is required and must be a non-empty string.", "gateway.missing_grid_type");
 
         var area = OptionalString(input.AreaOfInterest);
+        var modeSar = OptionalString(input.ModeSar);
 
         return new GatewayInputMessage(
             input.Id,
@@ -54,7 +55,8 @@ public static class GatewayInputMessageParser
             input.PhotoTime.ToUniversalTime(),
             geometry,
             input.GridType,
-            OptionalString(input.GridUri) ?? string.Empty);
+            OptionalString(input.GridUri) ?? string.Empty,
+            string.IsNullOrWhiteSpace(modeSar) ? null : modeSar);
     }
 
     private static GatewayMatchInputDto Deserialize(ReadOnlyMemory<byte> body)
@@ -151,4 +153,7 @@ internal sealed class GatewayMatchInputDto
 
     [JsonPropertyName("gridURI")]
     public JsonElement GridUri { get; init; }
+
+    [JsonPropertyName("modeSAR")]
+    public JsonElement ModeSar { get; init; }
 }
