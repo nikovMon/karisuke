@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Collections.Frozen;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using static ImagingPipeline.PipelineContracts.ContractValidation;
 
 namespace ImagingPipeline.PipelineContracts;
 
@@ -79,35 +80,12 @@ public sealed class SarAtcPipelineContract : IPipelineContract
             return new(string.Empty, default);
         }
 
-        ValidateProperties(value, errors);
-        var modelName = string.Empty;
-        if (value.TryGetProperty("modelName", out var model) && model.ValueKind == JsonValueKind.String &&
-            !string.IsNullOrWhiteSpace(model.GetString()))
-            modelName = model.GetString()!;
-        else
-            errors.Add(new("modelName", "Must be a nonempty string."));
+        ValidateProperties(value, RunParamFields, errors);
+        var modelName = ReadRequiredString(value, "modelName", errors);
 
         if (!value.TryGetProperty("frameMetadata", out var frameMetadata) || frameMetadata.ValueKind != JsonValueKind.Object)
             errors.Add(new("frameMetadata", "Must be a JSON object."));
         return new(modelName, frameMetadata);
-    }
-
-    private static void ValidateProperties(JsonElement value, List<ContractValidationError> errors)
-    {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var property in value.EnumerateObject())
-        {
-            if (!RunParamFields.Contains(property.Name))
-                errors.Add(new(property.Name, "Unknown parameter."));
-            else if (!seen.Add(property.Name))
-                errors.Add(new(property.Name, "Duplicate parameters are not allowed."));
-        }
-    }
-
-    private static void ThrowIfInvalid(List<ContractValidationError> errors, string parameterName)
-    {
-        if (errors.Count != 0)
-            throw new ArgumentException(string.Join("; ", errors.Select(error => $"{error.Field}: {error.Message}")), parameterName);
     }
 
     private sealed record SarAtcRunParameters(string ModelName, JsonElement FrameMetadata);

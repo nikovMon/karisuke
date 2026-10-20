@@ -3,6 +3,7 @@ using System.Collections.Frozen;
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Messaging;
 using ImagingPipeline.Common.Dtos.Rules.Models;
+using static ImagingPipeline.PipelineContracts.ContractValidation;
 
 namespace ImagingPipeline.PipelineContracts;
 
@@ -69,19 +70,8 @@ public sealed class FindAirPipelineContract : IPipelineContract
         }
         var errors = new List<ContractValidationError>();
         var parameters = ParseRunParams(runParams, errors);
-        if (errors.Count != 0)
-        {
-            throw new ArgumentException(
-                string.Join("; ", errors.Select(error => $"{error.Field}: {error.Message}")),
-                nameof(runParams));
-        }
-
-        var contextErrors = ValidateContext(context, runParams);
-        if (contextErrors.Count != 0)
-        {
-            throw new ArgumentException(
-                string.Join("; ", contextErrors.Select(error => $"{error.Field}: {error.Message}")), nameof(context));
-        }
+        ThrowIfInvalid(errors, nameof(runParams));
+        ThrowIfInvalid(ValidateContext(context, runParams), nameof(context));
 
         var buffer = new ArrayBufferWriter<byte>();
         using var writer = new Utf8JsonWriter(buffer);
@@ -137,17 +127,8 @@ public sealed class FindAirPipelineContract : IPipelineContract
             return new(string.Empty, [], []);
         }
 
-        ValidateProperties(runParams, RunParamFields, string.Empty, errors);
-        var tenantId = string.Empty;
-        if (!runParams.TryGetProperty("tenantId", out var tenant) ||
-            tenant.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(tenant.GetString()))
-        {
-            errors.Add(new("tenantId", "Must be a nonempty string."));
-        }
-        else
-        {
-            tenantId = tenant.GetString()!;
-        }
+        ValidateProperties(runParams, RunParamFields, errors);
+        var tenantId = ReadRequiredString(runParams, "tenantId", errors);
 
         var algorithms = ReadAlgorithms(runParams, errors);
         var tilingConfigs = ReadTilingConfigs(runParams, errors);
@@ -209,7 +190,7 @@ public sealed class FindAirPipelineContract : IPipelineContract
             }
 
             var errorsBefore = errors.Count;
-            ValidateProperties(value, TilingFields, field + ".", errors);
+            ValidateProperties(value, TilingFields, errors, field + ".");
             var tiling = new TilingConfig
             {
                 TileSizeWidth = ReadInteger(value, "tileSizeWidth", field, errors),
@@ -241,26 +222,6 @@ public sealed class FindAirPipelineContract : IPipelineContract
 
         errors.Add(new($"{field}.{propertyName}", "Must be a 32-bit integer."));
         return 0;
-    }
-
-    private static void ValidateProperties(
-        JsonElement element,
-        FrozenSet<string> allowed,
-        string prefix,
-        List<ContractValidationError> errors)
-    {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var property in element.EnumerateObject())
-        {
-            if (!allowed.Contains(property.Name))
-            {
-                errors.Add(new(prefix + property.Name, "Unknown parameter."));
-            }
-            else if (!seen.Add(property.Name))
-            {
-                errors.Add(new(prefix + property.Name, "Duplicate parameters are not allowed."));
-            }
-        }
     }
 
     private sealed record FindAirRunParameters(
