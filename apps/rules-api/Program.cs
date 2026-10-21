@@ -5,6 +5,7 @@ using ImagingPipeline.ElasticsearchClient;
 using ImagingPipeline.Observability;
 using ImagingPipeline.PipelineCatalog;
 using ImagingPipeline.PipelineContracts;
+using ImagingPipeline.Rules.Api.AutoRuns;
 using ImagingPipeline.Rules.Api.Configuration;
 using ImagingPipeline.Rules.Api.Health;
 using ImagingPipeline.Rules.Api.Observability;
@@ -101,6 +102,7 @@ public sealed class Program
         builder.Services.AddPipelineContracts();
         builder.Services.AddPipelineCatalog(builder.Configuration);
         builder.Services.AddSingleton<IElasticsearchHealthProbe, ElasticsearchHealthProbe>();
+        builder.Services.AddAutoRuns(builder.Configuration);
 
         var app = builder.Build();
 
@@ -109,6 +111,12 @@ public sealed class Program
             exceptionApp.Run(async context =>
             {
                 var exception = context.Features.Get<IExceptionHandlerPathFeature>()?.Error;
+                if (exception is AutoRunRequestException autoRunException)
+                {
+                    context.Response.StatusCode = autoRunException.StatusCode;
+                    await context.Response.WriteAsJsonAsync(new { error = autoRunException.Message });
+                    return;
+                }
                 if (exception is RulePersistenceException persistenceException)
                 {
                     Activity.Current.SetTelemetryError(
@@ -141,7 +149,10 @@ public sealed class Program
 
         app.UseSwagger();
         app.UseSwaggerUI();
+        app.UseStaticFiles();
         app.MapControllers();
+        app.MapGet("/ui", () => Results.Redirect("/ui/auto-run"));
+        app.MapFallbackToFile("/ui/{*path:nonfile}", "ui/index.html");
         app.MapGet(
             "/health",
             async (IElasticsearchHealthProbe healthProbe, CancellationToken cancellationToken) =>

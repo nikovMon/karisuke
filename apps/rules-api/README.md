@@ -1,8 +1,8 @@
 # Rules API
 
-`rules-api` manages rule configuration documents for the imaging pipeline. It exposes REST routes under `/rules`, stores documents in Elasticsearch, and returns JSON.
+`rules-api` manages rule configuration documents for the imaging pipeline. It exposes REST routes under `/rules` and `/pipelines`, stores documents in Elasticsearch, and returns JSON. Historical auto-run routes under `/auto-runs` prepare overlays from Elastic Provider and publish selected work to the Unified Gateway.
 
-Swagger is available at `/swagger` when the app is running. Health is available at `/health`.
+Swagger is available at `/swagger` when the app is running. Health is available at `/health`. The historical processing console is available at `/ui/auto-run`; `/ui` redirects there.
 
 ## Runtime
 
@@ -42,6 +42,319 @@ Docker Compose exposes the service on host port `8080`.
 ### Pipeline catalog
 
 The API loads the same pipeline catalog as the unified gateway: `pipelinecatalog.json` next to the app, or the file named by the `PipelineCatalogFile` setting. An invalid catalog stops startup. The API reads pipeline IDs and contracts from it, never transport settings. The catalog still has to validate in full, so RabbitMQ credentials only need placeholder values here.
+
+## Historical auto-run
+
+Auto-run has two explicit stages: prepare a preview, then start publication. Preparation fetches historical overlays through Elastic Provider, evaluates selected saved pipeline rules, checks each pipeline's input contract, and freezes the selected payloads, rule definitions, and target assignments. Starting uses that frozen preview. Editing or deleting a saved rule after preparation does not change the run.
+
+The feature is disabled by default. Jobs and previews are held in memory on **one Rules API instance**. Only one job may prepare or publish at a time; unused ready previews can coexist within the retention and payload limits. Restarting the instance loses all jobs and previews. There is no scheduled execution, restart recovery, or coordination between API replicas.
+
+The console uses the same API routes, supports all three source modes, browses saved rules, shows per-rule quotas and preview shortfalls, and polls run progress. Run links use `/ui/auto-run/runs/{id}`. Date inputs let the operator select the browser timezone or UTC and submit explicit UTC timestamps. The UI and API use the deployment's existing access boundary; this feature adds no login, roles, or per-user job isolation.
+
+### Workflow and routes
+
+| Method and route | Behavior |
+| --- | --- |
+| `GET /auto-runs/options` | Feature status, publication defaults, effective limits, configured provider timezone, and `singleInstance: true`. |
+| `POST /auto-runs/preview` | Accepts a preview request and returns `202 Accepted`, a run summary, and its `Location` URL. No messages are published. |
+| `GET /auto-runs` | Lists retained run summaries, newest first. |
+| `GET /auto-runs/{id}` | Returns state, counters, target quotas, frozen rules, provider queries, warnings, and errors. |
+| `GET /auto-runs/{id}/items?from=0&size=50` | Pages through selected overlays and their assigned pipeline/rule pairs. `size` is 1–200; optional `outcome` filters by `Pending`, `InFlight`, `Confirmed`, `Failed`, or `Uncertain`. |
+| `POST /auto-runs/{id}/start` | Starts a ready, unexpired preview. Repeating start for a run that has already started returns its current state without publishing it again. |
+| `PATCH /auto-runs/{id}/publication` | Changes batch size and delay during preparation, while ready, or during publication. |
+| `POST /auto-runs/{id}/cancel` | Cancels preparation or publication, or discards a ready preview. Already queued messages are not recalled. |
+
+Poll the summary until `state` is `Ready`, inspect the selection and warnings, then call start. States are `Preparing`, `Ready`, `Publishing`, `Completed`, `CompletedWithErrors`, `Failed`, `Cancelled`, and `Expired`. Cancellation is cooperative; an active run may remain `Preparing` or `Publishing` until outstanding work settles.
+
+Invalid requests return `400`; missing or forgotten runs return `404`; a busy worker, full retained-job budget, or invalid state transition returns `409`; preparing while disabled returns `503`. A provider failure after the preview is accepted changes the job to `Failed`, so inspect the job summary rather than relying only on the initial HTTP response.
+
+### Preview requests
+
+All modes require 1–100 unique `(pipelineId, ruleId)` targets. IDs reference existing schema-version-2 rules from `/pipelines/{pipelineId}/rules`, and the pipeline must be enabled in the catalog. An explicitly selected inactive rule is allowed. Historical matching ignores only `maxPhotoAgeDays`; sensor, registration quality, grid type, resolution, geometry, and `modeSAR` conditions still apply.
+
+`Rules` derives provider queries from the selected rules. Each sensor branch retains its own quality and grid conditions. Queries are paged in round-robin order, and repeated overlay IDs are deduplicated across queries. Optional `source.filters` narrows those searches:
+
+```json
+{
+  "source": {
+    "mode": "Rules",
+    "filters": {
+      "createdTime": {
+        "from": "2026-01-01T00:00:00Z",
+        "to": "2026-01-31T23:59:59Z"
+      }
+    }
+  },
+  "targets": [
+    {
+      "pipelineId": "FindAir",
+      "ruleId": "replace-with-findair-rule-id",
+      "minOverlays": 20,
+      "maxOverlays": 100
+    },
+    {
+      "pipelineId": "DeepWisdom",
+      "ruleId": "replace-with-deepwisdom-rule-id",
+      "minOverlays": 10,
+      "maxOverlays": 50
+    }
+  ],
+  "minOverlays": 30,
+  "maxOverlays": 120,
+  "publication": { "batchSize": 10, "delayMs": 1000 }
+}
+```
+
+`Filters` searches with explicit overlay filters, then evaluates the selected rules locally. Empty or omitted filters search the provider without additional conditions; scan and candidate limits still apply. This example shows every supported filter; replace the illustrative field values with values used by your provider:
+
+```json
+{
+  "source": {
+    "mode": "Filters",
+    "filters": {
+      "sensorNames": ["SENSOR_A", "SENSOR_B"],
+      "sensorTypes": ["EO"],
+      "gridTypes": ["grid"],
+      "registrationQualities": ["Accurate"],
+      "sortieIds": ["sortie-001"],
+      "isRealtime": false,
+      "resolution": { "min": 0.3, "max": 1.2 },
+      "createdTime": {
+        "from": "2026-01-01T00:00:00+02:00",
+        "to": "2026-02-01T00:00:00+02:00"
+      },
+      "photoTime": {
+        "from": "2025-01-01T00:00:00Z",
+        "to": "2025-12-31T23:59:59Z"
+      },
+      "wkt": "POLYGON ((34.7 31.7, 34.9 31.7, 34.9 31.9, 34.7 31.9, 34.7 31.7))"
+    }
+  },
+  "targets": [
+    {
+      "pipelineId": "FindAir",
+      "ruleId": "replace-with-findair-rule-id",
+      "minOverlays": 10,
+      "maxOverlays": 100
+    }
+  ],
+  "maxOverlays": 100,
+  "publication": { "batchSize": 10, "delayMs": 1000 }
+}
+```
+
+Filter fields combine with AND. Values within a list are alternatives and are compared exactly, including case. Lists must be nonempty if supplied; registration qualities are `Accurate` and `Sensor`. Resolution bounds must be positive finite JSON numbers. Both numeric and time boundaries are inclusive, and either boundary may be omitted. API timestamps require ISO 8601 seconds with `Z` or an explicit offset; timezone-less request dates are rejected. Use JSON `true` or `false` for `isRealtime`; omitting it means either value.
+
+WKT must be a valid Polygon or MultiPolygon. The search selects intersecting overlays without clipping their footprints. The matched rule's geometry determines the ROI used for dispatch. Explicit filters are checked again against returned overlays locally; an overlay missing a value required by a filter does not match.
+
+`OverlayIds` fetches specific overlays through the provider's GET route, then evaluates rules and pipeline contracts. It accepts 1–100,000 nonempty IDs, deduplicates repeated IDs before fetching, and cannot include `filters`:
+
+```json
+{
+  "source": {
+    "mode": "OverlayIds",
+    "overlayIds": ["overlay-001", "overlay-002"]
+  },
+  "targets": [
+    {
+      "pipelineId": "FindAir",
+      "ruleId": "replace-with-findair-rule-id",
+      "minOverlays": 0,
+      "maxOverlays": 2
+    }
+  ],
+  "maxOverlays": 2,
+  "publication": { "batchSize": 1, "delayMs": 1000 }
+}
+```
+
+### Quotas, coverage, and preview limits
+
+Each target requires `maxOverlays`; its `minOverlays` defaults to zero and must not exceed the maximum. The overall minimum defaults to zero. The overall maximum defaults to the sum of target maxima, capped by `AutoRun:MaxSelectedOverlays`. A shared overlay counts once toward the overall quota and once toward every rule assigned to it. A single overlay may result in multiple downstream requests through its assigned rules and their run parameters.
+
+Selection prioritizes overlays that help the most unmet target minimums, then fills available target maxima. Ties prefer newer photo times, then ordinal overlay ID. This is a deterministic greedy selection, not a proof that no other assignment could meet the minimums. Maxima are hard limits; minimum shortfalls are reported per target and overall, and do not prevent starting the available selection. Quotas measure selected overlays, not successful downstream processing.
+
+`counters.scanned` counts processed provider records, including invalid records and duplicates. `observedMatches` counts distinct eligible candidates found before selection; it is not the provider's total hit count. A malformed entity or missing explicit ID is reported as invalid and preparation continues. A failed provider request, malformed page, or invalid continuation fails preparation.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `AutoRun:MaxSelectedOverlays` | 100,000 | Maximum unique selected overlays per run; configurable downward. |
+| `AutoRun:MaxScannedRecords` | 1,000,000 | Maximum processed source records per preview; configurable downward. |
+| `AutoRun:MaxCandidates` | 200,000 | Maximum eligible candidates retained for selection; configurable downward. |
+| `AutoRun:PayloadBudgetBytes` | 536,870,912 | Process-wide retained serialized request, rule, query, and overlay byte budget; configurable downward. |
+| `AutoRun:ReadyLifetimeMinutes` | 30 | Time from readiness until an unstarted preview expires. |
+| `AutoRun:SummaryLifetimeMinutes` | 60 | Retention after a terminal state; payloads are released when the run becomes terminal. |
+| `AutoRun:MaxRetainedJobs` | 100 | Maximum retained previews and summaries on the instance. |
+| `AutoRun:Provider:MaxResponseBytes` | 16,777,216 | Maximum bytes in one provider response, including streamed responses. |
+
+Reaching a scan or candidate limit can produce a ready preview with `sourceExhausted: false`, a `stoppedReason` of `scanLimit` or `candidateLimit`, and a warning. It does not establish the source's total count or guarantee the newest overlays outside the scanned subset. Exceeding the retained payload budget fails preparation instead of creating a runnable partial preview. `sourceExhausted: true` means the adapter exhausted the supplied IDs or returned continuation chain; it is not a transactional snapshot of Elasticsearch.
+
+The payload budget counts serialized bytes, not total heap usage: object overhead and transient provider page buffers use additional memory. Terminal jobs release overlay payloads immediately; their retained requests, rule snapshots, and queries remain charged until summary expiry.
+
+### Publication and outcomes
+
+`publication` may be omitted to use configured defaults. `batchSize` is 1–100 overlays, and `delayMs` is 0–60,000 milliseconds between batches. The default is 10 overlays and a 1,000 ms delay. A batch waits for its publication outcomes before the next batch; actual throughput also depends on broker latency, `AutoRun:PublisherConcurrency` (default 4), and `AutoRun:PublishTimeoutSeconds` (default 30).
+
+To change a run's publication settings, send:
+
+```http
+PATCH /auto-runs/{id}/publication
+Content-Type: application/json
+
+{ "batchSize": 20, "delayMs": 500 }
+```
+
+During publication, changes apply at the next batch boundary. The summary exposes requested `publication`, effective `activePublication`, and `publicationChangePending`. Changing settings does not change the selected overlays, rule snapshots, or quotas.
+
+Each selected overlay produces one persistent, mandatory RabbitMQ message containing its frozen overlay and assigned rule snapshots. Item outcomes have these meanings:
+
+| Outcome | Meaning |
+| --- | --- |
+| `Pending` | Publication has not started for this item. |
+| `InFlight` | Publication is awaiting an outcome. |
+| `Confirmed` | The broker confirmed publication to the gateway input route. |
+| `Failed` | The message could not be constructed, the destination was invalid, or the broker explicitly rejected or returned it. |
+| `Uncertain` | A timeout, cancellation, connection failure, or lost confirmation prevents determining delivery. It may already be queued. |
+
+`Completed` means all selected publications were confirmed; `CompletedWithErrors` means publication finished with failed or uncertain items. Neither state means the gateway or downstream algorithms finished processing. Per-rule confirmed counts inherit the result of the shared gateway envelope. The Rules API does not automatically retry failed or uncertain publications. Retrying start on the same run does not resend messages; creating a new run is a deliberate new execution.
+
+Gateway retries preserve dispatch IDs for the same run, overlay, pipeline, rule, and run parameters. A new run has new IDs. A gateway retry can resend targets that already succeeded, so downstream deduplication remains necessary; see [historical gateway input](../unified-gateway/README.md#historical-auto-run-input).
+
+### Elastic Provider configuration and contract
+
+The adapter uses:
+
+- `GET /ErisImages/v2.0/ErisImages/Images/TableEntities/{id}` for one overlay.
+- `POST /ErisImages/v2.0/ErisImages/Images/TableEntities` for filtered batches.
+
+The first request supplies no provider query flags. Batch responses must contain `entities_list`; the optional `next_page` URL is followed with the **same POST body**, including any continuation query string supplied by the provider. Continuations must remain on the configured scheme, host, and port. Redirects are disabled, repeated continuation URLs fail preparation, and an empty `entities_list` terminates paging. Provider request timeout defaults to 30 seconds.
+
+Request construction follows the supplied working logical-operator example, not the differing Swagger skeleton:
+
+```json
+{
+  "filter": {
+    "logical_operators": {
+      "AND": [
+        { "match": { "SENSOR": { "type": "IN", "values": ["SENSOR_A"] } } },
+        { "range": { "RESOLUTION": { "type": "IN", "values": [{ "gte": 0.3, "lte": 1.2 }] } } }
+      ]
+    }
+  },
+  "sort": { "date": "desc" }
+}
+```
+
+Different rule/sensor branches use separate AND queries. The adapter does not invent an OR grammar or retry by dropping a rejected condition. Provider request aliases are configurable under `AutoRun:Provider:RequestFields`:
+
+| Option | Default request alias |
+| --- | --- |
+| `Id` | `GlobalId` |
+| `SensorName` | `SENSOR` |
+| `SensorType` | `IMAGINGTECHNIQUE` |
+| `GridType` | `SOLUTIONTYPE` |
+| `RegistrationQuality` | `REGISTRATIONQUALITY` |
+| `SortieId` | `SORTIE` |
+| `IsRealtime` | `ISREALTIME` |
+| `CreatedTime` | `CREATED` |
+| `PhotoTime` | `PHOTOTIME` |
+| `Resolution` | `RESOLUTION` |
+| `Geometry` | `geo` |
+| `SortDate` | `date` |
+| `ModeSar` | Unset; SAR mode is checked locally. |
+
+**Request aliases and numeric/boolean encodings remain deployment assumptions.** The working example confirms `SENSOR`, `geo`, and the logical grammar; it does not verify every alias above. Native JSON numbers and booleans are the defaults. Set `StringEncodedNumbers` or `StringEncodedBooleans` only when the deployed provider requires string values. Public API filters remain native numbers and booleans in either case.
+
+The response contract is separate from request aliases. Both GET and each batch entity contain `properties_list` and `geo.wkt`. These configured response mappings use the supplied example and confirmed provider property names:
+
+| Provider response field | Normalized overlay field |
+| --- | --- |
+| `properties_list.GlobalId` | `id` |
+| `properties_list.Url` | `imageUrl` |
+| `properties_list.GridPath` | `gridURI` |
+| `properties_list.Sensor` | `sensorName` |
+| `properties_list.ImagingTechnique` | `sensorType` |
+| `properties_list.SolutionType` | `gridType` |
+| `properties_list.Sortie` | `sortieId` |
+| `properties_list.Resolution` | `bestResolution` |
+| `properties_list.RegistrationQuality` | `registrationQuality` |
+| `properties_list.PhotoTime` | `photoTime` |
+| `properties_list.Created` | `createdTime` |
+| `properties_list.IsRealTime` | `isRealtime` |
+| `properties_list.ImageWidth`, `properties_list.ImageHeight` | `width`, `height` |
+| `geo.wkt` | Polygon/MultiPolygon GeoJSON `roiFootprint` |
+
+Response aliases can be changed under `AutoRun:Provider:ResponseFields` using the option names in [ElasticProviderOptions.cs](AutoRuns/Provider/ElasticProviderOptions.cs). The GET result's mapped `GlobalId` must equal the requested ID. Response resolution must be a JSON number, and `IsRealTime`, when present, must be a JSON boolean; request encoding flags do not change response parsing.
+
+`SourceTimeZoneId` defaults provisionally to `Asia/Jerusalem`. Confirm the provider's timezone before relying on timezone-less `Created` or `PhotoTime`. Dates carrying explicit offsets honor those offsets. Timezone-less provider dates use the configured timezone, and ambiguous or nonexistent daylight-saving times make that record invalid instead of being guessed. Accepted local date shapes are `dd/MM/yyyy HH:mm:ss` and `yyyy-MM-ddTHH:mm:ss`, optionally with fractional seconds.
+
+Optional `ResponseFields.ModeSar`, `AreaOfInterest`, `LegId`, `PrevOverlayId`, and `NextOverlayId` are unset until their real provider property names are configured. Rules with `modeSAR` always enforce that condition locally; configure its response alias before expecting matches, and configure `RequestFields.ModeSar` separately only if provider filtering is verified. Missing SAR metadata does not silently disable the rule condition.
+
+Shared overlay validity is checked first, then each selected pipeline validates the fields it needs. FindAir checks image URL, dimensions, sensor type, grid URI, and optional area metadata. DeepWisdom checks relationship metadata for `run_every_other_image` when supplied. SarAtc gets `modelName` and `frameMetadata` from the saved rule's run parameters, not an invented provider field. An overlay can remain eligible for one target when another target's contract rejects it. See [pipeline contracts](../../libs/pipeline-contracts/README.md) for exact downstream requirements.
+
+### Destination configuration and rollout
+
+The auto-run destination is the **Unified Gateway input queue**, independently of pipeline catalog transport destinations. This example matches the repository's default gateway input topology; replace host and credentials for the deployment:
+
+```json
+{
+  "AutoRun": {
+    "Enabled": false,
+    "Publication": { "BatchSize": 10, "DelayMs": 1000 },
+    "Provider": {
+      "BaseUrl": "https://elastic-provider.example",
+      "TableEntitiesPath": "/ErisImages/v2.0/ErisImages/Images/TableEntities",
+      "SourceTimeZoneId": "Asia/Jerusalem",
+      "TimeoutSeconds": 30,
+      "MaxResponseBytes": 16777216,
+      "StringEncodedNumbers": false,
+      "StringEncodedBooleans": false
+    },
+    "Destination": {
+      "Connection": {
+        "Name": "unified-gateway-input",
+        "Host": "rabbitmq",
+        "Port": 5672,
+        "Username": "replace-me",
+        "Password": "replace-me",
+        "VirtualHost": "/"
+      },
+      "QueueName": "unified-gateway.input.q",
+      "QueueArguments": {
+        "x-dead-letter-exchange": "",
+        "x-dead-letter-routing-key": "unified-gateway.dlq.q"
+      },
+      "ExchangeName": "",
+      "ExchangeType": "direct",
+      "RoutingKey": "",
+      "BindQueueToExchange": false,
+      "ExchangeArguments": {},
+      "BindingArguments": {}
+    }
+  }
+}
+```
+
+Use deployment secrets for credentials, for example `AutoRun__Destination__Connection__Password`. `Connection.Name` is a required logical connection name. An empty `ExchangeName` publishes through the default exchange using `QueueName` as the effective routing key.
+
+The publisher declares a durable, nonexclusive, non-auto-delete queue on first use. `QueueArguments` must match the gateway queue's existing declaration, including its `RabbitMq:HeadersArguments`, effective `x-dead-letter-exchange`, effective `x-dead-letter-routing-key`, and any explicit `x-queue-type`. Copy the deployed values, not just the example. For a named exchange, configure `ExchangeName`, `ExchangeType`, and `ExchangeArguments` to match it; set `RoutingKey` to the gateway input route, and use `BindQueueToExchange` with matching `BindingArguments` if this publisher should declare the binding. Named exchanges are declared durable and non-auto-delete. Incompatible declarations fail; the publisher does not replace existing broker topology.
+
+Argument dictionaries are JSON objects containing scalar strings, booleans, integers, or finite numbers, rather than serialized JSON strings or nested objects. They are validated and normalized at startup. String-valued broker arguments such as `x-queue-type` and dead-letter exchange/routing keys must remain strings.
+
+Deployment sequence:
+
+1. Deploy the gateway version supporting historical envelopes to **every consumer** of the input queue, and enable `HistoricalInput__Enabled=true`. Older consumers can mishandle these envelopes, so complete that rollout before enabling Rules API auto-run.
+2. Deploy one Rules API instance with `AutoRun:Enabled=false`, configure its provider and exact gateway destination, and verify the enabled pipeline IDs and contracts agree with the gateway.
+3. Verify the real provider contract in the deployment: field casing, numeric resolution bounds, both boolean values, date ranges/timezone, Polygon and MultiPolygon intersections, required response mappings, and at least two pages followed by termination. Check returned values, not only HTTP success.
+4. Enable `AutoRun__Enabled=true`, prepare a small preview, inspect its assigned targets and warnings, then start it. Verify broker confirmations and correlated gateway dispatch before increasing quotas or batch size.
+
+The implementation has local automated coverage; **the real Elastic Provider, RabbitMQ deployment topology, and end-to-end historical dispatch have not been validated against a live deployment**. A ready preview validates available data and contracts but does not establish broker connectivity. Scaling this version to multiple Rules API replicas is unsupported.
+
+### Auto-run observability
+
+Preparation and publication emit `auto_run.prepare` and `auto_run.publish` spans with `auto_run.id`, plus correlated logs for state, selected counts, and confirmed/failed/uncertain publications. The Rules API meter exposes `auto_run.selected.overlays` and `auto_run.publications`; the latter has a bounded `outcome` dimension. IDs remain in spans/logs and are not metric labels.
+
+The summary exposes current counts, per-target shortfalls, `confirmedPerSecond`, and bounded warning/error samples. Gateway telemetry identifies historical work through `auto_run.run_id` and `unified_gateway.input_kind`. Use those gateway events to distinguish confirmed enqueueing from later dispatch or downstream failures.
 
 ## Rule Schema
 
