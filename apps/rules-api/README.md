@@ -290,7 +290,7 @@ Response aliases can be changed under `AutoRun:Provider:ResponseFields` using th
 
 Optional `ResponseFields.ModeSar`, `AreaOfInterest`, `LegId`, `PrevOverlayId`, and `NextOverlayId` are unset until their real provider property names are configured. Rules with `modeSAR` always enforce that condition locally; configure its response alias before expecting matches, and configure `RequestFields.ModeSar` separately only if provider filtering is verified. Missing SAR metadata does not silently disable the rule condition.
 
-Shared overlay validity is checked first, then each selected pipeline validates the fields it needs. FindAir checks image URL, dimensions, sensor type, grid URI, and optional area metadata. DeepWisdom checks relationship metadata for `run_every_other_image` when supplied. SarAtc gets `modelName` and `frameMetadata` from the saved rule's run parameters, not an invented provider field. An overlay can remain eligible for one target when another target's contract rejects it. See [pipeline contracts](../../libs/pipeline-contracts/README.md) for exact downstream requirements.
+Shared overlay validity is checked first, then each selected pipeline validates the fields it needs. FindAir checks image URL, dimensions, sensor type, grid URI, and optional area metadata. DeepWisdom checks relationship metadata for `run_every_other_image` when supplied. SarAtc gets `modelName` and `fieldsToFilter` from the saved rule's run parameters, not an invented provider field. An overlay can remain eligible for one target when another target's contract rejects it. See [pipeline contracts](../../libs/pipeline-contracts/README.md) for exact downstream requirements.
 
 ### Destination configuration and rollout
 

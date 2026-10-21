@@ -7,7 +7,7 @@ namespace ImagingPipeline.PipelineContracts.Tests;
 public sealed class SarAtcPipelineContractTests
 {
     private const string ValidRunParams = """
-        {"modelName":"sar-atc-v2","frameMetadata":{"band":"X","angles":[12.5,30],"nested":{"מסגרת":null}}}
+        {"modelName":"sar-atc-v2","fieldsToFilter":[{"band":"X","angles":[12.5,30]},{"nested":{"מסגרת":null}}]}
         """;
 
     private readonly SarAtcPipelineContract _contract = new();
@@ -16,7 +16,7 @@ public sealed class SarAtcPipelineContractTests
     public void BuildPayloadWritesTheSarAtcWireBodyAndVersionHeader()
     {
         const string expected = """
-            {"imageId":"image-1","modelName":"sar-atc-v2","frameMetadata":{"band":"X","angles":[12.5,30],"nested":{"מסגרת":null}},"requestId":"dispatch-1"}
+            {"imageId":"image-1","modelName":"sar-atc-v2","fieldsToFilter":[{"band":"X","angles":[12.5,30]},{"nested":{"מסגרת":null}}],"requestId":"dispatch-1"}
             """;
 
         var payload = _contract.BuildPayload(Context(), Json(ValidRunParams));
@@ -30,33 +30,39 @@ public sealed class SarAtcPipelineContractTests
     }
 
     [Fact]
-    public void FrameMetadataIsPassedThroughUnchanged()
+    public void FieldsToFilterArePassedThroughUnchanged()
     {
-        var runParams = Json("""{"modelName":"m","frameMetadata":{"large":9007199254740993,"decimal":0.12345678901234567890}}""");
+        var runParams = Json("""{"modelName":"m","fieldsToFilter":[{"large":9007199254740993,"decimal":0.12345678901234567890}]}""");
 
         var payload = _contract.BuildPayload(Context(), runParams);
 
         using var body = JsonDocument.Parse(payload.Body);
-        var written = body.RootElement.GetProperty("frameMetadata");
-        Assert.True(JsonElement.DeepEquals(runParams.GetProperty("frameMetadata"), written));
-        Assert.Equal("0.12345678901234567890", written.GetProperty("decimal").GetRawText());
+        var written = body.RootElement.GetProperty("fieldsToFilter");
+        Assert.True(JsonElement.DeepEquals(runParams.GetProperty("fieldsToFilter"), written));
+        Assert.Equal("0.12345678901234567890", written[0].GetProperty("decimal").GetRawText());
     }
 
     [Fact]
-    public void EmptyFrameMetadataIsAllowed()
+    public void EmptyFieldsToFilterAreAllowedAndSent()
     {
-        Assert.Empty(_contract.ValidateRunParams(Json("""{"modelName":"m","frameMetadata":{}}""")));
+        var runParams = Json("""{"modelName":"m","fieldsToFilter":[]}""");
+
+        Assert.Empty(_contract.ValidateRunParams(runParams));
+        using var body = JsonDocument.Parse(_contract.BuildPayload(Context(), runParams).Body);
+        Assert.Equal(0, body.RootElement.GetProperty("fieldsToFilter").GetArrayLength());
     }
 
     [Theory]
-    [InlineData("""{"frameMetadata":{}}""", "modelName")]
-    [InlineData("""{"modelName":" ","frameMetadata":{}}""", "modelName")]
-    [InlineData("""{"modelName":7,"frameMetadata":{}}""", "modelName")]
-    [InlineData("""{"modelName":"m"}""", "frameMetadata")]
-    [InlineData("""{"modelName":"m","frameMetadata":[]}""", "frameMetadata")]
-    [InlineData("""{"modelName":"m","frameMetadata":null}""", "frameMetadata")]
-    [InlineData("""{"modelName":"m","frameMetadata":{},"modelname":"typo"}""", "modelname")]
-    [InlineData("""{"modelName":"m","modelName":"n","frameMetadata":{}}""", "modelName")]
+    [InlineData("""{"fieldsToFilter":[]}""", "modelName")]
+    [InlineData("""{"modelName":" ","fieldsToFilter":[]}""", "modelName")]
+    [InlineData("""{"modelName":7,"fieldsToFilter":[]}""", "modelName")]
+    [InlineData("""{"modelName":"m"}""", "fieldsToFilter")]
+    [InlineData("""{"modelName":"m","fieldsToFilter":{}}""", "fieldsToFilter")]
+    [InlineData("""{"modelName":"m","fieldsToFilter":null}""", "fieldsToFilter")]
+    [InlineData("""{"modelName":"m","fieldsToFilter":[{},"text"]}""", "fieldsToFilter[1]")]
+    [InlineData("""{"modelName":"m","fieldsToFilter":[[]]}""", "fieldsToFilter[0]")]
+    [InlineData("""{"modelName":"m","fieldsToFilter":[],"frameMetadata":{}}""", "frameMetadata")]
+    [InlineData("""{"modelName":"m","modelName":"n","fieldsToFilter":[]}""", "modelName")]
     [InlineData("""[]""", "runParams")]
     public void InvalidRunParamsAreRejectedWithTheirField(string runParams, string field)
     {
