@@ -27,6 +27,9 @@ public static class AutoRunRegistration
             .ValidateOnStart();
         services.AddOptions<ElasticProviderOptions>()
             .Bind(configuration.GetSection(ElasticProviderOptions.SectionName))
+            .Validate(options => ElasticProviderHeaders.IsValid(options.Headers) &&
+                ElasticProviderHeaders.HasValidConfigurationShape(configuration.GetSection("AutoRun:Provider:Headers")),
+                ElasticProviderHeaders.ValidationError)
             .Validate(options => options.TimeoutSeconds > 0 && options.MaxResponseBytes > 0,
                 "Elastic Provider time and response limits must be positive.")
             .Validate(options => !configuration.GetValue<bool>("AutoRun:Enabled") ||
@@ -38,6 +41,7 @@ public static class AutoRunRegistration
         services.AddRabbitMqDestinationPublisher(configuration);
         services.AddHttpClient<IElasticOverlayProvider, ElasticOverlayProvider>((provider, client) =>
             client.Timeout = TimeSpan.FromSeconds(provider.GetRequiredService<IOptions<ElasticProviderOptions>>().Value.TimeoutSeconds))
+            .RedactLoggedHeaders(static _ => true)
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddSingleton<ProviderQueryBuilder>();
         services.AddSingleton<IAutoRunRuleResolver, AutoRunRuleResolver>();

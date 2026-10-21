@@ -14,6 +14,7 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
     : IElasticOverlayProvider
 {
     private readonly ElasticProviderOptions _options = configured.Value;
+    private readonly IReadOnlyDictionary<string, string> _headers = ElasticProviderHeaders.Snapshot(configured.Value.Headers);
 
     public async Task<ProviderOverlayResult> GetAsync(string id, CancellationToken cancellationToken)
     {
@@ -126,6 +127,9 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
 
     private async Task<JsonDocument?> SendAsync(HttpRequestMessage request, bool allowNotFound, CancellationToken cancellationToken)
     {
+        foreach (var (name, value) in _headers)
+            if (!request.Headers.TryAddWithoutValidation(name, value))
+                throw new ElasticProviderException(ElasticProviderHeaders.ValidationError);
         if (_options.TimeoutSeconds <= 0 || _options.MaxResponseBytes <= 0)
             throw new ElasticProviderException("Provider timeout and response-byte limit must be positive.");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

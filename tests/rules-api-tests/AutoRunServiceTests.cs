@@ -106,17 +106,147 @@ public sealed class AutoRunServiceTests
         Assert.Equal(["frozen"], fixture.Provider.GetCalls);
     }
 
+    [Fact]
+    public async Task OverlayIdsWithoutTargetsRetainOldOverlaysWithoutResolvingRulesOrValidatingPipelineMetadata()
+    {
+        var overlay = Overlay("old", photoTime: "2000-01-01T00:00:00Z", imageUrl: "");
+        var frozenPayload = overlay.Payload.ToArray();
+        await using var fixture = await Fixture.StartAsync([overlay]);
+        fixture.Resolver.Rules.Clear();
+        var request = new AutoRunPreviewRequest
+        {
+            Source = new() { Mode = AutoRunSourceMode.OverlayIds, OverlayIds = ["old"] }
+        };
+
+        var ready = await fixture.ReadyAsync(request);
+
+        Assert.Equal(0, fixture.Resolver.Calls);
+        Assert.Empty(ready.Targets);
+        Assert.Empty(ready.Queries);
+        Assert.Empty(fixture.Provider.SearchCursors);
+        Assert.Equal(1, ready.MaxOverlays);
+        Assert.Equal(1, ready.Counters.ObservedMatches);
+        Assert.Equal(1, ready.Counters.Selected);
+        Assert.Empty(Assert.Single(fixture.Service.Items(ready.Id, 0, 10, null).Items).Targets);
+        Assert.Contains(ready.Warnings, warning => warning.Contains("Current active gateway rules", StringComparison.Ordinal)
+            && warning.Contains("photo-age", StringComparison.Ordinal) && warning.Contains("not predicted", StringComparison.Ordinal));
+
+        // Mutating the provider's original buffer cannot alter the frozen preview.
+        Array.Fill(overlay.Payload, (byte)'x');
+        request.Source.OverlayIds![0] = "changed";
+        fixture.Service.Start(ready.Id);
+        var complete = await fixture.WaitAsync(ready.Id, AutoRunState.Completed);
+
+        Assert.Equal(1, complete.Counters.Confirmed);
+        var publication = Assert.Single(fixture.Publisher.Calls);
+        Assert.Equal(frozenPayload, publication.Payload);
+        Assert.Empty(publication.Targets);
+        Assert.Equal(["old"], fixture.Provider.GetCalls);
+    }
+
     [Theory]
-    [InlineData("scanLimit")]
-    [InlineData("candidateLimit")]
-    public async Task PreparationBoundsScanningAndCandidateRetentionAndReportsPartialSource(string limit)
+    [InlineData(null, 2)]
+    [InlineData(1, 1)]
+    public async Task DirectOverlayQuotasChooseNewestThenStableIdAndDefaultToCappedUniqueIdCount(int? maximum, int selected)
+    {
+        var options = EnabledOptions();
+        options.MaxSelectedOverlays = 2;
+        await using var fixture = await Fixture.StartAsync(
+            [Overlay("old", "2000-01-01T00:00:00Z"), Overlay("z"), Overlay("a")], options);
+        var ready = await fixture.ReadyAsync(Request(["old", "z", "a", "z"], []) with { MaxOverlays = maximum });
+
+        Assert.Equal(maximum ?? 2, ready.MaxOverlays);
+        Assert.Equal(3, ready.Counters.Scanned);
+        Assert.Equal(selected, ready.Counters.Selected);
+        Assert.Equal(new[] { "a", "z" }.Take(selected), fixture.Service.Items(ready.Id, 0, 10, null).Items.Select(item => item.OverlayId));
+        Assert.Equal(["old", "z", "a"], fixture.Provider.GetCalls);
+        Assert.True(ready.SourceExhausted);
+        Assert.Equal(0, fixture.Resolver.Calls);
+    }
+
+    [Fact]
+    public async Task DirectIdsDeduplicateReturnedOverlaysCountMissingAndInvalidAndReportGlobalShortfalls()
+    {
+        await using var fixture = await Fixture.StartAsync([]);
+        fixture.Provider.Get = (id, _) => Task.FromResult(id switch
+        {
+            "bad" => new ProviderOverlayResult(null, "Invalid overlay."),
+            "missing" => new ProviderOverlayResult(null, "Missing overlay."),
+            _ => new ProviderOverlayResult(Overlay(id == "alias" ? "z" : id), null)
+        });
+        var ready = await fixture.ReadyAsync(Request(["z", "alias", "z", "bad", "missing", "a"], []) with
+        {
+            MinOverlays = 4
+        });
+
+        Assert.Equal(5, ready.MaxOverlays);
+        Assert.Equal(5, ready.Counters.Scanned);
+        Assert.Equal(1, ready.Counters.Duplicates);
+        Assert.Equal(2, ready.Counters.Invalid);
+        Assert.Equal(2, ready.Counters.ObservedMatches);
+        Assert.Equal(2, ready.Counters.Selected);
+        Assert.Equal(2, ready.Shortfall);
+        Assert.Equal(2, ready.Errors.Count);
+        Assert.Contains(ready.Warnings, warning => warning.Contains("minimums", StringComparison.Ordinal));
+        Assert.Empty(ready.Targets);
+    }
+
+    [Theory]
+    [InlineData(AutoRunSourceMode.Rules)]
+    [InlineData(AutoRunSourceMode.Filters)]
+    public async Task RulesAndFiltersStillRequireTargets(AutoRunSourceMode mode)
+    {
+        await using var fixture = await Fixture.StartAsync([]);
+        var request = new AutoRunPreviewRequest { Source = new() { Mode = mode } };
+        var error = await Assert.ThrowsAsync<AutoRunRequestException>(() =>
+            fixture.Service.PreviewAsync(request, CancellationToken.None));
+
+        Assert.Equal(400, error.StatusCode);
+        Assert.Equal(0, fixture.Resolver.Calls);
+        Assert.Empty(fixture.Provider.GetCalls);
+        Assert.Empty(fixture.Provider.SearchCursors);
+    }
+
+    [Fact]
+    public async Task DirectIdsStillValidateIdsOverallLimitsFiltersAndNullTargets()
+    {
+        var options = EnabledOptions();
+        options.MaxSelectedOverlays = 2;
+        await using var fixture = await Fixture.StartAsync([], options);
+        var invalidRequests = new[]
+        {
+            Request([], []), Request([" "], []), Request([null!], []),
+            Request(["one"], []) with { MinOverlays = 2 },
+            Request(["one"], []) with { MaxOverlays = 0 },
+            Request(["one"], []) with { MaxOverlays = 3 },
+            Request(["one"], []) with { MinOverlays = -1 },
+            Request(["one"], []) with { Targets = null! },
+            Request(["one"], []) with
+            {
+                Source = new() { Mode = AutoRunSourceMode.OverlayIds, OverlayIds = ["one"], Filters = new() }
+            }
+        };
+
+        foreach (var request in invalidRequests)
+            Assert.Equal(400, (await Assert.ThrowsAsync<AutoRunRequestException>(() =>
+                fixture.Service.PreviewAsync(request, CancellationToken.None))).StatusCode);
+        Assert.Equal(0, fixture.Resolver.Calls);
+        Assert.Empty(fixture.Provider.GetCalls);
+    }
+
+    [Theory]
+    [InlineData("scanLimit", false)]
+    [InlineData("candidateLimit", false)]
+    [InlineData("scanLimit", true)]
+    [InlineData("candidateLimit", true)]
+    public async Task PreparationBoundsScanningAndCandidateRetentionAndReportsPartialSource(string limit, bool direct)
     {
         var options = EnabledOptions();
         if (limit == "scanLimit") options.MaxScannedRecords = 2;
         else options.MaxCandidates = 2;
         await using var fixture = await Fixture.StartAsync(
             [Overlay("one"), Overlay("two"), Overlay("three")], options);
-        var ready = await fixture.ReadyAsync(Request(["one", "two", "three"]));
+        var ready = await fixture.ReadyAsync(Request(["one", "two", "three"], direct ? [] : null));
 
         Assert.Equal(2, ready.Counters.Scanned);
         Assert.Equal(2, ready.Counters.Selected);
@@ -190,20 +320,22 @@ public sealed class AutoRunServiceTests
         Assert.Empty(fixture.Publisher.Calls);
     }
 
-    [Fact]
-    public async Task ByteBudgetFailureReleasesCandidatesAndAllowsLaterPreview()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ByteBudgetFailureReleasesCandidatesAndAllowsLaterPreview(bool direct)
     {
         var oversized = Overlay("oversized", imageUrl: "https://example.invalid/" + new string('a', 8000));
         var options = EnabledOptions();
         options.PayloadBudgetBytes = 5000;
         await using var fixture = await Fixture.StartAsync([Overlay("small"), oversized], options);
-        var first = await fixture.Service.PreviewAsync(Request(["small", "oversized"]), CancellationToken.None);
+        var first = await fixture.Service.PreviewAsync(Request(["small", "oversized"], direct ? [] : null), CancellationToken.None);
         var failed = await fixture.WaitAsync(first.Id, AutoRunState.Failed);
 
         Assert.Equal(0, failed.Counters.Selected);
         Assert.Contains(failed.Errors, error => error.Contains("payload budget", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(409, Assert.Throws<AutoRunRequestException>(() => fixture.Service.Start(first.Id)).StatusCode);
-        var next = await fixture.ReadyAsync(Request(["small"]));
+        var next = await fixture.ReadyAsync(Request(["small"], direct ? [] : null));
         Assert.Equal(1, next.Counters.Selected);
         Assert.Empty(fixture.Publisher.Calls);
     }
@@ -407,12 +539,14 @@ public sealed class AutoRunServiceTests
         Assert.Equal(["first", "second"], fixture.Publisher.Calls.Select(call => call.OverlayId));
     }
 
-    [Fact]
-    public async Task CancellationInterruptsInterBatchDelayWithoutSubmittingNextItem()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancellationInterruptsInterBatchDelayWithoutSubmittingNextItem(bool direct)
     {
         var time = new ControlledDelayTimeProvider();
         await using var fixture = await Fixture.StartAsync([Overlay("first"), Overlay("second")], time: time);
-        var ready = await fixture.ReadyAsync(Request(["first", "second"]) with
+        var ready = await fixture.ReadyAsync(Request(["first", "second"], direct ? [] : null) with
         {
             Publication = new() { BatchSize = 1, DelayMs = 60_000 }
         });
@@ -496,8 +630,10 @@ public sealed class AutoRunServiceTests
         Assert.NotEmpty(cancelled.Warnings);
     }
 
-    [Fact]
-    public async Task CancelPreparingReleasesAdmissionAndReadyCancellationDoesNotPublish()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancelPreparingReleasesAdmissionAndReadyCancellationDoesNotPublish(bool direct)
     {
         await using var fixture = await Fixture.StartAsync([Overlay("one")]);
         var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -507,16 +643,16 @@ public sealed class AutoRunServiceTests
             await Task.Delay(Timeout.InfiniteTimeSpan, token);
             return new(Overlay("one"), null);
         };
-        var first = await fixture.Service.PreviewAsync(Request(["one"]), CancellationToken.None);
+        var first = await fixture.Service.PreviewAsync(Request(["one"], direct ? [] : null), CancellationToken.None);
         await requested.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var concurrent = await Assert.ThrowsAsync<AutoRunRequestException>(() =>
-            fixture.Service.PreviewAsync(Request(["one"]), CancellationToken.None));
+            fixture.Service.PreviewAsync(Request(["one"], direct ? [] : null), CancellationToken.None));
         Assert.Equal(409, concurrent.StatusCode);
         fixture.Service.Cancel(first.Id);
         await fixture.WaitAsync(first.Id, AutoRunState.Cancelled);
         fixture.Provider.Get = null;
 
-        var second = await fixture.ReadyAsync(Request(["one"]));
+        var second = await fixture.ReadyAsync(Request(["one"], direct ? [] : null));
         Assert.Equal(AutoRunState.Cancelled, fixture.Service.Cancel(second.Id).State);
         Assert.Equal(409, Assert.Throws<AutoRunRequestException>(() => fixture.Service.Start(second.Id)).StatusCode);
         Assert.Empty(fixture.Publisher.Calls);

@@ -28,7 +28,7 @@ public sealed class AutoRunPublisher(
         {
             using var overlay = JsonDocument.Parse(payload);
             var id = overlay.RootElement.GetProperty("id").GetString()!;
-            body = JsonSerializer.SerializeToUtf8Bytes(new HistoricalOverlayEnvelope
+            body = targets.Count == 0 ? payload : JsonSerializer.SerializeToUtf8Bytes(new HistoricalOverlayEnvelope
             {
                 RunId = runId,
                 Overlay = overlay.RootElement,
@@ -46,8 +46,11 @@ public sealed class AutoRunPublisher(
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            IReadOnlyDictionary<string, object?>? headers = targets.Count == 0
+                ? new Dictionary<string, object?> { ["x-updated-fields"] = new List<object> { "gridType" } }
+                : null;
             await publisher.PublishAsync(destination,
-                new RabbitMqMessageEnvelope(messageId, body, CorrelationId: runId), cancellationToken);
+                new RabbitMqMessageEnvelope(messageId, body, CorrelationId: runId, Headers: headers), cancellationToken);
             return new(AutoRunItemOutcome.Confirmed);
         }
         catch (PublishException ex)

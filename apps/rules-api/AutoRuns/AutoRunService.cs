@@ -40,15 +40,17 @@ public sealed class AutoRunService(
         if (request is null) throw new AutoRunRequestException(400, "An auto-run request is required.");
         request = request with { Publication = request.Publication ?? _options.Publication with { } };
         Validate(request);
+        cancellationToken.ThrowIfCancellationRequested();
         lock (_gate) EnsureAvailable();
-        var targets = await resolver.ResolveAsync(request.Targets, cancellationToken);
+        IReadOnlyList<AutoRunResolvedTarget> targets = request.Targets.Count == 0
+            ? [] : await resolver.ResolveAsync(request.Targets, cancellationToken);
         var requestBytes = JsonSerializer.SerializeToUtf8Bytes(request, AutoRunJson.Options);
         var frozen = JsonSerializer.Deserialize<AutoRunPreviewRequest>(requestBytes, AutoRunJson.Options)!;
         var rulesBytes = requestBytes.LongLength +
             targets.Sum(t => (long)JsonSerializer.SerializeToUtf8Bytes(t.Rule, AutoRunJson.Options).Length);
-        var job = new Job(frozen, targets, time.GetUtcNow(),
-            Math.Min(request.MaxOverlays ?? (int)Math.Min(targets.Sum(t => (long)t.Target.MaxOverlays!.Value), _options.MaxSelectedOverlays),
-                _options.MaxSelectedOverlays));
+        var job = new Job(frozen, targets, time.GetUtcNow(), Maximum(frozen));
+        if (job.IsDirect)
+            AddWarning(job, "These overlays will be submitted as ordinary gateway input. Current active gateway rules, including photo-age limits, apply; pipeline assignments and downstream processing are not predicted by this preview.");
         lock (_gate)
         {
             EnsureAvailable();
@@ -195,7 +197,7 @@ public sealed class AutoRunService(
     {
         var candidates = new List<AutoRunCandidate>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        var matcher = new RuleMatcher(time);
+        var matcher = job.IsDirect ? null : new RuleMatcher(time);
         var matchRules = job.Targets.Select(t => t.MatchRule).ToArray();
         var queryBodies = queryBuilder.Build(job.Request.Source, job.Targets.Select(t => t.Rule).ToArray());
         lock (_gate)
@@ -245,7 +247,11 @@ public sealed class AutoRunService(
             lock (_gate) job.SourceExhausted = job.StoppedReason is null;
         }
         cancellationToken.ThrowIfCancellationRequested();
-        var selection = AutoRunSelector.Select(candidates, job.Targets.Select(t => t.Target).ToArray(), job.Maximum, cancellationToken);
+        IReadOnlyList<AutoRunSelection> selection = job.IsDirect
+            ? candidates.OrderByDescending(c => c.Overlay.Input.PhotoTime)
+                .ThenBy(c => c.Overlay.Input.ImageId, StringComparer.Ordinal)
+                .Take(job.Maximum).Select(c => new AutoRunSelection(c, [])).ToArray()
+            : AutoRunSelector.Select(candidates, job.Targets.Select(t => t.Target).ToArray(), job.Maximum, cancellationToken);
         lock (_gate)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -288,7 +294,12 @@ public sealed class AutoRunService(
                 return;
             }
             if (job.Request.Source.Filters is { } filters && !ProviderQueryBuilder.Matches(overlay, filters)) return;
-            var evaluation = matcher.Match(overlay.Input, matchRules);
+            if (job.IsDirect)
+            {
+                Retain(overlay, []);
+                return;
+            }
+            var evaluation = matcher!.Match(overlay.Input, matchRules);
             if (evaluation.Matches.Count == 0) return;
             using var document = JsonDocument.Parse(overlay.Payload);
             PipelineDispatchContext context;
@@ -322,6 +333,11 @@ public sealed class AutoRunService(
                 lock (_gate) job.Invalid++;
                 return;
             }
+            Retain(overlay, matches.ToArray());
+        }
+
+        void Retain(ProviderOverlay overlay, int[] matches)
+        {
             lock (_gate)
             {
                 job.ObservedMatches++;
@@ -330,7 +346,8 @@ public sealed class AutoRunService(
                 _retainedBytes += overlay.Payload.LongLength;
                 job.PayloadBytes += overlay.Payload.LongLength;
             }
-            candidates.Add(new(overlay, matches.ToArray()));
+            // Direct submission owns the exact normalized bytes selected by preview.
+            candidates.Add(new(job.IsDirect ? overlay with { Payload = overlay.Payload.ToArray() } : overlay, matches));
         }
     }
 
@@ -459,9 +476,11 @@ public sealed class AutoRunService(
 
     private void Validate(AutoRunPreviewRequest request)
     {
-        if (request is null || request.Source is null || request.Targets is not { Count: > 0 and <= 100 })
-            throw new AutoRunRequestException(400, "A source and 1–100 targets are required.");
+        if (request.Source is null || request.Targets is not { Count: <= 100 })
+            throw new AutoRunRequestException(400, "A source and at most 100 targets are required; targets cannot be null.");
         if (!Enum.IsDefined(request.Source.Mode)) throw new AutoRunRequestException(400, "Unknown source mode.");
+        if (request.Source.Mode != AutoRunSourceMode.OverlayIds && request.Targets.Count == 0)
+            throw new AutoRunRequestException(400, "Rules and Filters modes require at least one pipeline rule target.");
         if (request.Source.Mode == AutoRunSourceMode.OverlayIds)
         {
             if (request.Source.Filters is not null || request.Source.OverlayIds is not { Length: > 0 and <= 100_000 } ids ||
@@ -484,11 +503,17 @@ public sealed class AutoRunService(
                 !keys.Add((target.PipelineId, target.RuleId)))
                 throw new AutoRunRequestException(400, "Targets must be unique pipeline/rule pairs with 0 <= minOverlays <= maxOverlays within the selected-overlay limit.");
         }
-        var maximum = request.MaxOverlays ?? (int)Math.Min(request.Targets.Sum(t => (long)t.MaxOverlays!.Value), _options.MaxSelectedOverlays);
+        var maximum = Maximum(request);
         if (maximum <= 0 || maximum > _options.MaxSelectedOverlays || request.MinOverlays < 0 || request.MinOverlays > maximum)
             throw new AutoRunRequestException(400, "Overall quotas must satisfy 0 <= minOverlays <= maxOverlays within the selected-overlay limit.");
         ValidatePublication(request.Publication!);
     }
+
+    private int Maximum(AutoRunPreviewRequest request) => request.MaxOverlays ?? (int)Math.Min(
+        request.Targets.Count == 0
+            ? request.Source.OverlayIds!.Distinct(StringComparer.Ordinal).LongCount()
+            : request.Targets.Sum(t => (long)t.MaxOverlays!.Value),
+        _options.MaxSelectedOverlays);
 
     private static void ValidatePublication(AutoRunPublication publication)
     {
@@ -520,6 +545,7 @@ public sealed class AutoRunService(
         public string Id { get; } = Guid.NewGuid().ToString("N");
         public AutoRunPreviewRequest Request { get; } = request;
         public IReadOnlyList<AutoRunResolvedTarget> Targets { get; } = targets;
+        public bool IsDirect { get; } = request.Source.Mode == AutoRunSourceMode.OverlayIds && request.Targets.Count == 0;
         public int Maximum { get; } = maximum;
         public DateTimeOffset CreatedAt { get; } = createdAt;
         public ActivityContext TraceContext { get; } = Activity.Current?.Context ?? default;
