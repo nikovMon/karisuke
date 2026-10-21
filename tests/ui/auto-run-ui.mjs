@@ -25,6 +25,29 @@ const rules = Array.from({ length: 11 }, (_, i) => ({
   match: { sensors: [{ name: 'SENSOR_A', registrationQualities: ['Accurate'], gridTypes: ['grid'] }],
     resolution: { min: 0.3, max: 1 }, maxPhotoAgeDays: 7 }, runParams: {}
 }));
+const pipelineRules = new Map([
+  ['imagery', rules],
+  ['secondary', rules.slice(0, 10).map(rule => ({ ...rule, ruleName: `Secondary ${rule.ruleName}` }))],
+  ['duplicates', [...rules.slice(0, 10), rules[0], rules[10]]],
+  ['ninety', Array.from({ length: 90 }, (_, i) => ({ ...rules[0], _id: `ninety-${i}`, ruleName: `Ninety ${i}` }))],
+  ['too-many', Array.from({ length: 101 }, (_, i) => ({ ...rules[0], _id: `many-${i}`, ruleName: `Many ${i}` }))],
+  ['empty', []]
+]);
+const rulePageOverrides = new Map();
+const ruleLookupGates = new Map();
+const pendingResponses = new Set();
+function holdRulePage(pipeline, offset) {
+  let unblock, markEntered;
+  const held = new Promise(resolve => { unblock = resolve; });
+  const entered = new Promise(resolve => { markEntered = resolve; });
+  const release = () => { unblock(); pendingResponses.delete(release); };
+  pendingResponses.add(release);
+  rulePageOverrides.set(pipeline, async (from, size) => {
+    if (from === offset) { markEntered(); await held; }
+    return { data: pipelineRules.get(pipeline).slice(from, from + size) };
+  });
+  return { entered, release };
+}
 const requests = [];
 const runs = new Map();
 const reads = new Map();
@@ -62,13 +85,24 @@ const server = http.createServer(async (req, res) => {
     const json = (data, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
     if (url.pathname === '/auto-runs/options') return json(options);
     if (url.pathname === '/pipelines') return json([
-      { pipelineId: 'imagery', enabled: true, contractId: 'overlay' },
+      ...[...pipelineRules.keys()].map(pipelineId => ({ pipelineId, enabled: true, contractId: 'overlay' })),
       { pipelineId: 'disabled-pipeline', enabled: false, contractId: 'overlay' }
     ]);
-    if (url.pathname === '/pipelines/imagery/rules')
-      return json(rules.slice(Number(url.searchParams.get('from')), Number(url.searchParams.get('from')) + Number(url.searchParams.get('size'))));
+    const rulePage = url.pathname.match(/^\/pipelines\/([^/]+)\/rules$/);
+    if (rulePage) {
+      const pipeline = decodeURIComponent(rulePage[1]);
+      const from = Number(url.searchParams.get('from')), size = Number(url.searchParams.get('size'));
+      const override = rulePageOverrides.get(pipeline);
+      if (override) {
+        const result = await override(from, size);
+        return json(result.data, result.status ?? 200);
+      }
+      return json((pipelineRules.get(pipeline) ?? []).slice(from, from + size));
+    }
     if (url.pathname.startsWith('/pipelines/imagery/rules/')) {
-      const rule = rules.find(r => r._id === decodeURIComponent(url.pathname.split('/').pop()));
+      const id = decodeURIComponent(url.pathname.split('/').pop());
+      await ruleLookupGates.get(id)?.();
+      const rule = rules.find(r => r._id === id);
       return json(rule ?? { error: 'Rule not found.' }, rule ? 200 : 404);
     }
     if (url.pathname === '/auto-runs/preview') return json(makeRun(body), 202);
@@ -251,6 +285,197 @@ try {
   await page.goto(`${origin}/ui/unknown`);
   await page.getByText('Open auto-run', { exact: true }).click();
   await page.locator('#prepare-button:not(:disabled)').waitFor();
+
+  const bulkPage = await context.newPage();
+  bulkPage.on('pageerror', error => pageErrors.push(error.message));
+  const targetRows = bulkPage.locator('#selected-targets tbody tr');
+  const bulkButton = bulkPage.getByRole('button', { name: 'Select all rules', exact: true });
+  const choosePipeline = async pipeline => {
+    await bulkPage.locator('#pipeline-select').selectOption(pipeline);
+    await bulkPage.locator('#rule-browser').waitFor({ state: 'visible' });
+    await bulkPage.locator('#rule-list .loading').waitFor({ state: 'hidden' });
+  };
+  const openBulk = async pipeline => {
+    await bulkPage.goto(`${origin}/ui/auto-run`);
+    await bulkPage.locator('#prepare-button:not(:disabled)').waitFor();
+    assert.ok(await bulkButton.isDisabled(), 'select all needs a selected pipeline');
+    await choosePipeline(pipeline);
+  };
+  const selectAll = async status => {
+    await bulkButton.click();
+    await bulkPage.locator('#rule-selection-status').filter({ hasText: status }).waitFor();
+    assert.ok(await bulkButton.isEnabled(), 'bulk selection must restore controls');
+    assert.equal(await bulkButton.getAttribute('aria-busy'), 'false');
+  };
+  const addFirstRule = async () => {
+    await bulkPage.locator('[name="rule-choice"]').first().check();
+    await bulkPage.locator('#add-rules').click();
+  };
+
+  // Start on page two: selection still begins at page zero, preserving existing quotas.
+  await openBulk('imagery');
+  await addFirstRule();
+  await bulkPage.getByLabel('Minimum for Urban detail').fill('7');
+  await bulkPage.getByLabel('Maximum for Urban detail').fill('17');
+  await bulkPage.locator('#rules-next').click();
+  await bulkPage.getByText('Rule 11', { exact: true }).waitFor();
+  const bulkStart = requests.length;
+  await bulkButton.focus();
+  await bulkPage.keyboard.press('Enter');
+  await bulkPage.locator('#rule-selection-status').filter({ hasText: 'Added 10 rules from imagery.' }).waitFor();
+  assert.equal(await targetRows.count(), 11, 'select all includes rules beyond the visible page');
+  assert.equal(await bulkPage.getByLabel('Minimum for Urban detail').inputValue(), '7');
+  assert.equal(await bulkPage.getByLabel('Maximum for Urban detail').inputValue(), '17');
+  assert.match(await targetRows.filter({ hasText: 'Archive coverage' }).textContent(), /inactive/);
+  assert.deepEqual(requests.slice(bulkStart).filter(r => r.path === '/pipelines/imagery/rules')
+    .map(r => Number(new URLSearchParams(r.search).get('from'))), [0, 10]);
+  assert.match(await bulkPage.locator('#select-all-scope').textContent(), /imagery.*every page/);
+  await bulkButton.focus();
+  await bulkPage.keyboard.press('Space');
+  await bulkPage.locator('#rule-selection-status').filter({ hasText: 'All 11 rules in imagery are already selected.' }).waitFor();
+  assert.equal(await targetRows.count(), 11, 'repeated selection cannot duplicate targets');
+  assert.equal(await bulkPage.getByLabel('Maximum for Urban detail').inputValue(), '17');
+  await bulkPage.locator('#pipeline-select').scrollIntoViewIfNeeded();
+  await bulkPage.screenshot({ path: path.join(screenshots, 'select-all-desktop.png') });
+
+  await choosePipeline('secondary');
+  await selectAll('Added 10 rules from secondary.');
+  assert.equal(await targetRows.count(), 21, 'the same rule IDs in different pipelines remain distinct targets');
+  await choosePipeline('ninety');
+  await bulkButton.click();
+  await bulkPage.locator('#rule-error').filter({ hasText: '100-target limit across all pipelines' }).waitFor();
+  assert.equal(await targetRows.count(), 21, 'over-capacity selection must be atomic across all pipelines');
+  assert.equal(await bulkPage.getByLabel('Maximum for Urban detail', { exact: true }).inputValue(), '17');
+  assert.equal(await bulkPage.locator('#rule-selection-status').textContent(), '');
+  assert.ok(await bulkButton.isEnabled());
+  assert.ok(await bulkPage.locator('#prepare-button').isEnabled());
+  await choosePipeline('empty');
+  await selectAll('No rules found in empty.');
+  assert.equal(await targetRows.count(), 21, 'an empty pipeline cannot remove existing targets');
+  assert.ok(await bulkPage.locator('#rule-error').isHidden(), 'changing pipeline clears stale errors');
+  await bulkPage.setViewportSize({ width: 390, height: 844 });
+  await bulkPage.locator('#pipeline-select').scrollIntoViewIfNeeded();
+  await bulkPage.screenshot({ path: path.join(screenshots, 'select-all-mobile.png') });
+  assert.ok(await bulkPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'bulk selection controls must fit mobile');
+  await bulkButton.focus();
+  await bulkPage.keyboard.press('Enter');
+  await bulkPage.locator('#rule-selection-status').filter({ hasText: 'No rules found in empty.' }).waitFor();
+  assert.equal(await targetRows.count(), 21, 'mobile keyboard activation preserves existing selections');
+  await bulkPage.setViewportSize({ width: 1440, height: 1000 });
+
+  await openBulk('duplicates');
+  await selectAll('Added 11 rules from duplicates.');
+  assert.equal(await targetRows.count(), 11, 'duplicate records across pages count once within a pipeline');
+  await openBulk('too-many');
+  await bulkButton.click();
+  await bulkPage.locator('#rule-error').filter({ hasText: '100-target limit' }).waitFor();
+  assert.equal(await targetRows.count(), 0, 'a pipeline with 101 rules must not be silently truncated to 100');
+  await choosePipeline('ninety');
+  await selectAll('Added 90 rules from ninety.');
+  await choosePipeline('secondary');
+  await selectAll('Added 10 rules from secondary.');
+  assert.equal(await targetRows.count(), 100, 'exactly the server target limit is supported');
+  await selectAll('All 10 rules in secondary are already selected.');
+  assert.equal(await targetRows.count(), 100, 'existing selections can be reselected at full capacity');
+
+  await openBulk('imagery');
+  await addFirstRule();
+  await bulkPage.getByLabel('Minimum for Urban detail').fill('9');
+  await bulkPage.getByLabel('Maximum for Urban detail').fill('19');
+  rulePageOverrides.set('imagery', async (from, size) => from === 10
+    ? { data: { error: 'The second page is temporarily unavailable.' }, status: 503 }
+    : { data: rules.slice(from, from + size) });
+  await bulkButton.click();
+  await bulkPage.locator('#rule-error').filter({ hasText: 'No rules were added. The second page is temporarily unavailable.' }).waitFor();
+  assert.equal(await targetRows.count(), 1, 'a later page failure cannot leave partial selection');
+  assert.equal(await bulkPage.getByLabel('Minimum for Urban detail').inputValue(), '9');
+  assert.equal(await bulkPage.getByLabel('Maximum for Urban detail').inputValue(), '19');
+  assert.ok(await bulkPage.locator('#add-rules').isEnabled());
+  assert.ok(await bulkPage.locator('#add-pasted-rules').isEnabled());
+  rulePageOverrides.delete('imagery');
+  await selectAll('Added 10 rules from imagery.');
+  assert.ok(await bulkPage.locator('#rule-error').isHidden(), 'retry clears the previous failure');
+
+  await openBulk('imagery');
+  await addFirstRule();
+  const heldSelection = holdRulePage('imagery', 10);
+  const raceStart = requests.length;
+  await bulkButton.click();
+  await heldSelection.entered;
+  assert.equal(await targetRows.count(), 1, 'no rules are appended while later pages are pending');
+  assert.ok(await bulkButton.isDisabled());
+  assert.equal(await bulkButton.getAttribute('aria-busy'), 'true');
+  for (const id of ['add-rules', 'add-pasted-rules', 'prepare-button'])
+    assert.ok(await bulkPage.locator(`#${id}`).isDisabled(), `${id} must wait for selection`);
+  await bulkPage.evaluate(() => {
+    document.getElementById('select-all-rules').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    document.getElementById('add-pasted-rules').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    document.getElementById('preview-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
+  await bulkPage.getByLabel('Minimum for Urban detail').fill('12');
+  await bulkPage.getByLabel('Maximum for Urban detail').fill('34');
+  heldSelection.release();
+  rulePageOverrides.delete('imagery');
+  await bulkPage.locator('#rule-selection-status').filter({ hasText: 'Added 10 rules from imagery.' }).waitFor();
+  assert.equal(await bulkPage.getByLabel('Minimum for Urban detail').inputValue(), '12');
+  assert.equal(await bulkPage.getByLabel('Maximum for Urban detail').inputValue(), '34', 'edits during retrieval survive the atomic commit');
+  assert.equal(requests.slice(raceStart).filter(r => r.path === '/auto-runs/preview').length, 0, 'preview cannot race pending selection');
+  assert.equal(requests.slice(raceStart).filter(r => r.path === '/pipelines/imagery/rules').length, 2, 'repeated clicks cannot start concurrent bulk fetches');
+
+  await openBulk('imagery');
+  const staleSelection = holdRulePage('imagery', 10);
+  await bulkButton.click();
+  await staleSelection.entered;
+  await choosePipeline('secondary');
+  assert.equal(await bulkPage.locator('#rule-selection-status').textContent(), '', 'pipeline changes clear loading state');
+  const nextSelection = holdRulePage('secondary', 0);
+  await bulkButton.click();
+  await nextSelection.entered;
+  staleSelection.release();
+  rulePageOverrides.delete('imagery');
+  await bulkPage.waitForTimeout(100);
+  assert.ok(await bulkButton.isDisabled(), 'stale completion cannot unlock a new operation');
+  assert.match(await bulkPage.locator('#rule-selection-status').textContent(), /Loading all rules in secondary/);
+  assert.equal(await targetRows.count(), 0, 'old pipeline results must never be committed');
+  nextSelection.release();
+  rulePageOverrides.delete('secondary');
+  await bulkPage.locator('#rule-selection-status').filter({ hasText: 'Added 10 rules from secondary.' }).waitFor();
+  assert.equal(await targetRows.count(), 10);
+  assert.equal(await targetRows.filter({ hasText: 'imagery' }).count(), 0);
+  assert.ok(await bulkPage.locator('#rule-error').isHidden(), 'cancelled requests must not show stale errors');
+
+  await openBulk('imagery');
+  let releaseLookup, markLookupEntered;
+  const heldLookup = new Promise(resolve => { releaseLookup = resolve; });
+  const lookupEntered = new Promise(resolve => { markLookupEntered = resolve; });
+  pendingResponses.add(releaseLookup);
+  ruleLookupGates.set('rule-6', async () => { markLookupEntered(); await heldLookup; });
+  await bulkPage.locator('.paste-rules summary').click();
+  await bulkPage.locator('#pasted-rule-ids').fill('rule-1, rule-2, rule-3, rule-4, rule-5, rule-6');
+  await bulkPage.locator('#add-pasted-rules').click();
+  await lookupEntered;
+  assert.equal(await targetRows.count(), 5, 'completed pasted-ID batches must be visible while later batches are pending');
+  assert.ok(await bulkPage.locator('#prepare-button').isDisabled());
+  await bulkPage.getByLabel('Maximum for Urban detail').fill('42');
+  await choosePipeline('secondary');
+  assert.equal(await targetRows.count(), 5, 'cancelling pasted lookup keeps every committed target visible');
+  assert.ok(await bulkPage.locator('#prepare-button').isEnabled());
+  releaseLookup();
+  pendingResponses.delete(releaseLookup);
+  ruleLookupGates.delete('rule-6');
+  await bulkPage.waitForTimeout(100);
+  assert.equal(await targetRows.count(), 5, 'the cancelled second batch cannot add a hidden target');
+  assert.equal(await bulkPage.getByLabel('Maximum for Urban detail').inputValue(), '42');
+  assert.ok(await bulkPage.locator('#rule-error').isHidden());
+  await bulkPage.locator('#prepare-button').click();
+  await bulkPage.waitForURL('**/ui/auto-run/runs/run-4');
+  await bulkPage.locator('#start-run:not([hidden])').waitFor();
+  const pastedPreview = requests.filter(r => r.path === '/auto-runs/preview').at(-1).body;
+  assert.deepEqual(pastedPreview.targets.map(target => [target.pipelineId, target.ruleId]),
+    rules.slice(0, 5).map(rule => ['imagery', rule._id]), 'submitted targets must match the five visible committed rules');
+  assert.equal(pastedPreview.targets[0].maxOverlays, 42);
+  await bulkPage.close();
+
   options.enabled = false;
   const disabledPage = await context.newPage();
   disabledPage.on('pageerror', error => pageErrors.push(error.message));
@@ -265,8 +490,13 @@ try {
     'live batch update', 'cancel and terminal polling stop', 'draft preserved across navigation', 'ID deduplication',
     'deep-link reload', 'mobile overflow', 'expired or missing run', 'pasted IDs with partial lookup failures',
     'rule-derived source', 'ambiguous DST validation', 'unknown-route recovery', 'disabled feature',
-    'configuration publication presets', 'monitor presets require Apply and survive polling', 'terminal preset controls disabled'], screenshots }, null, 2));
+    'configuration publication presets', 'monitor presets require Apply and survive polling', 'terminal preset controls disabled',
+    'select all across every page including inactive rules', 'bulk keyboard and mobile controls', 'bulk duplicate and quota preservation',
+    'bulk cross-pipeline identity and capacity', 'empty pipeline selection', 'bulk exact target limit and no truncation',
+    'atomic page failure and retry', 'bulk operation locking and live quota edits', 'stale pipeline cancellation and operation isolation',
+    'pasted-ID batch cancellation keeps committed targets visible and submitted'], screenshots }, null, 2));
 } finally {
+  for (const release of pendingResponses) release();
   if (browser) await browser.close();
   await new Promise(resolve => server.close(resolve));
 }

@@ -9,7 +9,8 @@ const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const state = {
   initialized: false, options: null, targets: [], rules: [], rulesFrom: 0, rulesSize: 10,
   pipelines: [], runId: null, run: null, timer: null, itemsFrom: 0, itemsSize: 20,
-  itemsOutcome: '', publicationDirty: false, refreshVersion: 0, rulesVersion: 0
+  itemsOutcome: '', publicationDirty: false, refreshVersion: 0, rulesVersion: 0,
+  rulesLoading: false, rulesPipeline: '', selectionOperation: null, setupReady: false, preparing: false
 };
 const $ = id => document.getElementById(id);
 const badge = value => `<span class="tag ${['Ready', 'Completed', 'Confirmed'].includes(value) ? 'good' : ['Failed', 'Expired'].includes(value) ? 'bad' : ['CompletedWithErrors', 'Uncertain', 'Cancelled'].includes(value) ? 'warn' : ''}">${escape(value)}</span>`;
@@ -45,6 +46,7 @@ function syncPublicationPresets(prefix = '', disabled = false) {
 }
 
 export async function showAutoRun(id = null) {
+  cancelRuleSelection();
   if (!state.initialized || !$('configuration')) {
     state.initialized = true;
     $('app').innerHTML = `<div id="global-notice" role="alert" hidden></div><div id="configuration">${configurationMarkup()}</div><div id="run-detail" hidden></div>`;
@@ -95,6 +97,8 @@ function configurationMarkup() {
     </div></section>
     <section class="panel">${panelHeader('02', 'Select pipeline rules', 'Each selected rule gets its own overlay quota.')}<div class="panel-body">
       <div class="toolbar"><label class="field" for="pipeline-select"><span>Pipeline</span><select id="pipeline-select"><option value="">Loading pipelines…</option></select></label><button type="button" class="button ghost" id="load-rules">Browse rules <span aria-hidden="true">↓</span></button></div>
+      <div class="rule-selection-actions"><button type="button" class="button compact" id="select-all-rules" aria-describedby="select-all-scope" disabled>Select all rules</button><p id="select-all-scope" class="hint">Choose a pipeline to select all its rules across every page.</p></div>
+      <p id="rule-selection-status" class="hint rule-selection-status" role="status" aria-live="polite"></p>
       <div id="rule-browser" class="rule-browser" hidden><div class="browser-header"><span>AVAILABLE RULES · active and inactive</span><span id="rule-page-label"></span></div><div id="rule-list" class="browser-list"></div><div class="browser-footer"><div class="pagination"><button type="button" class="button compact ghost" id="rules-prev" aria-label="Previous rules page">←</button><button type="button" class="button compact ghost" id="rules-next" aria-label="Next rules page">→</button></div><button type="button" class="button compact" id="add-rules">Add selected rules</button></div></div>
       <details class="paste-rules"><summary>Already have rule IDs?</summary><div class="toolbar"><label class="field" for="pasted-rule-ids"><span>Rule IDs in the selected pipeline</span><textarea id="pasted-rule-ids" rows="2" placeholder="Paste IDs separated by commas or new lines"></textarea></label><button type="button" class="button" id="add-pasted-rules">Add IDs</button></div></details>
       <div id="rule-error" class="inline-error" role="alert" hidden></div>
@@ -123,15 +127,17 @@ function attachConfiguration() {
   $('preview-form').addEventListener('submit', submitPreview);
   attachPublicationPresets();
   document.querySelectorAll('[name="source-mode"]').forEach(radio => radio.addEventListener('change', updateSource));
-  $('pipeline-select').addEventListener('change', () => { state.rulesFrom = 0; loadRules(); });
+  $('pipeline-select').addEventListener('change', () => { cancelRuleSelection(); hideError('rule-error'); state.rulesFrom = 0; loadRules(); });
   $('load-rules').addEventListener('click', () => { state.rulesFrom = 0; loadRules(); });
   $('rules-prev').addEventListener('click', () => { state.rulesFrom = Math.max(0, state.rulesFrom - state.rulesSize); loadRules(); });
   $('rules-next').addEventListener('click', () => { state.rulesFrom += state.rulesSize; loadRules(); });
   $('add-rules').addEventListener('click', () => {
+    if (state.selectionOperation || state.preparing) return;
     if (!$('pipeline-select').value) return showError('rule-error', new Error('Select a pipeline first.'));
     const selected = [...document.querySelectorAll('[name="rule-choice"]:checked')].map(input => state.rules[Number(input.value)]);
     try { selected.forEach(rule => addTarget($('pipeline-select').value, rule)); renderTargets(); renderRuleList(); } catch (error) { showError('rule-error', error); }
   });
+  $('select-all-rules').addEventListener('click', selectAllRules);
   $('add-pasted-rules').addEventListener('click', addPastedRules);
   $('refresh-history').addEventListener('click', loadHistory);
   $('selected-targets').addEventListener('input', event => {
@@ -179,7 +185,94 @@ async function loadSetup() {
     $('pipeline-select').innerHTML = '<option value="">Could not load pipelines</option>';
     showError('rule-error', pipelines.reason);
   }
-  $('prepare-button').disabled = !state.options?.enabled || pipelines.status !== 'fulfilled';
+  state.setupReady = pipelines.status === 'fulfilled';
+  syncSelectionControls();
+}
+
+function syncSelectionControls() {
+  if (!$('pipeline-select')) return;
+  const pipeline = $('pipeline-select').value;
+  const busy = Boolean(state.selectionOperation) || state.preparing;
+  $('select-all-rules').disabled = !pipeline || !state.options || busy;
+  $('select-all-rules').setAttribute('aria-busy', String(state.selectionOperation?.kind === 'all'));
+  $('select-all-scope').textContent = pipeline
+    ? `All rules in ${pipeline}, across every page. Includes active and inactive rules.`
+    : 'Choose a pipeline to select all its rules across every page.';
+  $('add-rules').disabled = busy || state.rulesLoading || state.rulesPipeline !== pipeline || !state.rules.length;
+  $('add-pasted-rules').disabled = busy;
+  $('prepare-button').disabled = busy || !state.options?.enabled || !state.setupReady;
+}
+
+function cancelRuleSelection() {
+  state.selectionOperation?.controller.abort();
+  state.selectionOperation = null;
+  if ($('rule-selection-status')) $('rule-selection-status').textContent = '';
+  syncSelectionControls();
+}
+
+function beginRuleSelection(kind, pipeline) {
+  if (state.selectionOperation || state.preparing) return null;
+  const operation = { kind, pipeline, controller: new AbortController() };
+  state.selectionOperation = operation;
+  hideError('rule-error');
+  $('rule-selection-status').textContent = kind === 'all' ? `Loading all rules in ${pipeline}…` : '';
+  syncSelectionControls();
+  return operation;
+}
+
+function isCurrentSelection(operation) {
+  return state.selectionOperation === operation && $('pipeline-select')?.value === operation.pipeline;
+}
+
+function finishRuleSelection(operation) {
+  if (state.selectionOperation !== operation) return;
+  state.selectionOperation = null;
+  syncSelectionControls();
+}
+
+async function selectAllRules() {
+  const pipeline = $('pipeline-select').value;
+  if (!pipeline || !state.options) return;
+  const operation = beginRuleSelection('all', pipeline);
+  if (!operation) return;
+  const maxTargets = state.options.limits.maxTargets ?? 100;
+  const candidates = new Map();
+  const additions = () => [...candidates.values()].filter(rule =>
+    !state.targets.some(target => target.pipelineId === pipeline && target.ruleId === rule._id));
+  const checkCapacity = () => {
+    const newRules = additions();
+    if (state.targets.length + newRules.length > maxTargets)
+      throw new Error(`Selecting every rule would exceed the ${maxTargets}-target limit across all pipelines. Remove targets or select rules individually.`);
+    return newRules;
+  };
+  try {
+    // The API has offset pagination without a total. Read through the final page;
+    // bound repeated/overlapping pages if the catalog changes during retrieval.
+    for (let from = 0; ; from += state.rulesSize) {
+      if (from >= Math.max(1000, maxTargets * 10)) throw new Error('The rule list kept changing while loading. Try again.');
+      const page = await api.rules(pipeline, from, state.rulesSize, operation.controller.signal);
+      if (!isCurrentSelection(operation)) return;
+      if (!Array.isArray(page) || page.some(rule => !rule || typeof rule._id !== 'string' || !rule._id.trim()))
+        throw new Error('The API returned an invalid rule list.');
+      for (const rule of page) candidates.set(rule._id, rule);
+      checkCapacity();
+      if (page.length < state.rulesSize) break;
+    }
+    if (!isCurrentSelection(operation)) return;
+    const newRules = checkCapacity();
+    // Commit only after every page succeeds. Keep existing target objects and quotas.
+    state.targets.push(...newRules.map(rule => ({ pipelineId: pipeline, ruleId: rule._id, minOverlays: '0', maxOverlays: '100', rule })));
+    renderTargets();
+    if (!state.rulesLoading) renderRuleList();
+    const existing = candidates.size - newRules.length;
+    $('rule-selection-status').textContent = !candidates.size ? `No rules found in ${pipeline}.`
+      : !newRules.length ? `All ${candidates.size} rules in ${pipeline} are already selected.`
+      : `Added ${newRules.length} rule${newRules.length === 1 ? '' : 's'} from ${pipeline}.${existing ? ` ${existing} already selected; existing quotas kept.` : ''}`;
+  } catch (error) {
+    if (!isCurrentSelection(operation)) return;
+    $('rule-selection-status').textContent = '';
+    showError('rule-error', new Error(`No rules were added. ${error.message}`));
+  } finally { finishRuleSelection(operation); }
 }
 
 function updateSource() {
@@ -210,6 +303,8 @@ function ruleDescription(rule) {
 async function loadRules() {
   const pipeline = $('pipeline-select').value;
   const version = ++state.rulesVersion;
+  state.rulesLoading = Boolean(pipeline);
+  syncSelectionControls();
   if (!pipeline) {
     state.rules = [];
     $('rule-browser').hidden = true;
@@ -225,17 +320,21 @@ async function loadRules() {
     const rules = await api.rules(pipeline, state.rulesFrom, state.rulesSize);
     if (version !== state.rulesVersion) return;
     state.rules = rules;
+    state.rulesPipeline = pipeline;
+    state.rulesLoading = false;
     renderRuleList();
   } catch (error) {
     if (version !== state.rulesVersion) return;
     state.rules = [];
+    state.rulesLoading = false;
     $('rule-list').innerHTML = '<div class="run-empty">Rules could not be loaded. Try Browse rules again.</div>';
     showError('rule-error', error);
-  }
+  } finally { if (version === state.rulesVersion) syncSelectionControls(); }
 }
 
 function renderRuleList() {
   const pipeline = $('pipeline-select').value;
+  if (state.rulesLoading || state.rulesPipeline !== pipeline) { syncSelectionControls(); return; }
   $('rule-page-label').textContent = state.rules.length ? `${state.rulesFrom + 1}–${state.rulesFrom + state.rules.length}` : 'No rules';
   $('rule-list').innerHTML = state.rules.length ? state.rules.map((rule, i) => {
     const exists = state.targets.some(target => target.pipelineId === pipeline && target.ruleId === rule._id);
@@ -243,7 +342,7 @@ function renderRuleList() {
   }).join('') : '<div class="run-empty">No rules on this page.</div>';
   $('rules-prev').disabled = state.rulesFrom === 0;
   $('rules-next').disabled = state.rules.length < state.rulesSize;
-  $('add-rules').disabled = !state.rules.length;
+  syncSelectionControls();
 }
 
 function addTarget(pipelineId, rule) {
@@ -253,28 +352,32 @@ function addTarget(pipelineId, rule) {
 }
 
 async function addPastedRules() {
+  if (state.selectionOperation || state.preparing) return;
   hideError('rule-error');
   const pipeline = $('pipeline-select').value;
   const ids = splitValues($('pasted-rule-ids').value);
   if (!pipeline || !ids.length) return showError('rule-error', new Error('Select a pipeline and enter at least one rule ID.'));
   if (ids.length > (state.options?.limits.maxTargets ?? 100)) return showError('rule-error', new Error('Too many rule IDs for one preview.'));
-  const button = $('add-pasted-rules');
-  button.disabled = true;
+  const operation = beginRuleSelection('ids', pipeline);
+  if (!operation) return;
   try {
     const errors = [];
     // Limit lookup concurrency and show individual failures without losing successful selections.
     for (let i = 0; i < ids.length; i += 5) {
-      const results = await Promise.allSettled(ids.slice(i, i + 5).map(id => api.rule(pipeline, id)));
+      const results = await Promise.allSettled(ids.slice(i, i + 5).map(id => api.rule(pipeline, id, operation.controller.signal)));
+      if (!isCurrentSelection(operation)) return;
       results.forEach((result, j) => {
         if (result.status === 'fulfilled') addTarget(pipeline, result.value);
         else errors.push(`${ids[i + j]}: ${result.reason.message}`);
       });
+      // Successful lookups remain selected if a later batch is cancelled.
+      // Keep those committed targets visible before starting the next batch.
+      renderTargets(); renderRuleList();
     }
-    renderTargets(); renderRuleList();
     if (errors.length) showError('rule-error', new Error(errors.join(' ')));
     else $('pasted-rule-ids').value = '';
-  } catch (error) { renderTargets(); showError('rule-error', error); }
-  finally { button.disabled = false; }
+  } catch (error) { if (isCurrentSelection(operation)) { renderTargets(); renderRuleList(); showError('rule-error', error); } }
+  finally { finishRuleSelection(operation); }
 }
 
 function renderTargets() {
@@ -337,6 +440,7 @@ function collectFilters() {
 
 async function submitPreview(event) {
   event.preventDefault();
+  if (state.selectionOperation || state.preparing || !state.options?.enabled || !state.setupReady) return;
   hideError('form-error');
   const button = $('prepare-button');
   try {
@@ -358,7 +462,8 @@ async function submitPreview(event) {
     }
     const min = optionalNumber('overall-min') ?? 0, max = optionalNumber('overall-max');
     if (max !== undefined && min > max) throw new Error('The overall minimum cannot be greater than the overall maximum.');
-    button.disabled = true;
+    state.preparing = true;
+    syncSelectionControls();
     button.textContent = 'Preparing…';
     const run = await api.preview({ source, targets, minOverlays: min, maxOverlays: max,
       publication: { batchSize: Number($('batch-size').value), delayMs: Number($('delay-ms').value) } });
@@ -367,7 +472,8 @@ async function submitPreview(event) {
     showError('form-error', error);
     $('form-error').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   } finally {
-    button.disabled = !state.options?.enabled;
+    state.preparing = false;
+    syncSelectionControls();
     button.innerHTML = 'Prepare preview <span aria-hidden="true">↗</span>';
   }
 }

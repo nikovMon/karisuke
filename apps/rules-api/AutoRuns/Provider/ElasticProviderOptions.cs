@@ -9,6 +9,7 @@ public sealed class ElasticProviderOptions
     public string SourceTimeZoneId { get; set; } = "Asia/Jerusalem";
     public int TimeoutSeconds { get; set; } = 30;
     public int MaxResponseBytes { get; set; } = 16 * 1024 * 1024;
+    public Dictionary<string, string> Headers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool StringEncodedNumbers { get; set; }
     public bool StringEncodedBooleans { get; set; }
     public ProviderRequestFields RequestFields { get; set; } = new();

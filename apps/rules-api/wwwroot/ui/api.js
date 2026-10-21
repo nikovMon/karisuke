@@ -36,8 +36,8 @@ export async function request(path, { method = 'GET', body, signal } = {}) {
 export const api = {
   options: () => request('/auto-runs/options'),
   pipelines: () => request('/pipelines'),
-  rules: (pipeline, from, size) => request(`/pipelines/${encodeURIComponent(pipeline)}/rules?from=${from}&size=${size}`),
-  rule: (pipeline, id) => request(`/pipelines/${encodeURIComponent(pipeline)}/rules/${encodeURIComponent(id)}`),
+  rules: (pipeline, from, size, signal) => request(`/pipelines/${encodeURIComponent(pipeline)}/rules?from=${from}&size=${size}`, { signal }),
+  rule: (pipeline, id, signal) => request(`/pipelines/${encodeURIComponent(pipeline)}/rules/${encodeURIComponent(id)}`, { signal }),
   preview: body => request('/auto-runs/preview', { method: 'POST', body }),
   list: () => request('/auto-runs'),
   run: id => request(`/auto-runs/${encodeURIComponent(id)}`),

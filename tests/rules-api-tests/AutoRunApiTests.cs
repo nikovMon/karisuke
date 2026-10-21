@@ -259,6 +259,56 @@ public sealed class AutoRunApiTests
         Assert.Empty(fixture.Broker.Messages);
     }
 
+    [Theory]
+    [InlineData(AutoRunSourceMode.OverlayIds)]
+    [InlineData(AutoRunSourceMode.Rules)]
+    public async Task ProviderHeadersAreSentWithoutExposingThemInApiResponsesOrGatewayMessages(AutoRunSourceMode mode)
+    {
+        var headers = new Dictionary<string, string>
+        {
+            ["Authorization"] = "Bearer provider-test-only-token",
+            ["X-Private-Provider-Key"] = "provider-test-only-key"
+        };
+        using var fixture = new Fixture(providerHeaders: headers);
+        fixture.Store.Add(RulesIndex, "shared-rule", Rule("Historical rule", "tenant"));
+        var request = Request() with
+        {
+            Source = new() { Mode = mode, OverlayIds = mode == AutoRunSourceMode.OverlayIds ? ["overlay-1"] : null }
+        };
+        using var accepted = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", request, AutoRunJson.Options);
+        await AssertStatus(accepted, HttpStatusCode.Accepted);
+        AssertNoHeaders(await accepted.Content.ReadAsStringAsync());
+        var created = await Read<AutoRunSummary>(accepted);
+        await WaitForState(fixture.Client, created.Id, AutoRunState.Ready);
+
+        Assert.NotEmpty(fixture.Provider.Calls);
+        Assert.All(fixture.Provider.Calls, call =>
+        {
+            foreach (var (name, value) in headers)
+                Assert.Equal(value, Assert.Single(call.Headers[name]));
+        });
+        foreach (var route in new[] { "/auto-runs/options", "/auto-runs", $"/auto-runs/{created.Id}", $"/auto-runs/{created.Id}/items" })
+        {
+            using var response = await fixture.Client.GetAsync(route);
+            await AssertStatus(response, HttpStatusCode.OK);
+            AssertNoHeaders(await response.Content.ReadAsStringAsync());
+        }
+
+        using var started = await fixture.Client.PostAsync($"/auto-runs/{created.Id}/start", null);
+        await AssertStatus(started, HttpStatusCode.OK);
+        await WaitForState(fixture.Client, created.Id, AutoRunState.Completed);
+        AssertNoHeaders(Encoding.UTF8.GetString(Assert.Single(fixture.Broker.Messages).Message.Body));
+
+        void AssertNoHeaders(string json)
+        {
+            foreach (var (name, value) in headers)
+            {
+                Assert.DoesNotContain(name, json, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain(value, json, StringComparison.Ordinal);
+            }
+        }
+    }
+
     private static AutoRunPreviewRequest Request() => new()
     {
         Source = new() { Mode = AutoRunSourceMode.OverlayIds, OverlayIds = ["overlay-1"] },
@@ -312,12 +362,12 @@ public sealed class AutoRunApiTests
         public CapturingBroker Broker { get; } = new();
         public HttpClient Client { get; }
 
-        public Fixture(bool enabled = true)
+        public Fixture(bool enabled = true, IReadOnlyDictionary<string, string>? providerHeaders = null)
         {
             _baseFactory = new(Store);
             _app = _baseFactory.WithWebHostBuilder(builder =>
             {
-                builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+                var configuration = new Dictionary<string, string?>
                 {
                     ["AutoRun:Enabled"] = enabled.ToString(),
                     ["AutoRun:Provider:BaseUrl"] = enabled ? "http://provider.invalid" : "",
@@ -329,7 +379,11 @@ public sealed class AutoRunApiTests
                     ["AutoRun:Destination:Connection:Password"] = "test",
                     ["AutoRun:Destination:Connection:VirtualHost"] = "/",
                     ["AutoRun:Destination:QueueName"] = "unified-gateway.input"
-                }));
+                };
+                if (providerHeaders is not null)
+                    foreach (var (name, value) in providerHeaders)
+                        configuration[$"AutoRun:Provider:Headers:{name}"] = value;
+                builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(configuration));
                 builder.ConfigureServices(services =>
                 {
                     services.AddHttpClient<IElasticOverlayProvider, ElasticOverlayProvider>()
@@ -349,7 +403,7 @@ public sealed class AutoRunApiTests
         }
     }
 
-    private sealed record ProviderCall(HttpMethod Method, Uri Uri, string? Body);
+    private sealed record ProviderCall(HttpMethod Method, Uri Uri, string? Body, IReadOnlyDictionary<string, string[]> Headers);
 
     private sealed class ProviderHandler : HttpMessageHandler
     {
@@ -359,7 +413,8 @@ public sealed class AutoRunApiTests
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
-            Calls.Enqueue(new(request.Method, request.RequestUri!, body));
+            Calls.Enqueue(new(request.Method, request.RequestUri!, body,
+                request.Headers.ToDictionary(header => header.Key, header => header.Value.ToArray(), StringComparer.OrdinalIgnoreCase)));
             var entity = new
             {
                 exclusive_id = new { entity_id = "overlay-1" }, geo = new { wkt = Area },

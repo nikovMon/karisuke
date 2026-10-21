@@ -51,6 +51,8 @@ The feature is disabled by default. Jobs and previews are held in memory on **on
 
 The console uses the same API routes, supports all three source modes, browses saved rules, shows per-rule quotas and preview shortfalls, and polls run progress. Run links use `/ui/auto-run/runs/{id}`. Date inputs let the operator select the browser timezone or UTC and submit explicit UTC timestamps. The UI and API use the deployment's existing access boundary; this feature adds no login, roles, or per-user job isolation.
 
+In the rule browser, **Select all rules** adds every rule in the selected pipeline across all pages, including inactive rules. Rules already selected retain their edited quotas, and targets from other pipelines remain selected. The operation adds nothing if fetching a page fails or the combined selection would exceed the 100-target limit; select fewer rules individually in that case. Selecting rules prepares the configuration only; it does not start a preview or publish messages.
+
 ### Workflow and routes
 
 | Method and route | Behavior |
@@ -229,6 +231,23 @@ The adapter uses:
 
 The first request supplies no provider query flags. Batch responses must contain `entities_list`; the optional `next_page` URL is followed with the **same POST body**, including any continuation query string supplied by the provider. Continuations must remain on the configured scheme, host, and port. Redirects are disabled, repeated continuation URLs fail preparation, and an empty `entities_list` terminates paging. Provider request timeout defaults to 30 seconds.
 
+Optional `AutoRun:Provider:Headers` configures string header names and values for every provider GET, search POST, and continuation request. The default is `{}`. For example:
+
+```json
+{
+  "AutoRun": {
+    "Provider": {
+      "Headers": {
+        "X-Sending-System": "UnifiedGateway",
+        "Authorization": "Bearer replace-me"
+      }
+    }
+  }
+}
+```
+
+Supply real credentials through deployment secrets, for example the environment variable `AutoRun__Provider__Headers__Authorization`. Header names are case-insensitive; values are preserved. Malformed headers and content/transport-managed headers such as `Content-Type`, `Content-Length`, `Host`, and `Connection` fail startup validation. The adapter continues to set JSON content type itself. Header values are redacted in the provider HTTP client's logs and are not exposed through the Auto-run API or UI. Restart Rules API after changing these settings. Continuation requests remain restricted to the configured origin, and redirects remain disabled.
+
 Request construction follows the supplied working logical-operator example, not the differing Swagger skeleton:
 
 ```json
@@ -308,7 +327,8 @@ The auto-run destination is the **Unified Gateway input queue**, independently o
       "TimeoutSeconds": 30,
       "MaxResponseBytes": 16777216,
       "StringEncodedNumbers": false,
-      "StringEncodedBooleans": false
+      "StringEncodedBooleans": false,
+      "Headers": {}
     },
     "Destination": {
       "Connection": {
