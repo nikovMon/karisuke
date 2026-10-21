@@ -7,6 +7,7 @@ using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Historical;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.RabbitMqClient;
+using ImagingPipeline.RuleEngine.Input;
 using ImagingPipeline.Rules.Api.AutoRuns;
 using ImagingPipeline.Rules.Api.AutoRuns.Provider;
 using ImagingPipeline.Rules.Api.Tests.Fakes;
@@ -139,6 +140,63 @@ public sealed class AutoRunApiTests
         Assert.Equal(created.Id, Assert.Single(await Read<List<AutoRunSummary>>(history)).Id);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OverlayIdsWithoutRulesPublishesFrozenOrdinaryGatewayInput(bool includeEmptyTargets)
+    {
+        using var fixture = new Fixture();
+        // No rules exist in this store. Direct submission must not require a rule lookup.
+        var request = new Dictionary<string, object>
+        {
+            ["source"] = new { mode = "OverlayIds", overlayIds = new[] { "overlay-1", "overlay-1" } },
+            ["publication"] = new { batchSize = 1, delayMs = 0 }
+        };
+        if (includeEmptyTargets) request["targets"] = Array.Empty<object>();
+        using var accepted = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", request);
+        await AssertStatus(accepted, HttpStatusCode.Accepted);
+        var created = await Read<AutoRunSummary>(accepted);
+        var ready = await WaitForState(fixture.Client, created.Id, AutoRunState.Ready);
+
+        Assert.Empty(ready.Targets);
+        Assert.Empty(ready.Queries);
+        Assert.Equal(1, ready.MaxOverlays);
+        Assert.Equal(1, ready.Counters.Scanned);
+        Assert.Equal(1, ready.Counters.Selected);
+        Assert.True(ready.SourceExhausted);
+        Assert.NotEmpty(ready.Warnings);
+        Assert.Equal(HttpMethod.Get, Assert.Single(fixture.Provider.Calls).Method);
+        Assert.Empty(fixture.Broker.Messages);
+        using var itemsResponse = await fixture.Client.GetAsync($"/auto-runs/{created.Id}/items");
+        var item = Assert.Single((await Read<AutoRunItemsPage>(itemsResponse)).Items);
+        Assert.Empty(item.Targets);
+
+        fixture.Provider.ImageUrl = "https://images.invalid/changed-after-preview";
+        using var started = await fixture.Client.PostAsync($"/auto-runs/{created.Id}/start", null);
+        await AssertStatus(started, HttpStatusCode.OK);
+        var completed = await WaitForState(fixture.Client, created.Id, AutoRunState.Completed);
+        Assert.Equal(1, completed.Counters.Confirmed);
+        Assert.Empty(completed.Targets);
+        var published = Assert.Single(fixture.Broker.Messages);
+        Assert.Equal("unified-gateway.input", published.Destination.QueueName);
+        Assert.Equal(created.Id, published.Message.CorrelationId);
+        var input = GatewayInputMessageParser.Parse(published.Message.Body);
+        Assert.Equal("overlay-1", input.ImageId);
+        Assert.Equal("https://images.invalid/original", input.ImageUrl);
+        Assert.Equal(DateTimeOffset.Parse("2000-01-02T10:00:00Z"), input.PhotoTime);
+        Assert.Equal("Polygon", input.Geometry.GeometryType);
+        using var body = JsonDocument.Parse(published.Message.Body);
+        Assert.Equal("overlay-1", body.RootElement.GetProperty("id").GetString());
+        foreach (var name in new[] { "kind", "version", "runId", "overlay", "targets" })
+            Assert.False(body.RootElement.TryGetProperty(name, out _));
+        Assert.NotNull(published.Message.Headers);
+        var updatedFields = Assert.IsAssignableFrom<IEnumerable<object>>(published.Message.Headers["x-updated-fields"]);
+        Assert.Contains("gridType", updatedFields);
+        using var repeatedStart = await fixture.Client.PostAsync($"/auto-runs/{created.Id}/start", null);
+        await AssertStatus(repeatedStart, HttpStatusCode.OK);
+        Assert.Single(fixture.Broker.Messages);
+    }
+
     [Fact]
     public async Task OmittedPublicationUsesConfiguredDefaultsAndReadySettingsCanBeChanged()
     {
@@ -171,6 +229,10 @@ public sealed class AutoRunApiTests
 
     [Theory]
     [InlineData("{}")]
+    [InlineData("""{"source":{"mode":"Rules"},"targets":[]}""")]
+    [InlineData("""{"source":{"mode":"Filters"},"targets":[]}""")]
+    [InlineData("""{"source":{"mode":"OverlayIds","overlayIds":["overlay-1"]},"targets":null}""")]
+    [InlineData("""{"source":{"mode":"OverlayIds","overlayIds":["overlay-1"],"filters":{}},"targets":[]}""")]
     [InlineData("""{"source":{"mode":"OverlayIds","overlayIds":[]},"targets":[{"pipelineId":"FindAir","ruleId":"shared-rule","maxOverlays":1}]}""")]
     [InlineData("""{"source":{"mode":"Rules"},"targets":[{"pipelineId":"FindAir","ruleId":"shared-rule"}]}""")]
     [InlineData("""{"source":{"mode":"Rules"},"targets":[{"pipelineId":"FindAir","ruleId":"shared-rule","maxOverlays":0}]}""")]
@@ -260,9 +322,10 @@ public sealed class AutoRunApiTests
     }
 
     [Theory]
-    [InlineData(AutoRunSourceMode.OverlayIds)]
-    [InlineData(AutoRunSourceMode.Rules)]
-    public async Task ProviderHeadersAreSentWithoutExposingThemInApiResponsesOrGatewayMessages(AutoRunSourceMode mode)
+    [InlineData(AutoRunSourceMode.OverlayIds, false)]
+    [InlineData(AutoRunSourceMode.OverlayIds, true)]
+    [InlineData(AutoRunSourceMode.Rules, false)]
+    public async Task ProviderHeadersAreSentWithoutExposingThemInApiResponsesOrGatewayMessages(AutoRunSourceMode mode, bool direct)
     {
         var headers = new Dictionary<string, string>
         {
@@ -273,7 +336,8 @@ public sealed class AutoRunApiTests
         fixture.Store.Add(RulesIndex, "shared-rule", Rule("Historical rule", "tenant"));
         var request = Request() with
         {
-            Source = new() { Mode = mode, OverlayIds = mode == AutoRunSourceMode.OverlayIds ? ["overlay-1"] : null }
+            Source = new() { Mode = mode, OverlayIds = mode == AutoRunSourceMode.OverlayIds ? ["overlay-1"] : null },
+            Targets = direct ? [] : Request().Targets
         };
         using var accepted = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", request, AutoRunJson.Options);
         await AssertStatus(accepted, HttpStatusCode.Accepted);
@@ -297,7 +361,9 @@ public sealed class AutoRunApiTests
         using var started = await fixture.Client.PostAsync($"/auto-runs/{created.Id}/start", null);
         await AssertStatus(started, HttpStatusCode.OK);
         await WaitForState(fixture.Client, created.Id, AutoRunState.Completed);
-        AssertNoHeaders(Encoding.UTF8.GetString(Assert.Single(fixture.Broker.Messages).Message.Body));
+        var message = Assert.Single(fixture.Broker.Messages).Message;
+        AssertNoHeaders(Encoding.UTF8.GetString(message.Body));
+        AssertNoHeaders(JsonSerializer.Serialize(message.Headers));
 
         void AssertNoHeaders(string json)
         {

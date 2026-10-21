@@ -59,7 +59,7 @@ public sealed record AutoRunTarget
 public sealed record AutoRunPreviewRequest
 {
     [Required] public AutoRunSource Source { get; init; } = null!;
-    [Required, MinLength(1), MaxLength(100)] public List<AutoRunTarget> Targets { get; init; } = [];
+    [Required, MaxLength(100)] public List<AutoRunTarget> Targets { get; init; } = [];
     [Range(0, 100_000)] public int MinOverlays { get; init; }
     [Range(1, 100_000)] public int? MaxOverlays { get; init; }
     public AutoRunPublication? Publication { get; init; }

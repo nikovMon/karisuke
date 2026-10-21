@@ -1,5 +1,7 @@
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Historical;
+using ImagingPipeline.Common.Dtos.Rules.Models;
+using ImagingPipeline.PipelineContracts;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.Rules.Api.AutoRuns;
 using Microsoft.Extensions.Configuration;
@@ -18,10 +20,15 @@ public sealed class AutoRunPublisherTests
         var destination = Destination();
         var publisher = new AutoRunPublisher(transport, Options.Create(new AutoRunOptions { Destination = destination }));
         var payload = """{"id":"overlay-1","photoTime":"2020-01-01T00:00:00Z"}"""u8.ToArray();
+        AutoRunResolvedTarget[] targets = [new(
+            new() { PipelineId = "pipeline", RuleId = "rule", MaxOverlays = 1 },
+            new PipelineRuleDocument { Id = "rule", RuleName = "Saved rule", MatchAll = true, RunParams = [] },
+            new("rule", new Dictionary<string, ImagingPipeline.RuleEngine.Rules.SensorMatchCriteria>(), 0, double.MaxValue, null, null, null, []),
+            new FindAirPipelineContract())];
 
-        var first = await publisher.PublishAsync("run-1", payload, [], CancellationToken.None);
-        await publisher.PublishAsync("run-1", payload, [], CancellationToken.None);
-        await publisher.PublishAsync("run-2", payload, [], CancellationToken.None);
+        var first = await publisher.PublishAsync("run-1", payload, targets, CancellationToken.None);
+        await publisher.PublishAsync("run-1", payload, targets, CancellationToken.None);
+        await publisher.PublishAsync("run-2", payload, targets, CancellationToken.None);
 
         Assert.Equal(AutoRunItemOutcome.Confirmed, first.Outcome);
         Assert.All(transport.Destinations, used => Assert.Same(destination, used));
@@ -34,6 +41,37 @@ public sealed class AutoRunPublisherTests
         Assert.Equal(1, body.RootElement.GetProperty("version").GetInt32());
         Assert.Equal("run-1", body.RootElement.GetProperty("runId").GetString());
         Assert.Equal("overlay-1", body.RootElement.GetProperty("overlay").GetProperty("id").GetString());
+        Assert.Equal("pipeline", Assert.Single(body.RootElement.GetProperty("targets").EnumerateArray()).GetProperty("pipelineId").GetString());
+        Assert.Null(transport.Messages[0].Headers);
+    }
+
+    [Fact]
+    public async Task NoTargetsPublishesExactOrdinaryGatewayBodyAndUpdatedFieldsWithStableIdentity()
+    {
+        var transport = new Transport();
+        var destination = Destination();
+        var publisher = new AutoRunPublisher(transport, Options.Create(new AutoRunOptions { Destination = destination }));
+        var payload = """{ "id": "overlay-1", "photoTime": "2000-01-01T00:00:00Z", "gridType": "grid", "extra": [1,2] }"""u8.ToArray();
+
+        var first = await publisher.PublishAsync("run-1", payload, [], CancellationToken.None);
+        await publisher.PublishAsync("run-1", payload, [], CancellationToken.None);
+        await publisher.PublishAsync("run-2", payload, [], CancellationToken.None);
+
+        Assert.Equal(AutoRunItemOutcome.Confirmed, first.Outcome);
+        Assert.All(transport.Destinations, used => Assert.Same(destination, used));
+        Assert.All(transport.Messages, message =>
+        {
+            Assert.Equal(payload, message.Body);
+            Assert.Equal("application/json", message.ContentType);
+            var fields = Assert.IsAssignableFrom<IList<object>>(message.Headers!["x-updated-fields"]);
+            Assert.Equal("gridType", Assert.Single(fields));
+            using var document = JsonDocument.Parse(message.Body);
+            Assert.False(document.RootElement.TryGetProperty("kind", out _));
+            Assert.False(document.RootElement.TryGetProperty("targets", out _));
+        });
+        Assert.Equal("run-1", transport.Messages[0].CorrelationId);
+        Assert.Equal(transport.Messages[0].MessageId, transport.Messages[1].MessageId);
+        Assert.NotEqual(transport.Messages[0].MessageId, transport.Messages[2].MessageId);
     }
 
     [Theory]

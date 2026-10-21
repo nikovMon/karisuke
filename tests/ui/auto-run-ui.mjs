@@ -52,22 +52,28 @@ const requests = [];
 const runs = new Map();
 const reads = new Map();
 let runSequence = 0;
+let pipelineFailure = false;
+let pipelineGate = null;
 function makeRun(body) {
   const now = new Date();
+  const direct = body.source.mode === 'OverlayIds' && !body.targets?.length;
+  const selected = direct ? Math.min(body.source.overlayIds.length, body.maxOverlays ?? body.source.overlayIds.length) : 25;
   const run = {
     id: `run-${++runSequence}`, state: 'Preparing', createdAt: now.toISOString(),
     readyAt: null, startedAt: null, finishedAt: null, expiresAt: new Date(+now + 1800000).toISOString(),
-    sourceMode: body.source.mode, minOverlays: body.minOverlays, maxOverlays: body.maxOverlays ?? 200,
-    shortfall: 0, counters: { scanned: 162, invalid: 2, duplicates: 4, observedMatches: 80, selected: 25,
-      confirmed: 0, failed: 0, uncertain: 0, inFlight: 0, remaining: 25 },
-    targets: body.targets.map(t => ({ ...t, ruleName: rules.find(r => r._id === t.ruleId).ruleName,
+    sourceMode: body.source.mode, minOverlays: body.minOverlays, maxOverlays: body.maxOverlays ?? (direct ? selected : 200),
+    overlayIds: direct ? body.source.overlayIds.slice(0, selected) : null,
+    shortfall: 0, counters: { scanned: direct ? body.source.overlayIds.length : 162, invalid: direct ? 0 : 2,
+      duplicates: direct ? 0 : 4, observedMatches: direct ? 0 : 80, selected,
+      confirmed: 0, failed: 0, uncertain: 0, inFlight: 0, remaining: selected },
+    targets: (body.targets ?? []).map(t => ({ ...t, ruleName: rules.find(r => r._id === t.ruleId).ruleName,
       isActive: rules.find(r => r._id === t.ruleId).isActive, selected: 20, confirmed: 0,
       failed: 0, uncertain: 0, shortfall: Math.max(0, t.minOverlays - 20),
       rule: rules.find(r => r._id === t.ruleId) })),
     publication: body.publication, activePublication: body.publication, publicationChangePending: false,
-    sourceExhausted: false, stoppedReason: 'Scan limit',
-    warnings: ['Observed counts cover scanned candidates only.'], errors: [],
-    queries: [{ filter: { logical_operators: { AND: [{ match: { SENSOR: { type: 'IN', values: ['SENSOR_A'] } } }] } } }],
+    sourceExhausted: direct, stoppedReason: direct ? null : 'Scan limit',
+    warnings: direct ? [] : ['Observed counts cover scanned candidates only.'], errors: [],
+    queries: direct ? [] : [{ filter: { logical_operators: { AND: [{ match: { SENSOR: { type: 'IN', values: ['SENSOR_A'] } } }] } } }],
     confirmedPerSecond: 0
   };
   runs.set(run.id, run);
@@ -84,10 +90,13 @@ const server = http.createServer(async (req, res) => {
     requests.push({ method: req.method, path: url.pathname, search: url.search, body });
     const json = (data, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
     if (url.pathname === '/auto-runs/options') return json(options);
-    if (url.pathname === '/pipelines') return json([
-      ...[...pipelineRules.keys()].map(pipelineId => ({ pipelineId, enabled: true, contractId: 'overlay' })),
-      { pipelineId: 'disabled-pipeline', enabled: false, contractId: 'overlay' }
-    ]);
+    if (url.pathname === '/pipelines') {
+      await pipelineGate;
+      return pipelineFailure ? json({ error: 'Pipeline discovery is unavailable.' }, 503) : json([
+        ...[...pipelineRules.keys()].map(pipelineId => ({ pipelineId, enabled: true, contractId: 'overlay' })),
+        { pipelineId: 'disabled-pipeline', enabled: false, contractId: 'overlay' }
+      ]);
+    }
     const rulePage = url.pathname.match(/^\/pipelines\/([^/]+)\/rules$/);
     if (rulePage) {
       const pipeline = decodeURIComponent(rulePage[1]);
@@ -117,11 +126,12 @@ const server = http.createServer(async (req, res) => {
         return json(run);
       }
       if (match[2] === 'items') {
-        let items = Array.from({ length: 25 }, (_, i) => ({
-          overlayId: `overlay-${String(i + 1).padStart(3, '0')}`, sensorName: 'SENSOR_A',
+        let items = Array.from({ length: run.counters.selected }, (_, i) => ({
+          overlayId: run.overlayIds?.[i] ?? `overlay-${String(i + 1).padStart(3, '0')}`, sensorName: 'SENSOR_A',
           photoTime: '2026-10-19T10:00:00Z', targets: run.targets.map(t => ({ pipelineId: t.pipelineId, ruleId: t.ruleId })),
-          outcome: i === 1 ? 'Failed' : i === 2 ? 'Uncertain' : run.state === 'Publishing' ? 'Confirmed' : 'Pending',
-          error: i === 1 ? '<img src=x onerror="window.injected=true"> mock broker error' : i === 2 ? 'Acknowledgment not received.' : null
+          outcome: run.overlayIds ? (i < run.counters.confirmed ? 'Confirmed' : 'Pending')
+            : i === 1 ? 'Failed' : i === 2 ? 'Uncertain' : run.state === 'Publishing' ? 'Confirmed' : 'Pending',
+          error: run.overlayIds ? null : i === 1 ? '<img src=x onerror="window.injected=true"> mock broker error' : i === 2 ? 'Acknowledgment not received.' : null
         }));
         const outcome = url.searchParams.get('outcome');
         if (outcome) items = items.filter(i => i.outcome === outcome);
@@ -130,7 +140,8 @@ const server = http.createServer(async (req, res) => {
       }
       if (match[2] === 'start') {
         run.state = 'Publishing'; run.startedAt = new Date().toISOString();
-        run.counters.confirmed = 15; run.counters.failed = 1; run.counters.uncertain = 1; run.counters.remaining = 8;
+        run.counters.confirmed = run.overlayIds ? 1 : 15; run.counters.failed = run.overlayIds ? 0 : 1;
+        run.counters.uncertain = run.overlayIds ? 0 : 1; run.counters.remaining = run.overlayIds ? run.counters.selected - 1 : 8;
         run.targets.forEach(t => { t.confirmed = 12; t.failed = 1; t.uncertain = 1; });
         run.confirmedPerSecond = 5;
       }
@@ -244,15 +255,29 @@ try {
   assert.equal(await page.locator('#sensor-names').inputValue(), 'SENSOR_A, SENSOR_A');
   assert.equal(await page.getByLabel('Minimum for Urban detail').inputValue(), '25');
   await page.locator('[name="source-mode"][value="OverlayIds"]').check();
+  assert.ok(await page.locator('[name="id-processing"][value="direct"]').isChecked(), 'Overlay IDs defaults to direct gateway processing');
+  assert.ok(await page.locator('#rule-selection').isHidden());
+  assert.ok(await page.getByLabel('Minimum for Urban detail').isDisabled());
+  await page.locator('[name="id-processing"][value="rules"]').check();
+  assert.ok(await page.locator('#rule-selection').isVisible());
+  assert.equal(await page.getByLabel('Minimum for Urban detail').inputValue(), '25');
+  assert.equal(await page.getByLabel('Maximum for Urban detail').inputValue(), '30');
+  await page.locator('[name="id-processing"][value="direct"]').check();
   await page.locator('#overlay-ids').fill('one, two\none');
   await page.locator('#prepare-button').click();
   await page.waitForURL('**/ui/auto-run/runs/run-2');
   await page.locator('#start-run:not([hidden])').waitFor();
   const idPreview = requests.filter(r => r.path === '/auto-runs/preview').at(-1).body;
   assert.deepEqual(idPreview.source, { mode: 'OverlayIds', overlayIds: ['one', 'two'] });
+  assert.deepEqual(idPreview.targets, [], 'direct mode must not include preserved hidden targets');
+  assert.ok(await page.locator('#run-target-table').isHidden());
+  assert.match(await page.locator('#direct-run-note').textContent(), /current rules, including photo-age limits/);
+  assert.equal(await page.locator('#items-target-heading').textContent(), 'Processing');
+  assert.ok(!(await page.locator('#run-meta').textContent()).includes('Observed matches'));
   await page.reload();
   await page.locator('#start-run:not([hidden])').waitFor();
-  assert.equal(await page.locator('#count-selected').textContent(), '25', 'deep links must reload');
+  assert.equal(await page.locator('#count-selected').textContent(), '2', 'direct run deep links must reload');
+  assert.ok(await page.locator('#direct-run-note').isVisible());
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: path.join(screenshots, 'run-mobile.png'), fullPage: true });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'run page must not overflow horizontally');
@@ -476,6 +501,137 @@ try {
   assert.equal(pastedPreview.targets[0].maxOverlays, 42);
   await bulkPage.close();
 
+  const directPage = await context.newPage();
+  directPage.on('pageerror', error => pageErrors.push(error.message));
+  await directPage.goto(`${origin}/ui/auto-run`);
+  await directPage.locator('#prepare-button:not(:disabled)').waitFor();
+  const directStart = requests.filter(r => r.path === '/auto-runs/preview').length;
+  for (const mode of ['Rules', 'Filters']) {
+    await directPage.locator(`[name="source-mode"][value="${mode}"]`).check();
+    await directPage.locator('#prepare-button').click();
+    await directPage.locator('#form-error').filter({ hasText: 'Select at least one pipeline rule' }).waitFor();
+  }
+  await directPage.locator('[name="source-mode"][value="OverlayIds"]').check();
+  await directPage.locator('#prepare-button').click();
+  await directPage.locator('#form-error').filter({ hasText: 'Enter at least one overlay ID' }).waitFor();
+  assert.equal(requests.filter(r => r.path === '/auto-runs/preview').length, directStart, 'rules and filters still need targets; direct mode needs IDs');
+  await directPage.locator('[name="id-processing"][value="rules"]').check();
+  await directPage.locator('#pipeline-select').selectOption('imagery');
+  await directPage.locator('[name="rule-choice"]').first().check();
+  await directPage.locator('#add-rules').click();
+  await directPage.getByLabel('Maximum for Urban detail').fill('13');
+  await directPage.locator('#overlay-ids').fill('matched-one');
+  await directPage.locator('#prepare-button').click();
+  await directPage.waitForURL('**/ui/auto-run/runs/run-5');
+  await directPage.locator('#start-run:not([hidden])').waitFor();
+  const matchedIds = requests.filter(r => r.path === '/auto-runs/preview').at(-1).body;
+  assert.deepEqual(matchedIds.source, { mode: 'OverlayIds', overlayIds: ['matched-one'] });
+  assert.deepEqual(matchedIds.targets, [{ pipelineId: 'imagery', ruleId: 'rule-1', minOverlays: 0, maxOverlays: 13 }]);
+  assert.equal(await directPage.locator('#run-target-heading').textContent(), 'Rule assignments');
+  assert.ok(await directPage.locator('#run-target-table').isVisible(), 'selected-rule IDs retain historical matching details');
+  assert.ok(await directPage.locator('#direct-run-note').isHidden());
+  await directPage.getByText('← Back to configuration', { exact: true }).click();
+  await directPage.getByLabel('Maximum for Urban detail').fill('');
+  await directPage.locator('[name="source-mode"][value="Filters"]').check();
+  await directPage.locator('#resolution-min').fill('-1');
+  await directPage.locator('[name="source-mode"][value="OverlayIds"]').check();
+  await directPage.locator('[name="id-processing"][value="direct"]').check();
+  assert.ok(await directPage.getByLabel('Maximum for Urban detail').isDisabled());
+  assert.ok(await directPage.locator('#resolution-min').isDisabled());
+  assert.ok(await directPage.locator('#preview-form').evaluate(form => form.checkValidity()), 'invalid hidden quotas and filters cannot block a direct run');
+  await directPage.locator('#overlay-ids').fill('direct-one, direct-two, direct-three, direct-two');
+  await directPage.locator('#overall-min').fill('1');
+  await directPage.locator('#overall-max').fill('2');
+  await directPage.locator('#batch-size').fill('7');
+  await directPage.locator('#delay-ms').fill('1500');
+  await directPage.evaluate(() => scrollTo(0, 0));
+  await directPage.screenshot({ path: path.join(screenshots, 'direct-configuration-desktop.png'), fullPage: true });
+  await directPage.setViewportSize({ width: 390, height: 844 });
+  await directPage.screenshot({ path: path.join(screenshots, 'direct-configuration-mobile.png'), fullPage: true });
+  assert.ok(await directPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'direct choice must fit mobile');
+  await directPage.locator('#prepare-button').click();
+  await directPage.waitForURL('**/ui/auto-run/runs/run-6');
+  await directPage.locator('#start-run:not([hidden])').waitFor();
+  const directPreview = requests.filter(r => r.path === '/auto-runs/preview').at(-1).body;
+  assert.deepEqual(directPreview.source, { mode: 'OverlayIds', overlayIds: ['direct-one', 'direct-two', 'direct-three'] });
+  assert.deepEqual(directPreview.targets, []);
+  assert.equal(directPreview.minOverlays, 1);
+  assert.equal(directPreview.maxOverlays, 2);
+  assert.deepEqual(directPreview.publication, { batchSize: 7, delayMs: 1500 });
+  assert.equal(await directPage.locator('#count-selected').textContent(), '2');
+  assert.equal(await directPage.locator('#run-items tr').count(), 2);
+  assert.equal(await directPage.locator('#run-items').getByText('Gateway rules', { exact: true }).count(), 2);
+  assert.match(await directPage.locator('#items-count').textContent(), /2 overlays/);
+  assert.match(await directPage.locator('#direct-run-limits').textContent(), /minimum: 1 overlays.*Maximum: 2 overlays/);
+  await directPage.screenshot({ path: path.join(screenshots, 'direct-run-mobile.png'), fullPage: true });
+  assert.ok(await directPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'direct monitor must fit mobile');
+  await directPage.setViewportSize({ width: 1440, height: 1000 });
+  await directPage.evaluate(() => scrollTo(0, 0));
+  await directPage.screenshot({ path: path.join(screenshots, 'direct-run-desktop.png'), fullPage: true });
+  await directPage.locator('#start-run').click();
+  await directPage.locator('#run-state').getByText('Publishing', { exact: true }).waitFor();
+  assert.equal(await directPage.locator('#count-confirmed').textContent(), '1');
+  await directPage.locator('#run-batch-size').fill('4');
+  await directPage.locator('#run-delay-ms').fill('500');
+  await directPage.locator('#update-publication').click();
+  await directPage.getByText('Pending next batch · active: 7 overlays / 1500 ms', { exact: true }).waitFor();
+  assert.deepEqual(requests.filter(r => r.path === '/auto-runs/run-6/publication').at(-1).body, { batchSize: 4, delayMs: 500 });
+  await directPage.locator('#cancel-run').click();
+  await directPage.locator('#run-state').getByText('Cancelled', { exact: true }).waitFor();
+  await directPage.getByText('← Back to configuration', { exact: true }).click();
+  await directPage.locator('[name="id-processing"][value="rules"]').check();
+  assert.equal(await directPage.getByLabel('Maximum for Urban detail').inputValue(), '', 'rule drafts survive direct preview and monitoring');
+  assert.ok(await directPage.getByLabel('Maximum for Urban detail').isEnabled());
+  await directPage.getByLabel('Maximum for Urban detail').fill('13');
+  await directPage.locator('[name="source-mode"][value="Filters"]').check();
+  assert.equal(await directPage.locator('#resolution-min').inputValue(), '-1', 'filters remain in the draft when switching modes');
+  assert.ok(await directPage.locator('#resolution-min').isEnabled());
+  const historyDirect = directPage.locator('#history-list a[href="/ui/auto-run/runs/run-6"]');
+  await historyDirect.getByText('Direct to gateway', { exact: true }).waitFor();
+  await historyDirect.click();
+  await directPage.locator('#direct-run-note').waitFor({ state: 'visible' });
+  await directPage.reload();
+  await directPage.locator('#direct-run-note').waitFor({ state: 'visible' });
+  assert.equal(await directPage.locator('#run-target-heading').textContent(), 'Gateway processing');
+  assert.equal(await directPage.locator('#run-items tr').count(), 2, 'direct history links reload overlay outcomes');
+  await directPage.close();
+
+  pipelineFailure = true;
+  let releasePipelines;
+  pipelineGate = new Promise(resolve => { releasePipelines = resolve; });
+  pendingResponses.add(releasePipelines);
+  const outagePage = await context.newPage();
+  outagePage.on('pageerror', error => pageErrors.push(error.message));
+  await outagePage.goto(`${origin}/ui/auto-run`);
+  await outagePage.locator('#connection-state').filter({ hasText: 'API connected' }).waitFor();
+  assert.ok(await outagePage.locator('#prepare-button').isDisabled(), 'rule-based preparation waits for pipeline discovery');
+  await outagePage.locator('[name="source-mode"][value="OverlayIds"]').check();
+  await outagePage.locator('#overlay-ids').fill('pending-pipeline-id');
+  assert.ok(await outagePage.locator('#prepare-button').isEnabled(), 'direct preparation only waits for options, not pipelines');
+  await outagePage.locator('#prepare-button').click();
+  await outagePage.waitForURL('**/ui/auto-run/runs/run-7');
+  await outagePage.locator('#start-run:not([hidden])').waitFor();
+  releasePipelines();
+  pendingResponses.delete(releasePipelines);
+  pipelineGate = null;
+  await outagePage.waitForFunction(() => document.getElementById('pipeline-select').textContent.includes('Could not load pipelines'));
+  await outagePage.getByText('← Back to configuration', { exact: true }).click();
+  await outagePage.locator('[name="id-processing"][value="rules"]').check();
+  assert.ok(await outagePage.locator('#prepare-button').isDisabled());
+  assert.match(await outagePage.locator('#rule-error').textContent(), /Pipeline discovery is unavailable/);
+  await outagePage.locator('[name="id-processing"][value="direct"]').check();
+  assert.ok(await outagePage.locator('#prepare-button').isEnabled(), 'pipeline failure cannot block a direct preview');
+  await outagePage.locator('#overlay-ids').fill('unavailable-pipeline-id');
+  await outagePage.locator('#prepare-button').click();
+  await outagePage.waitForURL('**/ui/auto-run/runs/run-8');
+  await outagePage.locator('#start-run:not([hidden])').waitFor();
+  assert.deepEqual(requests.filter(r => r.path === '/auto-runs/preview').at(-1).body.targets, []);
+  await outagePage.reload();
+  await outagePage.locator('#direct-run-note').waitFor({ state: 'visible' });
+  assert.equal(await outagePage.locator('#count-selected').textContent(), '1');
+  await outagePage.close();
+  pipelineFailure = false;
+
   options.enabled = false;
   const disabledPage = await context.newPage();
   disabledPage.on('pageerror', error => pageErrors.push(error.message));
@@ -483,6 +639,8 @@ try {
   await disabledPage.locator('#global-notice').waitFor({ state: 'visible' });
   assert.ok(await disabledPage.locator('#prepare-button').isDisabled(), 'disabled feature must not submit');
   assert.match(await disabledPage.locator('#global-notice').textContent(), /disabled/);
+  await disabledPage.locator('[name="source-mode"][value="OverlayIds"]').check();
+  assert.ok(await disabledPage.locator('#prepare-button').isDisabled(), 'disabled feature also prevents direct previews');
   await disabledPage.close();
   assert.deepEqual(pageErrors, [], 'no unhandled browser errors');
   console.log(JSON.stringify({ result: 'PASS', scenarios: ['rule pagination and inactive selection', 'typed filters and UTC dates',
@@ -494,7 +652,11 @@ try {
     'select all across every page including inactive rules', 'bulk keyboard and mobile controls', 'bulk duplicate and quota preservation',
     'bulk cross-pipeline identity and capacity', 'empty pipeline selection', 'bulk exact target limit and no truncation',
     'atomic page failure and retry', 'bulk operation locking and live quota edits', 'stale pipeline cancellation and operation isolation',
-    'pasted-ID batch cancellation keeps committed targets visible and submitted'], screenshots }, null, 2));
+    'pasted-ID batch cancellation keeps committed targets visible and submitted',
+    'Overlay IDs defaults to direct gateway mode with no hidden targets or filters', 'optional selected-rule matching for IDs',
+    'direct mode disables hidden validation and preserves rule/filter drafts', 'direct preview limits and publication controls',
+    'direct monitor, history, deep links and mobile layout', 'direct preparation survives pending and failed pipeline discovery',
+    'rule modes still require targets and direct mode still requires enabled options and IDs'], screenshots }, null, 2));
 } finally {
   for (const release of pendingResponses) release();
   if (browser) await browser.close();
