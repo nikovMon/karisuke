@@ -79,17 +79,17 @@ The factory stores the photographed legacy `DateTime.Parse(..., InvariantCulture
 
 ## SarAtc
 
-One SarAtc run-parameter object names the model and the frame metadata to send:
+One SarAtc run-parameter object names the model and the fields to filter:
 
 ```json
 {
   "modelName": "replace-me-model",
-  "frameMetadata": { }
+  "fieldsToFilter": [ { } ]
 }
 ```
 
-`modelName` is a required nonempty string, with no fixed list of models. `frameMetadata` is a required JSON object, `{}` included; the contract does not look inside it and writes it to the body as stored, without escaping non-ASCII text. Unknown and duplicate run parameters are rejected. Rules may omit a location; when they set one it only filters images, because the body has no ROI.
+`modelName` is a required nonempty string, with no fixed list of models. `fieldsToFilter` is a required array of JSON objects and may be empty; the contract does not look inside the objects and writes the array to the body as stored, without escaping non-ASCII text. Unknown and duplicate run parameters are rejected. Rules may omit a location; when they set one it only filters images, because the body has no ROI.
 
-The body is `{"imageId", "modelName", "frameMetadata", "requestId"}`. `requestId` is the dispatch ID (the context's `TaskId`), so a retried dispatch sends the same value and it matches the outgoing message ID. The only header is `sar-atc-contract-version`, an **integer** `1` in `RabbitMqAttributes`. Context validation needs only the image and dispatch IDs.
+The body is `{"imageId", "modelName", "fieldsToFilter", "requestId"}`. `requestId` is the dispatch ID (the context's `TaskId`), so a retried dispatch sends the same value and it matches the outgoing message ID. The only header is `sar-atc-contract-version`, an **integer** `1` in `RabbitMqAttributes`. Context validation needs only the image and dispatch IDs.
 
 Roberto, warmup, HTTP status handling, retries, rule snapshots and dispatch are outside this library. The contract prepares bytes only.

@@ -7,13 +7,13 @@ using static ImagingPipeline.PipelineContracts.ContractValidation;
 namespace ImagingPipeline.PipelineContracts;
 
 /// <summary>
-/// Builds one SAR ATC request: the image ID, the rule's model and frame metadata, and the dispatch
+/// Builds one SAR ATC request: the image ID, the rule's model and fields to filter, and the dispatch
 /// ID as <c>requestId</c>, so a retried dispatch carries the same ID. A rule location is optional.
 /// </summary>
 public sealed class SarAtcPipelineContract : IPipelineContract
 {
     private static readonly FrozenSet<string> RunParamFields =
-        new[] { "modelName", "frameMetadata" }.ToFrozenSet(StringComparer.Ordinal);
+        new[] { "modelName", "fieldsToFilter" }.ToFrozenSet(StringComparer.Ordinal);
     private static readonly FrozenDictionary<string, string> NoAttributes =
         new Dictionary<string, string>().ToFrozenDictionary(StringComparer.Ordinal);
     private static readonly FrozenDictionary<string, object?> RabbitMqAttributes =
@@ -54,13 +54,13 @@ public sealed class SarAtcPipelineContract : IPipelineContract
         ThrowIfInvalid(errors, nameof(context));
 
         var buffer = new ArrayBufferWriter<byte>();
-        // Keep frameMetadata's text as stored instead of escaping non-ASCII characters.
+        // Keep fieldsToFilter's text as stored instead of escaping non-ASCII characters.
         using var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         writer.WriteStartObject();
         writer.WriteString("imageId", context.ImageId);
         writer.WriteString("modelName", parameters.ModelName);
-        writer.WritePropertyName("frameMetadata");
-        parameters.FrameMetadata.WriteTo(writer);
+        writer.WritePropertyName("fieldsToFilter");
+        parameters.FieldsToFilter.WriteTo(writer);
         writer.WriteString("requestId", context.TaskId);
         if (extraData.ValueKind == JsonValueKind.Object && extraData.EnumerateObject().MoveNext())
         {
@@ -83,10 +83,22 @@ public sealed class SarAtcPipelineContract : IPipelineContract
         ValidateProperties(value, RunParamFields, errors);
         var modelName = ReadRequiredString(value, "modelName", errors);
 
-        if (!value.TryGetProperty("frameMetadata", out var frameMetadata) || frameMetadata.ValueKind != JsonValueKind.Object)
-            errors.Add(new("frameMetadata", "Must be a JSON object."));
-        return new(modelName, frameMetadata);
+        if (!value.TryGetProperty("fieldsToFilter", out var fieldsToFilter) || fieldsToFilter.ValueKind != JsonValueKind.Array)
+        {
+            errors.Add(new("fieldsToFilter", "Must be an array."));
+            return new(modelName, fieldsToFilter);
+        }
+
+        var index = 0;
+        foreach (var field in fieldsToFilter.EnumerateArray())
+        {
+            if (field.ValueKind != JsonValueKind.Object)
+                errors.Add(new($"fieldsToFilter[{index}]", "Must be a JSON object."));
+            index++;
+        }
+
+        return new(modelName, fieldsToFilter);
     }
 
-    private sealed record SarAtcRunParameters(string ModelName, JsonElement FrameMetadata);
+    private sealed record SarAtcRunParameters(string ModelName, JsonElement FieldsToFilter);
 }

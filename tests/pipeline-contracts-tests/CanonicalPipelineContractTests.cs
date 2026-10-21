@@ -117,7 +117,7 @@ public sealed class CanonicalPipelineContractTests
             {"tenantId":"tenant","algorithmNames":["FindAir"],
              "tilingConfigs":[{"tileSizeWidth":512,"tileSizeHeight":512,"tileOverlapWidth":0,"tileOverlapHeight":0}]}
             """,
-        "SarAtc" => """{"modelName":"model","frameMetadata":{}}""",
+        "SarAtc" => """{"modelName":"model","fieldsToFilter":[]}""",
         _ => """
             {"customer":"customer","profile_name":"profile","hebrew_rule_name":"משימה",
              "algorithm_name":"custom","priority":1,"username":null,
