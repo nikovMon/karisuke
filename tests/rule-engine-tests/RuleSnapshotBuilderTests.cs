@@ -112,9 +112,9 @@ public sealed class RuleSnapshotBuilderTests
     private static JsonElement AlgoRunParams() => JsonSerializer.SerializeToElement(new
     {
         customer = "customer-a",
-        algorithm_name = "algorithm-a",
+        algorithmName = "algorithm-a",
         priority = 1,
-        run_every_other_image = false,
-        should_check_in_vip = false
+        runEveryOtherImage = false,
+        shouldCheckInVip = false
     });
 }

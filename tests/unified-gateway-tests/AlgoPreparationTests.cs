@@ -77,9 +77,9 @@ public sealed class AlgoPreparationTests
     };
 
     private static JsonElement RuleParameters() => Json("""
-        {"customer":"example-customer","profile_name":"example-profile","hebrew_rule_name":"Example",
-         "algorithm_name":"example-algorithm","priority":1,"username":null,
-         "run_every_other_image":true,"should_check_in_vip":true}
+        {"customer":"example-customer","modelName":"example-profile","hebrewRuleName":"Example",
+         "algorithmName":"example-algorithm","priority":1,"username":null,
+         "runEveryOtherImage":true,"shouldCheckInVip":true}
         """);
 
     private static JsonElement Json(string json)

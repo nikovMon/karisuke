@@ -50,7 +50,7 @@ The source consumer uses the application's `RabbitMq` section. Output transports
 
 An update is considered only when `x-updated-fields` contains `gridType`. Common validation checks JSON structure, image identity, photo time, sensor name, registration quality, resolution, grid type and geometry needed for rule matching.
 
-FindAir validates image URL, dimensions, sensor type, grid URI and optional area metadata when preparing its payload. DeepWisdom validates relationship fields only for runs using `run_every_other_image`. Missing or malformed fields belonging to one contract do not prevent another matched contract from dispatching. Failures remain associated with their pipeline; the source can still be dead-lettered after valid siblings are sent.
+FindAir validates image URL, dimensions, sensor type, grid URI and optional area metadata when preparing its payload. DeepWisdom validates relationship fields only for runs using `runEveryOtherImage`. Missing or malformed fields belonging to one contract do not prevent another matched contract from dispatching. Failures remain associated with their pipeline; the source can still be dead-lettered after valid siblings are sent.
 
 Debug event `6022` explains filtered work using `unified_gateway.filter.reason`: `grid_type_not_updated`, `no_enabled_pipelines`, `no_matching_rules`, or `duplicate_run`. The log includes the source message ID and pipeline/rule scopes when available. To see these logs, set `Logging__LogLevel__ImagingPipeline.UnifiedGateway.Source.SourceMessageHandler=Debug`.
 

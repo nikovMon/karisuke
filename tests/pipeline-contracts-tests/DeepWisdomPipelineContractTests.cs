@@ -8,9 +8,9 @@ namespace ImagingPipeline.PipelineContracts.Tests;
 public sealed class DeepWisdomPipelineContractTests
 {
     private const string Rule = """
-        {"customer":"customer-a","profile_name":"profile-a","hebrew_rule_name":"Mission",
-         "algorithm_name":"custom-algorithm","priority":7,"username":null,
-         "run_every_other_image":true,"should_check_in_vip":true}
+        {"customer":"customer-a","modelName":"profile-a","hebrewRuleName":"Mission",
+         "algorithmName":"custom-algorithm","priority":7,"username":null,
+         "runEveryOtherImage":true,"shouldCheckInVip":true}
         """;
     private const string Settings = """
         {"XUserName":"configured-user","Origin":"configured-origin","QueueType":"configured-queue","SaveDetections":true}
@@ -38,8 +38,8 @@ public sealed class DeepWisdomPipelineContractTests
     public void FlagsControlTaskAssignmentsAndKeepUnassignedPropertiesAsNull(bool everyOther, bool vip)
     {
         var rule = JsonNode.Parse(Rule)!;
-        rule["run_every_other_image"] = everyOther;
-        rule["should_check_in_vip"] = vip;
+        rule["runEveryOtherImage"] = everyOther;
+        rule["shouldCheckInVip"] = vip;
         using var body = Body(Context(), rule.ToJsonString());
         var tasks = body.RootElement.GetProperty("tasksData");
         Assert.Equal(1, tasks.GetArrayLength());
@@ -68,8 +68,8 @@ public sealed class DeepWisdomPipelineContractTests
     public void NullableRuleNamesAndMissingNeighborIdsPreserveLegacyNulls()
     {
         var rule = JsonNode.Parse(Rule)!;
-        rule["profile_name"] = null;
-        rule["hebrew_rule_name"] = null;
+        rule["modelName"] = null;
+        rule["hebrewRuleName"] = null;
         using var body = Body(Context() with { LegId = null, PrevOverlayId = null, NextOverlayId = null }, rule.ToJsonString());
         Assert.Equal(JsonValueKind.Null, body.RootElement.GetProperty("modelName").ValueKind);
         Assert.Equal(" 23/09/2026", body.RootElement.GetProperty("missionName").GetString());
@@ -158,14 +158,16 @@ public sealed class DeepWisdomPipelineContractTests
     [Theory]
     // The rule location now comes from the rule's match, so it is no longer a run parameter.
     [InlineData("location_geojson", "{\"type\":\"Polygon\",\"coordinates\":[[[0,0],[2,0],[2,2],[0,0]]]}")]
-    [InlineData("algorithm_name", "[\"custom-algorithm\"]")]
+    [InlineData("algorithmName", "[\"custom-algorithm\"]")]
     [InlineData("priority", "\"7\"")]
     [InlineData("priority", "2147483648")]
     [InlineData("customer", "null")]
-    [InlineData("profile_name", "1")]
-    [InlineData("run_every_other_image", "\"true\"")]
-    [InlineData("should_check_in_vip", "null")]
+    [InlineData("modelName", "1")]
+    [InlineData("runEveryOtherImage", "\"true\"")]
+    [InlineData("shouldCheckInVip", "null")]
     [InlineData("unexpected", "true")]
+    [InlineData("profile_name", "\"profile-a\"")]
+    [InlineData("run_every_other_image", "false")]
     public void InvalidRuleFieldsReturnFieldErrorsAndCannotBuild(string field, string value)
     {
         var rule = JsonNode.Parse(Rule)!;
@@ -203,7 +205,7 @@ public sealed class DeepWisdomPipelineContractTests
     {
         var rule = JsonNode.Parse(Rule)!;
         rule["priority"] = int.MinValue;
-        rule["algorithm_name"] = "future-algorithm";
+        rule["algorithmName"] = "future-algorithm";
         Assert.Empty(_contract.ValidateRunParams(Json(rule.ToJsonString())));
     }
 

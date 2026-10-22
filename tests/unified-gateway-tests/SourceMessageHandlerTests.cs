@@ -245,9 +245,9 @@ public sealed class SourceMessageHandlerTests
         var rule = Rule("algo-rule");
         rule.RunParams = [JsonSerializer.SerializeToElement(new
         {
-            customer = "customer", profile_name = "profile", hebrew_rule_name = "rule",
-            algorithm_name = "algorithm", priority = 1, username = "user",
-            run_every_other_image = runEveryOtherImage, should_check_in_vip = false
+            customer = "customer", modelName = "profile", hebrewRuleName = "rule",
+            algorithmName = "algorithm", priority = 1, username = "user",
+            runEveryOtherImage = runEveryOtherImage, shouldCheckInVip = false
         })];
         return rule;
     }
