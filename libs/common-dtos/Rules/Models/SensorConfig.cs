@@ -13,11 +13,8 @@ public sealed class SensorConfig
     [JsonPropertyName("gridTypes")]
     public List<string> GridTypes { get; set; } = [];
 
-    /// <param name="allowAnyCriteria">
-    /// When true, a sensor with no qualities and no grid types is valid and accepts that sensor with
-    /// any quality and grid type. v1 rules keep rejecting it.
-    /// </param>
-    public static IEnumerable<string> ValidateCollection(IReadOnlyList<SensorConfig> sensors, bool allowAnyCriteria = false)
+    /// <summary>A sensor with no qualities and no grid types is valid: it accepts that sensor with any of them.</summary>
+    public static IEnumerable<string> ValidateCollection(IReadOnlyList<SensorConfig> sensors)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 0; i < sensors.Count; i++)
@@ -48,13 +45,6 @@ public sealed class SensorConfig
                 sensor.GridTypes.Any(string.IsNullOrWhiteSpace))
             {
                 yield return $"sensors[{i}].gridTypes contains empty or whitespace values";
-            }
-
-            if (!allowAnyCriteria &&
-                sensor.RegistrationQualities is { Count: 0 } or null &&
-                sensor.GridTypes is { Count: 0 } or null)
-            {
-                yield return $"sensors[{i}] must have at least one registrationQuality or gridType";
             }
         }
     }

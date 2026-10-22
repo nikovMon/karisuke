@@ -144,14 +144,6 @@ public sealed class PipelineRuleDocumentValidationTests
     }
 
     [Fact]
-    public void V1RulesStillRejectASensorWithoutQualitiesOrGridTypes()
-    {
-        Assert.Contains(
-            "sensors[0] must have at least one registrationQuality or gridType",
-            SensorConfig.ValidateCollection([new SensorConfig { Name = "camera" }]));
-    }
-
-    [Fact]
     public void ModeSarKeepsItsSourceSpellingInJson()
     {
         var rule = Rule();

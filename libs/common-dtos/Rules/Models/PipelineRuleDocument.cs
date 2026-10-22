@@ -156,7 +156,7 @@ public sealed class RuleMatchConditions
         }
         else if (Sensors is not null)
         {
-            foreach (var error in SensorConfig.ValidateCollection(Sensors, allowAnyCriteria: true))
+            foreach (var error in SensorConfig.ValidateCollection(Sensors))
             {
                 yield return $"match.{error}";
             }
