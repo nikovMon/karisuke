@@ -269,6 +269,20 @@ logical tile more than once. Use tile.id logs for logical-tile deduplication.
 - findair.dependency operation, duration, payload-size, and batch-size
   instruments
 
+### Unified Gateway
+
+| Instrument | Labels |
+|---|---|
+| unified_gateway.contract.preparations | pipeline.id, outcome |
+| unified_gateway.contract.preparation.duration | pipeline.id, outcome |
+| unified_gateway.rules.loads | pipeline.id, findair.outcome |
+| unified_gateway.rules.load.duration | pipeline.id, findair.outcome |
+| unified_gateway.dispatch.units | pipeline.id, pipeline.transport, findair.outcome, optional error.type |
+| unified_gateway.dispatch.duration | pipeline.id, pipeline.transport, findair.outcome, optional error.type |
+
+Pipeline IDs and transport kinds come from the deployment catalog and are
+bounded. The meter and activity source are ImagingPipeline.UnifiedGateway.
+
 ### Gateway and Rules API
 
 Gateway exposes rule-cache entries, age, skipped rules, refresh outcomes and
@@ -287,7 +301,7 @@ failures.
 
 Prometheus labels may use bounded business dimensions: rule ID, tenant ID,
 normalized area/country, sensor name, algorithm combination, configured tile
-size, stage, direction, operation, outcome, dependency, and bounded error
+size, configured pipeline ID, transport kind, stage, direction, operation, outcome, dependency, and bounded error
 category.
 
 Prometheus labels must not use message, correlation, task, request, image,
@@ -326,11 +340,11 @@ or the HTTP/protobuf equivalents. Logs use:
     Observability__Logs__DataStream__Dataset=findair
     Observability__Logs__DataStream__Namespace=integration
 
-Metrics use each pod's /metrics endpoint. Gateway, TB Publisher, and TB
-Consumer default to port 9464. Rules API uses its existing HTTP port.
+Metrics use each pod's /metrics endpoint. Gateway, Unified Gateway, TB
+Publisher, and TB Consumer default to port 9464. Rules API uses its existing HTTP port.
 
 Service identity defaults to namespace findair and service names
 findair-gateway, findair-rules-api, findair-tb-publisher, and
-findair-tb-consumer. Deployment environment, service version, pod UID/name,
+findair-tb-consumer; Unified Gateway uses unified-gateway. Deployment environment, service version, pod UID/name,
 namespace, deployment, node, container, and cluster should be supplied by the
 OpenShift config and downward API.
