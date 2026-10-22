@@ -113,6 +113,39 @@ public sealed class RuleMigrationTests
     }
 
     [Fact]
+    public async Task AlgoRulesMigrateFromAlgoRulesWithTwoDayPhotoAgeByDefault()
+    {
+        _client.Add("algo-rules", "a1", AlgoRule("north"));
+        _client.Add("algo-rules", "bad", """{ "rule_name": "bad", "priority": "high" }""");
+
+        var report = await new RuleMigration(_client).RunAsync(
+            new MigrationTarget(Target, new DeepWisdomPipelineContract()),
+            new MigrationOptions { Pipeline = "DeepWisdom", SourceSchema = SourceSchema.Algo, Apply = true },
+            CancellationToken.None);
+
+        Assert.Equal(["a1"], report.Migrated);
+        Assert.StartsWith("not a readable algo rule", Assert.Single(report.Skipped).Reason, StringComparison.Ordinal);
+        Assert.Empty(report.DroppedAreas);
+        var (_, id, source) = Assert.Single(_client.Saved);
+        Assert.Equal("a1", id);
+        Assert.Equal(2, (int)source["match"]!["maxPhotoAgeDays"]!);
+        Assert.Equal("Polygon", (string?)source["match"]!["location"]!["type"]);
+        Assert.Equal("profile-a", (string?)source["runParams"]![0]!["modelName"]);
+    }
+
+    [Theory]
+    [InlineData("V1", "rules", 7)]
+    [InlineData("Algo", "algo-rules", 2)]
+    public void DefaultsFollowTheSourceSchemaUnlessSet(string schema, string index, int days)
+    {
+        var defaults = new MigrationOptions { SourceSchema = Enum.Parse<SourceSchema>(schema) };
+        var set = new MigrationOptions { SourceSchema = Enum.Parse<SourceSchema>(schema), SourceIndex = "custom", MaxPhotoAgeDays = 5 };
+
+        Assert.Equal((index, days), (defaults.EffectiveSourceIndex, defaults.EffectiveMaxPhotoAgeDays));
+        Assert.Equal(("custom", 5), (set.EffectiveSourceIndex, set.EffectiveMaxPhotoAgeDays));
+    }
+
+    [Fact]
     public async Task MissingTargetIndexFails()
     {
         var migration = new RuleMigration(_client);
@@ -128,6 +161,26 @@ public sealed class RuleMigrationTests
             FindAir,
             new MigrationOptions { Pipeline = "FindAir", SourceIndex = Source, Apply = apply },
             CancellationToken.None);
+
+    private static object AlgoRule(string name) => new
+    {
+        rule_name = name,
+        hebrew_rule_name = "משימה",
+        algorithm_name = "algo-x",
+        customer = "customer-a",
+        profile_name = "profile-a",
+        username = (string?)null,
+        priority = 1,
+        is_active = true,
+        is_photo_old = true,
+        location_wkt = "POLYGON ((0 0, 2 0, 2 2, 0 2, 0 0))",
+        minimum_resolution = 0,
+        maximum_resolution = 2,
+        sensor_types = new[] { "SAR" },
+        sensor_names = new Dictionary<string, string[]> { ["S1"] = [] },
+        creation_time = "2026-01-01T00:00:00Z",
+        update_time = "2026-01-02T00:00:00Z"
+    };
 
     private static object V1Rule(string name, object[]? tenants = null, string area = "") => new
     {
