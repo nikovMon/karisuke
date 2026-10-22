@@ -1,6 +1,6 @@
 # SPEC-001: Unified gateway foundation
 
-Status: **Historical foundation specification**. This document records the original increment. The [application README](../apps/unified-gateway/README.md) describes the current implementation, including consumption, rules, dispatch, FindAir/DeepWisdom contracts, arbitrary ExtraData and per-pipeline virtual hosts. Later implementation decisions supersede the scope below. There is no deployment, index migration or production compatibility claim.
+Status: **Historical foundation specification**. This document records the original increment. The [application README](../apps/unified-gateway/README.md) describes the current implementation, including consumption, rules, dispatch, FindAir/DeepWisdom/SarAtc contracts, arbitrary ExtraData and per-pipeline virtual hosts. Later implementation decisions supersede the scope below. There is no deployment, index migration or production compatibility claim.
 
 ## Goal and current scope
 
