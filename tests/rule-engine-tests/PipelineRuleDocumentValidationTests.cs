@@ -135,6 +135,15 @@ public sealed class PipelineRuleDocumentValidationTests
     }
 
     [Fact]
+    public void SensorNamesThatDifferOnlyInCaseAreDuplicates()
+    {
+        var rule = Rule();
+        rule.Match!.Sensors = [new SensorConfig { Name = "camera" }, new SensorConfig { Name = "CAMERA" }];
+
+        Assert.Contains("match.Duplicate sensor name 'CAMERA'", Errors(rule));
+    }
+
+    [Fact]
     public void SensorWithoutQualitiesOrGridTypesIsAllowed()
     {
         var rule = Rule();

@@ -16,7 +16,7 @@ public sealed class SensorConfig
     /// <summary>A sensor with no qualities and no grid types is valid: it accepts that sensor with any of them.</summary>
     public static IEnumerable<string> ValidateCollection(IReadOnlyList<SensorConfig> sensors)
     {
-        var names = new HashSet<string>(StringComparer.Ordinal);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < sensors.Count; i++)
         {
             var sensor = sensors[i];

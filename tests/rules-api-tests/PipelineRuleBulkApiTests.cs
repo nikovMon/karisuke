@@ -79,6 +79,22 @@ public sealed class PipelineRuleBulkApiTests : IDisposable
     }
 
     [Fact]
+    public async Task AddSensorsFindsTheSensorIgnoringCase()
+    {
+        _store.Add(AsdIndex, "a", Rule("a"));
+        using var client = CreateClient();
+
+        var response = await client.PatchAsJsonAsync(
+            "/pipelines/FindAir/rules/sensors/add?ids=a",
+            new { sensorName = "CAMERA", gridTypes = new[] { "grid-a" } });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var sensor = Assert.Single(Stored("a").Match!.Sensors!);
+        Assert.Equal("camera", sensor.Name);
+        Assert.Equal(["grid-a"], sensor.GridTypes);
+    }
+
+    [Fact]
     public async Task AddSensorsToAMatchAllRuleFailsForThatRule()
     {
         _store.Add(AsdIndex, "all", new PipelineRuleDocument { RuleName = "all", MatchAll = true, RunParams = Rule("x").RunParams });

@@ -71,7 +71,8 @@ public static class RuleSnapshotBuilder
 
     private static Dictionary<string, SensorMatchCriteria> BuildSensors(List<SensorConfig>? sensors)
     {
-        var criteria = new Dictionary<string, SensorMatchCriteria>(StringComparer.Ordinal);
+        // Sensor names are matched ignoring case; validation rejects names that differ only in case.
+        var criteria = new Dictionary<string, SensorMatchCriteria>(StringComparer.OrdinalIgnoreCase);
         foreach (var sensor in sensors ?? [])
         {
             var qualityMask = sensor.RegistrationQualities is { Count: > 0 }

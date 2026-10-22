@@ -128,6 +128,15 @@ public sealed class RuleMatcherTests
         Assert.Equal(RuleMissReason.Sensor, Assert.Single(_matcher.Match(Image(sensorName: "other"), [active]).Misses).Reason);
     }
 
+    [Theory]
+    [InlineData("camera")]
+    [InlineData("CAMERA")]
+    [InlineData("Camera")]
+    public void SensorNamesMatchIgnoringCase(string imageSensor)
+    {
+        Assert.Single(_matcher.Match(Image(sensorName: imageSensor), [ActiveRule()]).Matches);
+    }
+
     [Fact]
     public void RuleWithoutModeSarMatchesImagesWithOrWithoutOne()
     {
