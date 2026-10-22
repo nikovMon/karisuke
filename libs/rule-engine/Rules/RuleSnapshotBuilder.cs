@@ -64,6 +64,7 @@ public static class RuleSnapshotBuilder
             match.MaxPhotoAgeDays is { } days ? TimeSpan.FromDays(days) : null,
             validation.Geometry,
             match.ModeSar is { } modes ? new HashSet<string>(modes, StringComparer.Ordinal) : null,
+            match.SensorTypes is { } types ? new HashSet<string>(types, StringComparer.Ordinal) : null,
             rule.RunParams!.ToArray());
         return true;
     }

@@ -14,6 +14,7 @@ public enum RuleMissReason
 {
     PhotoAge,
     Sensor,
+    SensorType,
     Resolution,
     ModeSar,
     Geometry

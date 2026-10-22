@@ -119,9 +119,9 @@ public sealed class CanonicalPipelineContractTests
             """,
         "SarAtc" => """{"modelName":"model","fieldsToFilter":[]}""",
         _ => """
-            {"customer":"customer","profile_name":"profile","hebrew_rule_name":"משימה",
-             "algorithm_name":"custom","priority":1,"username":null,
-             "run_every_other_image":false,"should_check_in_vip":false}
+            {"customer":"customer","modelName":"profile","hebrewRuleName":"משימה",
+             "algorithmName":"custom","priority":1,"username":null,
+             "runEveryOtherImage":false,"shouldCheckInVip":false}
             """
     });
 

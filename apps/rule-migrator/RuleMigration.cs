@@ -14,7 +14,7 @@ namespace ImagingPipeline.RuleMigrator;
 internal sealed record MigrationTarget(string IndexName, IPipelineContract Contract);
 
 /// <summary>
-/// Copies every v1 rule into a pipeline's v2 index under the same ID, so a rerun overwrites
+/// Copies every source rule into a pipeline's v2 index under the same ID, so a rerun overwrites
 /// instead of duplicating. A rule that fails v2 validation, or whose name a different rule in the
 /// target already has, is skipped and reported; the others are still migrated.
 /// </summary>
@@ -35,16 +35,15 @@ internal sealed class RuleMigration(IElasticsearchDocumentClient client)
             ruleIdsByName.TryAdd(existing.Source.RuleName, existing.Id);
         }
 
-        foreach (var document in await ReadAllAsync<JsonObject>(options.SourceIndex, [], cancellationToken))
+        foreach (var document in await ReadAllAsync<JsonObject>(options.EffectiveSourceIndex, [], cancellationToken))
         {
             report.Read++;
-            if (!TryRead(document, out var v1, out var readError))
+            if (!TryConvert(document, options, out var rule, out var droppedArea, out var readError))
             {
                 report.Skipped.Add(new(document.Id, null, readError));
                 continue;
             }
 
-            var rule = RuleConverter.Convert(v1, options.MaxPhotoAgeDays);
             var validation = PipelineRuleValidator.Validate(rule, target.Contract);
             if (!validation.IsValid)
             {
@@ -77,9 +76,9 @@ internal sealed class RuleMigration(IElasticsearchDocumentClient client)
             }
 
             report.Migrated.Add(rule.Id);
-            if (!string.IsNullOrWhiteSpace(v1.Area))
+            if (!string.IsNullOrWhiteSpace(droppedArea))
             {
-                report.DroppedAreas.Add(new(rule.Id, rule.RuleName, v1.Area));
+                report.DroppedAreas.Add(new(rule.Id, rule.RuleName, droppedArea));
             }
         }
 
@@ -112,23 +111,38 @@ internal sealed class RuleMigration(IElasticsearchDocumentClient client)
         }
     }
 
-    private static bool TryRead(
+    // Only v1 rules have an area, which v2 has no field for; it is reported as dropped.
+    private static bool TryConvert(
         ElasticsearchDocument<JsonObject> document,
-        [NotNullWhen(true)] out RuleDto? rule,
+        MigrationOptions options,
+        [NotNullWhen(true)] out PipelineRuleDocument? rule,
+        out string? droppedArea,
         out string error)
     {
+        rule = null;
+        droppedArea = null;
         try
         {
-            rule = document.Source.Deserialize<RuleDto>(JsonOptions)!;
+            if (options.SourceSchema == SourceSchema.Algo)
+            {
+                var algo = document.Source.Deserialize<AlgoRuleDocument>(JsonOptions)!;
+                algo.Id = document.Id;
+                rule = AlgoRuleConverter.Convert(algo, options.EffectiveMaxPhotoAgeDays);
+            }
+            else
+            {
+                var v1 = document.Source.Deserialize<RuleDto>(JsonOptions)!;
+                v1.Id = document.Id;
+                rule = RuleConverter.Convert(v1, options.EffectiveMaxPhotoAgeDays);
+                droppedArea = v1.Area;
+            }
         }
         catch (JsonException exception)
         {
-            rule = null;
-            error = $"not a readable v1 rule: {exception.Message}";
+            error = $"not a readable {options.SourceSchema.ToString().ToLowerInvariant()} rule: {exception.Message}";
             return false;
         }
 
-        rule.Id = document.Id;
         error = string.Empty;
         return true;
     }

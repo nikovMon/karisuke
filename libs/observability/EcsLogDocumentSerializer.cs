@@ -63,6 +63,8 @@ internal static class EcsLogDocumentSerializer
             [TelemetryAttributeNames.RulesMissedPhotoAgeCount] = TelemetryAttributeNames.RulesMissedPhotoAgeCount,
             [TelemetryAttributeNames.RulesMissedSensorIds] = TelemetryAttributeNames.RulesMissedSensorIds,
             [TelemetryAttributeNames.RulesMissedSensorCount] = TelemetryAttributeNames.RulesMissedSensorCount,
+            [TelemetryAttributeNames.RulesMissedSensorTypeIds] = TelemetryAttributeNames.RulesMissedSensorTypeIds,
+            [TelemetryAttributeNames.RulesMissedSensorTypeCount] = TelemetryAttributeNames.RulesMissedSensorTypeCount,
             [TelemetryAttributeNames.RulesMissedResolutionIds] = TelemetryAttributeNames.RulesMissedResolutionIds,
             [TelemetryAttributeNames.RulesMissedResolutionCount] = TelemetryAttributeNames.RulesMissedResolutionCount,
             [TelemetryAttributeNames.RulesMissedModeSarIds] = TelemetryAttributeNames.RulesMissedModeSarIds,

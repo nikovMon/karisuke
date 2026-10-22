@@ -6,7 +6,7 @@ The unified gateway uses **FindAir** (`FindAirPipelineContract`), **DeepWisdom**
 
 The registered contract IDs are `FindAir`, `DeepWisdom` and `SarAtc`, with exact casing. Custom catalogs must use these names.
 
-Projection records type errors for pipeline-specific metadata in `PipelineDispatchContext.InputFieldErrors`. `ValidateContext(context, runParams)` checks only fields consumed by that run: FindAir checks its image metadata, while DeepWisdom checks relationship fields when `run_every_other_image` is true. The common input parser validates the fields required for rule matching.
+Projection records type errors for pipeline-specific metadata in `PipelineDispatchContext.InputFieldErrors`. `ValidateContext(context, runParams)` checks only fields consumed by that run: FindAir checks its image metadata, while DeepWisdom checks relationship fields when `runEveryOtherImage` is true. The common input parser validates the fields required for rule matching.
 
 `PipelineContractRegistry` resolves explicitly registered contract IDs using ordinal comparison. Unknown IDs fail resolution. The gateway registers `FindAirPipelineContract` as `FindAir`, `DeepWisdomPipelineContract` as `DeepWisdom` and `SarAtcPipelineContract` as `SarAtc`. Pipeline contracts use unversioned IDs.
 
@@ -46,17 +46,17 @@ One DeepWisdom run-parameter object describes one selected rule's mission reques
 ```json
 {
   "customer": "replace-me-customer",
-  "profile_name": "replace-me-profile",
-  "hebrew_rule_name": "replace-me-mission",
-  "algorithm_name": "replace-me-algorithm",
+  "modelName": "replace-me-profile",
+  "hebrewRuleName": "replace-me-mission",
+  "algorithmName": "replace-me-algorithm",
   "priority": 1,
   "username": null,
-  "run_every_other_image": false,
-  "should_check_in_vip": false
+  "runEveryOtherImage": false,
+  "shouldCheckInVip": false
 }
 ```
 
-The optional `profile_name`, `hebrew_rule_name` and `username` accept strings or null. The other fields are required, with the shown JSON types. `algorithm_name` is one string and does not use FindAir's algorithm enum. `priority` is a 32-bit integer without an invented business range. Unknown and duplicate run parameters are rejected. These are the payload-relevant fields, not the entire stored rule document: matching conditions and rule metadata remain outside this contract.
+The optional `modelName`, `hebrewRuleName` and `username` accept strings or null. The other fields are required, with the shown JSON types. `algorithmName` is one string and does not use FindAir's algorithm enum. `priority` is a 32-bit integer without an invented business range. Unknown and duplicate run parameters are rejected. These are the payload-relevant fields, not the entire stored rule document: matching conditions and rule metadata remain outside this contract.
 
 DeepWisdom's `ExtraData` can include these optional settings alongside any custom fields:
 
@@ -71,9 +71,9 @@ DeepWisdom's `ExtraData` can include these optional settings alongside any custo
 
 None of these settings is required. Every supplied property is preserved under `extraData`, including custom fields. Known settings additionally populate the corresponding top-level fields without overwriting rule-derived values. Two pipelines may use the same `DeepWisdom` contract with different settings.
 
-In the mission request body, `customer` supplies `requestingUnit` and `displayName`; `profile_name` supplies `modelName`; `username` falls back to `XUserName` only when null. `missionName` combines the rule's Hebrew name with the image date formatted `dd/MM/yyyy` using invariant culture. The matched rule's own location supplies `focusedWkt`, independently of the input ROI. The caller passes it as `RuleLocationWkt` on the context, from the rule's `match.locationWkt`, so the polygon is stored once. `ValidateRuleLocation` rejects a DeepWisdom rule without a location when rules load; a context without one is also rejected. Optional `origin`, `queueType` and `saveDetections` values come from `ExtraData`.
+In the mission request body, `customer` supplies `requestingUnit` and `displayName`; `modelName` is sent as is; `username` falls back to `XUserName` only when null. `missionName` combines the rule's Hebrew name with the image date formatted `dd/MM/yyyy` using invariant culture. The matched rule's own location supplies `focusedWkt`, independently of the input ROI. The caller passes it as `RuleLocationWkt` on the context, from the rule's `match.locationWkt`, so the polygon is stored once. `ValidateRuleLocation` rejects a DeepWisdom rule without a location when rules load; a context without one is also rejected. Optional `origin`, `queueType` and `saveDetections` values come from `ExtraData`.
 
-`tasksData` contains one task with `imageId`. When `run_every_other_image` is true, its nullable `legId`, `prevOverlayId` and `nextOverlayId` come from the overlay. When `should_check_in_vip` is true, `photoTime` is assigned. Unassigned nullable properties are serialized as null. These flags describe downstream behavior; the builder does not perform alternating-image filtering or VIP checks.
+`tasksData` contains one task with `imageId`. When `runEveryOtherImage` is true, its nullable `legId`, `prevOverlayId` and `nextOverlayId` come from the overlay. When `shouldCheckInVip` is true, `photoTime` is assigned. Unassigned nullable properties are serialized as null. These flags describe downstream behavior; the builder does not perform alternating-image filtering or VIP checks.
 
 The factory stores the photographed legacy `DateTime.Parse(..., InvariantCulture)` result as `OverlayPhotoTime`, independently of the UTC `PhotoTime` used by FindAir. DeepWisdom prefers that clock value and otherwise uses `PhotoTime.DateTime` without another UTC conversion. Offset-bearing input follows the process timezone when parsed; matching the old deployment's timezone preserves its calendar-day behavior. A null Hebrew rule name retains the leading-space mission name rather than inventing a fallback.
 

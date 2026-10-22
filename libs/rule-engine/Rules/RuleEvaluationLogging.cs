@@ -20,6 +20,8 @@ public static class RuleEvaluationLogging
                    new(TelemetryAttributeNames.RulesMissedPhotoAgeCount, MissedCount(RuleMissReason.PhotoAge)),
                    new(TelemetryAttributeNames.RulesMissedSensorIds, MissedIds(RuleMissReason.Sensor)),
                    new(TelemetryAttributeNames.RulesMissedSensorCount, MissedCount(RuleMissReason.Sensor)),
+                   new(TelemetryAttributeNames.RulesMissedSensorTypeIds, MissedIds(RuleMissReason.SensorType)),
+                   new(TelemetryAttributeNames.RulesMissedSensorTypeCount, MissedCount(RuleMissReason.SensorType)),
                    new(TelemetryAttributeNames.RulesMissedResolutionIds, MissedIds(RuleMissReason.Resolution)),
                    new(TelemetryAttributeNames.RulesMissedResolutionCount, MissedCount(RuleMissReason.Resolution)),
                    new(TelemetryAttributeNames.RulesMissedModeSarIds, MissedIds(RuleMissReason.ModeSar)),

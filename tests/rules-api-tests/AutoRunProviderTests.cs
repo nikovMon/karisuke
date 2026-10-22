@@ -54,7 +54,8 @@ public sealed class AutoRunProviderTests
                     new() { Name = "A", GridTypes = ["grid-A"], RegistrationQualities = [RegistrationQuality.Accurate] },
                     new() { Name = "B", GridTypes = ["grid-B"], RegistrationQualities = [RegistrationQuality.Sensor] }
                 ],
-                Resolution = new() { Max = 1 }, LocationWkt = Area, MaxPhotoAgeDays = 1, ModeSar = ["strip"]
+                Resolution = new() { Max = 1 }, LocationWkt = Area, MaxPhotoAgeDays = 1, ModeSar = ["strip"],
+                SensorTypes = ["SAR"]
             }
         };
         var builder = new ProviderQueryBuilder(Options.Create(new ElasticProviderOptions()));
@@ -67,6 +68,7 @@ public sealed class AutoRunProviderTests
         Assert.Equal("B", Find(second, "match", "SENSOR")[0].GetString());
         Assert.Equal("grid-B", Find(second, "match", "SOLUTIONTYPE")[0].GetString());
         Assert.False(Find(second, "match", "hasalgorithmicregistration")[0].GetBoolean());
+        Assert.All([first, second], clauses => Assert.Equal("SAR", Find(clauses, "match", "IMAGINGTECHNIQUE")[0].GetString()));
         Assert.All(queries, query =>
         {
             Assert.DoesNotContain("\"date\"", query.GetProperty("filter").GetRawText(), StringComparison.Ordinal);

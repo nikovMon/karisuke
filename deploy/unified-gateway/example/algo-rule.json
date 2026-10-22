@@ -11,13 +11,13 @@
   "runParams": [
     {
       "customer": "customer-example",
-      "profile_name": null,
-      "hebrew_rule_name": "Example mission",
-      "algorithm_name": "example-algorithm",
+      "modelName": null,
+      "hebrewRuleName": "Example mission",
+      "algorithmName": "example-algorithm",
       "priority": 1,
       "username": null,
-      "run_every_other_image": false,
-      "should_check_in_vip": false
+      "runEveryOtherImage": false,
+      "shouldCheckInVip": false
     }
   ],
   "createdBy": "deployment-example",

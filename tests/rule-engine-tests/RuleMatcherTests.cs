@@ -97,6 +97,37 @@ public sealed class RuleMatcherTests
         }
     }
 
+    [Theory]
+    [InlineData("SAR", true)]
+    [InlineData("EO", true)]
+    [InlineData("IR", false)]
+    [InlineData("sar", false)]
+    [InlineData("", false)]
+    public void SensorTypeMustBeOneOfTheRuleTypes(string imageType, bool matches)
+    {
+        var rule = Rule();
+        rule.Match!.SensorTypes = ["SAR", "EO"];
+
+        var evaluation = _matcher.Match(Image(sensorType: imageType), [ActiveRule(rule)]);
+
+        Assert.Equal(matches, evaluation.Matches.Count == 1);
+        if (!matches)
+        {
+            Assert.Equal(new RuleMiss("rule-1", RuleMissReason.SensorType), Assert.Single(evaluation.Misses));
+        }
+    }
+
+    [Fact]
+    public void SensorWithoutCriteriaAcceptsAnyQualityAndGridTypeForThatSensorOnly()
+    {
+        var rule = Rule();
+        rule.Match!.Sensors = [new SensorConfig { Name = "camera" }];
+        var active = ActiveRule(rule);
+
+        Assert.Single(_matcher.Match(Image(quality: RegistrationQuality.Sensor, gridType: "any-grid"), [active]).Matches);
+        Assert.Equal(RuleMissReason.Sensor, Assert.Single(_matcher.Match(Image(sensorName: "other"), [active]).Misses).Reason);
+    }
+
     [Fact]
     public void RuleWithoutModeSarMatchesImagesWithOrWithoutOne()
     {

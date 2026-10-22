@@ -12,8 +12,8 @@ public sealed class DeepWisdomPipelineContract : IPipelineContract
 {
     private static readonly FrozenSet<string> RunParamFields = new[]
     {
-        "customer", "profile_name", "hebrew_rule_name", "algorithm_name", "priority", "username",
-        "run_every_other_image", "should_check_in_vip"
+        "customer", "modelName", "hebrewRuleName", "algorithmName", "priority", "username",
+        "runEveryOtherImage", "shouldCheckInVip"
     }.ToFrozenSet(StringComparer.Ordinal);
     private static readonly FrozenDictionary<string, string> NoAttributes =
         new Dictionary<string, string>().ToFrozenDictionary(StringComparer.Ordinal);
@@ -48,7 +48,7 @@ public sealed class DeepWisdomPipelineContract : IPipelineContract
             errors.Add(new("input.photoTime", "Must be supplied."));
         errors.AddRange(ValidateRuleLocation(context.RuleLocationWkt));
         if (runParams.ValueKind == JsonValueKind.Object &&
-            runParams.TryGetProperty("run_every_other_image", out var everyOther) && everyOther.ValueKind == JsonValueKind.True)
+            runParams.TryGetProperty("runEveryOtherImage", out var everyOther) && everyOther.ValueKind == JsonValueKind.True)
         {
             errors.AddRange(context.InputFieldErrors.Where(error => error.Field is
                 "input.legId" or "input.prevOverlayId" or "input.nextOverlayId"));
@@ -72,7 +72,7 @@ public sealed class DeepWisdomPipelineContract : IPipelineContract
         // DeepWisdom receives JSON directly; preserve the legacy serializer's unescaped Unicode.
         using var writer = new Utf8JsonWriter(buffer, new JsonWriterOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         writer.WriteStartObject();
-        writer.WriteString("modelName", parameters.ProfileName);
+        writer.WriteString("modelName", parameters.ModelName);
         writer.WriteString("focusedWkt", context.RuleLocationWkt);
         WriteConfiguredValue(writer, extraData, "Origin", "origin");
         WriteConfiguredValue(writer, extraData, "QueueType", "queueType");
@@ -131,13 +131,13 @@ public sealed class DeepWisdomPipelineContract : IPipelineContract
         ValidateProperties(value, RunParamFields, errors);
         return new(
             ReadRequiredString(value, "customer", errors),
-            ReadNullableString(value, "profile_name", errors),
-            ReadNullableString(value, "hebrew_rule_name", errors),
-            ReadRequiredString(value, "algorithm_name", errors),
+            ReadNullableString(value, "modelName", errors),
+            ReadNullableString(value, "hebrewRuleName", errors),
+            ReadRequiredString(value, "algorithmName", errors),
             ReadInteger(value, "priority", errors),
             ReadNullableString(value, "username", errors),
-            ReadBoolean(value, "run_every_other_image", errors),
-            ReadBoolean(value, "should_check_in_vip", errors));
+            ReadBoolean(value, "runEveryOtherImage", errors),
+            ReadBoolean(value, "shouldCheckInVip", errors));
     }
 
     private static string? ReadNullableString(JsonElement value, string name, List<ContractValidationError> errors)
@@ -166,6 +166,6 @@ public sealed class DeepWisdomPipelineContract : IPipelineContract
         return 0;
     }
 
-    private sealed record DeepWisdomRunParameters(string Customer, string? ProfileName, string? HebrewRuleName,
+    private sealed record DeepWisdomRunParameters(string Customer, string? ModelName, string? HebrewRuleName,
         string AlgorithmName, int Priority, string? Username, bool RunEveryOtherImage, bool ShouldCheckInVip);
 }

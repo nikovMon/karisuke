@@ -192,6 +192,17 @@ public sealed class RuleMatchConditionsPatch
         }
     }
 
+    [JsonPropertyName(PipelineRuleFields.SensorTypes)]
+    public List<string>? SensorTypes
+    {
+        get;
+        set
+        {
+            field = value;
+            _providedFields.Add(PipelineRuleFields.SensorTypes);
+        }
+    }
+
     internal void ApplyTo(RuleMatchConditions match)
     {
         if (_providedFields.Contains(PipelineRuleFields.Sensors))
@@ -217,6 +228,11 @@ public sealed class RuleMatchConditionsPatch
         if (_providedFields.Contains(PipelineRuleFields.ModeSar))
         {
             match.ModeSar = ModeSar;
+        }
+
+        if (_providedFields.Contains(PipelineRuleFields.SensorTypes))
+        {
+            match.SensorTypes = SensorTypes;
         }
     }
 }
