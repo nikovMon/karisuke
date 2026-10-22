@@ -106,9 +106,9 @@ public sealed class ExtraDataDispatchTests
         {"tenantId":"tenant","algorithmNames":["FindAir"],
          "tilingConfigs":[{"tileSizeWidth":512,"tileSizeHeight":512,"tileOverlapWidth":0,"tileOverlapHeight":0}]}
         """ : """
-        {"customer":"customer","profile_name":"profile","hebrew_rule_name":"משימה",
-         "algorithm_name":"custom","priority":1,"username":null,
-         "run_every_other_image":false,"should_check_in_vip":false}
+        {"customer":"customer","modelName":"profile","hebrewRuleName":"משימה",
+         "algorithmName":"custom","priority":1,"username":null,
+         "runEveryOtherImage":false,"shouldCheckInVip":false}
         """);
 
     private static JsonElement Json(string json)
