@@ -17,8 +17,8 @@ public sealed class ElasticProviderOptions
 }
 
 /// <summary>
-/// These aliases are provisional deployment defaults. The supplied working request confirms
-/// SENSOR and geo, not the case of every other provider field.
+/// SENSOR, geo and date are confirmed request aliases. Other aliases remain provisional
+/// deployment defaults; response property names are configured separately.
 /// </summary>
 public sealed class ProviderRequestFields
 {
@@ -30,7 +30,7 @@ public sealed class ProviderRequestFields
     public string SortieId { get; set; } = "SORTIE";
     public string IsRealtime { get; set; } = "ISREALTIME";
     public string CreatedTime { get; set; } = "CREATED";
-    public string PhotoTime { get; set; } = "PHOTOTIME";
+    public string PhotoTime { get; set; } = "date";
     public string Resolution { get; set; } = "RESOLUTION";
     public string Geometry { get; set; } = "geo";
     public string SortDate { get; set; } = "date";

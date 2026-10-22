@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using ImagingPipeline.GeometryUtils;
@@ -34,7 +35,10 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
         if (query.ValueKind != JsonValueKind.Object)
             throw new ArgumentException("Provider query must be an object.", nameof(query));
         var uri = nextPage is null ? TableUri() : ContinuationUri(nextPage);
-        using var request = new HttpRequestMessage(HttpMethod.Post, uri) { Content = JsonContent.Create(query) };
+        using var request = new HttpRequestMessage(HttpMethod.Post, uri)
+        {
+            Content = JsonContent.Create(query, mediaType: new MediaTypeHeaderValue("application/json-patch+json"))
+        };
         using var document = await SendAsync(request, allowNotFound: false, cancellationToken)
             ?? throw new ElasticProviderException("Provider returned no search response.");
         var root = document.RootElement;

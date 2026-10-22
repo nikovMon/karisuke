@@ -5,6 +5,7 @@ namespace ImagingPipeline.Rules.Api.AutoRuns;
 public sealed class AutoRunOptions
 {
     public const string SectionName = "AutoRun";
+    public const int DefaultFilterMaxOverlays = 100;
     public bool Enabled { get; set; }
     public int MaxSelectedOverlays { get; set; } = 100_000;
     public int MaxScannedRecords { get; set; } = 1_000_000;

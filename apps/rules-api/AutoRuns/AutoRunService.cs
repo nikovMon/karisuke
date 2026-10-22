@@ -67,6 +67,21 @@ public sealed class AutoRunService(
         }
     }
 
+    public Task<AutoRunSummary> RerunAsync(string id, CancellationToken cancellationToken)
+    {
+        AutoRunPreviewRequest request;
+        lock (_gate)
+        {
+            Sweep();
+            var job = Find(id);
+            if (job.State is AutoRunState.Preparing or AutoRunState.Publishing)
+                throw new AutoRunRequestException(409, "Wait for the active run to finish or cancel it before preparing a rerun.");
+            request = job.Request with { Publication = job.Publication with { } };
+        }
+        // Resolve current saved rules and fetch fresh overlays, leaving the original snapshot intact.
+        return PreviewAsync(request, cancellationToken);
+    }
+
     public AutoRunSummary Get(string id)
     {
         lock (_gate) { Sweep(); return Summary(Find(id)); }
@@ -479,8 +494,8 @@ public sealed class AutoRunService(
         if (request.Source is null || request.Targets is not { Count: <= 100 })
             throw new AutoRunRequestException(400, "A source and at most 100 targets are required; targets cannot be null.");
         if (!Enum.IsDefined(request.Source.Mode)) throw new AutoRunRequestException(400, "Unknown source mode.");
-        if (request.Source.Mode != AutoRunSourceMode.OverlayIds && request.Targets.Count == 0)
-            throw new AutoRunRequestException(400, "Rules and Filters modes require at least one pipeline rule target.");
+        if (request.Source.Mode == AutoRunSourceMode.Rules && request.Targets.Count == 0)
+            throw new AutoRunRequestException(400, "Rules mode requires at least one pipeline rule target.");
         if (request.Source.Mode == AutoRunSourceMode.OverlayIds)
         {
             if (request.Source.Filters is not null || request.Source.OverlayIds is not { Length: > 0 and <= 100_000 } ids ||
@@ -511,7 +526,9 @@ public sealed class AutoRunService(
 
     private int Maximum(AutoRunPreviewRequest request) => request.MaxOverlays ?? (int)Math.Min(
         request.Targets.Count == 0
-            ? request.Source.OverlayIds!.Distinct(StringComparer.Ordinal).LongCount()
+            ? request.Source.Mode == AutoRunSourceMode.OverlayIds
+                ? request.Source.OverlayIds!.Distinct(StringComparer.Ordinal).LongCount()
+                : AutoRunOptions.DefaultFilterMaxOverlays
             : request.Targets.Sum(t => (long)t.MaxOverlays!.Value),
         _options.MaxSelectedOverlays);
 
@@ -545,7 +562,7 @@ public sealed class AutoRunService(
         public string Id { get; } = Guid.NewGuid().ToString("N");
         public AutoRunPreviewRequest Request { get; } = request;
         public IReadOnlyList<AutoRunResolvedTarget> Targets { get; } = targets;
-        public bool IsDirect { get; } = request.Source.Mode == AutoRunSourceMode.OverlayIds && request.Targets.Count == 0;
+        public bool IsDirect { get; } = request.Targets.Count == 0;
         public int Maximum { get; } = maximum;
         public DateTimeOffset CreatedAt { get; } = createdAt;
         public ActivityContext TraceContext { get; } = Activity.Current?.Context ?? default;

@@ -173,7 +173,7 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
 
     private static string? Timestamp(string? value) => value is null ? null :
         ProviderDates.TryExplicitOffset(value, out var time)
-            ? time.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)
+            ? time.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture)
             : throw new ArgumentException("Time ranges require explicit UTC offsets.");
 
     private static object Clause(string operation, string field, object values) =>
