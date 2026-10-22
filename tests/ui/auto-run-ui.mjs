@@ -17,7 +17,10 @@ const options = {
   limits: { batchSize: { min: 1, max: 100 }, delayMs: { min: 0, max: 60000 }, maxSelectedOverlays: 100000,
     maxScannedRecords: 1000000, maxCandidates: 200000, payloadBudgetBytes: 536870912,
     readyLifetimeMinutes: 30, summaryLifetimeMinutes: 60, maxTargets: 100 },
-  singleInstance: true
+  singleInstance: true,
+  ui: { mapUrl: null },
+  memory: { availableBytes: 12884901888, processBytes: 1073741824, managedBytes: 536870912,
+    limitBytes: 10307921510, headroomBytes: 9234179686, isUnderPressure: false }
 };
 const rules = Array.from({ length: 11 }, (_, i) => ({
   _id: `rule-${i + 1}`, ruleName: i === 0 ? 'Urban detail' : i === 1 ? 'Archive coverage' : `Rule ${i + 1}`,
@@ -78,7 +81,7 @@ function makeRun(body) {
     sourceExhausted: direct, stoppedReason: direct ? null : 'Scan limit',
     warnings: direct ? [] : ['Observed counts cover scanned candidates only.'], errors: [],
     queries: directIds ? [] : [{ filter: { logical_operators: { AND: [{ match: { SENSOR: { type: 'IN', values: ['SENSOR_A'] } } }] } } }],
-    confirmedPerSecond: 0
+    confirmedPerSecond: 0, memory: structuredClone(options.memory)
   };
   runs.set(run.id, run);
   previewRequests.set(run.id, structuredClone(body));
@@ -95,6 +98,10 @@ const server = http.createServer(async (req, res) => {
     requests.push({ method: req.method, path: url.pathname, search: url.search, body });
     const json = (data, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
     if (url.pathname === '/auto-runs/options') return json(options);
+    if (url.pathname === '/map-test') {
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      return res.end('<!doctype html><html><body><h1>Test area map</h1><button>Choose an area</button></body></html>');
+    }
     if (url.pathname === '/pipelines') {
       await pipelineGate;
       return pipelineFailure ? json({ error: 'Pipeline discovery is unavailable.' }, 503) : json([
@@ -171,6 +178,7 @@ const server = http.createServer(async (req, res) => {
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const origin = `http://127.0.0.1:${server.address().port}`;
+options.ui.mapUrl = `${origin}/map-test`;
 let browser;
 try {
   browser = await playwright.chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {}) });
@@ -187,6 +195,37 @@ try {
   assert.equal(await page.locator('#input-timezone').count(), 0, 'timezone is automatic, not selectable');
   assert.equal(await page.locator('.environment-pill, .heading-mark, .sidebar-bottom, footer').count(), 0);
   assert.ok(!(await page.locator('body').textContent()).includes('HISTORICAL PROCESSING'));
+  assert.equal(await page.locator('#grid-types, #sortie-ids').count(), 0, 'removed filters cannot enter the request');
+  assert.equal(await page.locator('#area-map-frame').getAttribute('src'), null, 'map is not loaded before opening');
+  assert.equal(requests.filter(r => r.path === '/map-test').length, 0);
+  await page.locator('#filter-details summary').click();
+  await page.locator('#open-area-map:not(:disabled)').focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('dialog', { name: 'Search area map' }).waitFor({ state: 'visible' });
+  await page.frameLocator('#area-map-frame').getByRole('heading', { name: 'Test area map' }).waitFor();
+  assert.equal(await page.locator('#area-map-frame').getAttribute('src'), options.ui.mapUrl);
+  assert.equal(await page.locator('#area-map-external').getAttribute('href'), options.ui.mapUrl);
+  assert.ok(await page.locator('#close-area-map').evaluate(element => document.activeElement === element), 'dialog opens with close action focused');
+  await page.keyboard.press('Shift+Tab');
+  assert.ok(await page.locator('#area-map-dialog').evaluate(dialog => dialog.contains(document.activeElement)), 'focus stays inside the modal');
+  await page.screenshot({ path: path.join(screenshots, 'area-map-desktop.png'), fullPage: true });
+  // The embedded site owns its keyboard events; test Escape in the enclosing dialog.
+  await page.locator('#close-area-map').focus();
+  await page.keyboard.press('Escape');
+  await page.locator('#area-map-dialog').waitFor({ state: 'hidden' });
+  await page.waitForFunction(() => !document.getElementById('area-map-frame').hasAttribute('src'));
+  assert.equal(await page.locator('#area-map-frame').getAttribute('src'), null, 'closing unloads the map');
+  assert.ok(await page.locator('#open-area-map').evaluate(element => document.activeElement === element), 'focus returns to the map trigger');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('#open-area-map').click();
+  await page.frameLocator('#area-map-frame').getByRole('heading').waitFor();
+  assert.ok(await page.locator('#area-map-dialog').evaluate(dialog => dialog.getBoundingClientRect().width <= innerWidth && dialog.scrollWidth <= dialog.clientWidth), 'map modal fits a mobile viewport');
+  await page.screenshot({ path: path.join(screenshots, 'area-map-mobile.png'), fullPage: true });
+  await page.locator('#close-area-map').click();
+  await page.locator('#area-map-dialog').waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('#area-wkt').inputValue(), '', 'map never invents a WKT integration protocol');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.locator('#filter-details summary').click();
   for (const [name, batch, delay] of [['Sequential', '1', '1000'], ['Burst', '100', '0'], ['Balanced', '10', '1000']]) {
     const preset = page.locator('#publication-presets').getByRole('button', { name: new RegExp(`^${name}:`) });
     await preset.click();
@@ -223,6 +262,8 @@ try {
   await page.locator('#start-run:not([hidden])').waitFor();
   const preview = requests.find(r => r.path === '/auto-runs/preview').body;
   assert.equal(preview.source.mode, 'Rules');
+  assert.equal(preview.source.filters.gridTypes, undefined);
+  assert.equal(preview.source.filters.sortieIds, undefined);
   assert.equal(preview.source.filters.isRealtime, false);
   assert.deepEqual(preview.source.filters.sensorNames, ['SENSOR_A']);
   assert.equal(preview.source.filters.createdTime.from, '2026-10-01T06:30:00.000Z');
@@ -231,6 +272,8 @@ try {
   assert.equal(preview.targets[0].minOverlays, 25);
   assert.equal(preview.targets[1].ruleId, 'rule-2');
   assert.equal(await page.locator('#count-selected').textContent(), '25');
+  assert.equal(await page.locator('#refresh-run').count(), 0, 'redundant circular refresh action removed');
+  assert.match(await page.locator('#run-memory').textContent(), /Process memory: 1 GiB/);
   await page.locator('#items-next').click();
   await page.getByText('overlay-025', { exact: true }).waitFor();
   await page.locator('#items-prev').click();
@@ -658,6 +701,7 @@ try {
   await filtersPage.locator('#add-rules').click();
   await filtersPage.getByLabel('Maximum for Urban detail').fill('');
   await filtersPage.locator('[name="source-mode"][value="Filters"]').check();
+  assert.equal(await filtersPage.locator('#grid-types, #sortie-ids').count(), 0);
   assert.ok(await filtersPage.locator('#rule-selection').isHidden());
   assert.ok(await filtersPage.getByLabel('Maximum for Urban detail').isDisabled());
   assert.equal(await filtersPage.locator('#overall-max').getAttribute('placeholder'), 'Default: 100 overlays');
@@ -769,6 +813,48 @@ try {
   await filterOutagePage.close();
   pipelineFailure = false;
 
+  // A bounded partial preview remains usable after a memory or provider-page limit.
+  const partialPage = await context.newPage();
+  partialPage.on('pageerror', error => pageErrors.push(error.message));
+  for (const stoppedReason of ['memoryLimit', 'payloadBudget', 'responseLimit']) {
+    const partialRun = makeRun({ source: { mode: 'Filters' }, targets: [], minOverlays: 30,
+      maxOverlays: 50, publication: { batchSize: 10, delayMs: 1000 } });
+    partialRun.state = 'Ready';
+    partialRun.sourceExhausted = false;
+    partialRun.stoppedReason = stoppedReason;
+    partialRun.shortfall = 5;
+    partialRun.memory = { ...options.memory, processBytes: 10307921510, headroomBytes: 0, isUnderPressure: true };
+    const startsBefore = requests.filter(request => request.path.endsWith('/start')).length;
+    await partialPage.goto(`${origin}/ui/auto-run/runs/${partialRun.id}`);
+    await partialPage.locator('#partial-selection-note').waitFor();
+    assert.match(await partialPage.locator('#partial-selection-note').textContent(), /25 selected overlays were retained/);
+    assert.match(await partialPage.locator('#run-notices').textContent(), /not a complete source total/);
+    assert.match(await partialPage.locator('#run-memory').textContent(), /Headroom: 0 MiB/);
+    assert.ok(await partialPage.locator('#start-run').isEnabled(), 'partial selection permits explicit publication');
+    assert.equal(requests.filter(request => request.path.endsWith('/start')).length, startsBefore, 'memory limits never start a run automatically');
+    if (stoppedReason === 'memoryLimit') {
+      await partialPage.setViewportSize({ width: 390, height: 844 });
+      await partialPage.screenshot({ path: path.join(screenshots, 'partial-memory-preview-mobile.png'), fullPage: true });
+      assert.ok(await partialPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    }
+    await partialPage.locator('#start-run').click();
+    await partialPage.locator('#run-state').getByText('Publishing', { exact: true }).waitFor();
+    assert.equal(requests.filter(request => request.path === `/auto-runs/${partialRun.id}/start`).length, 1);
+  }
+  await partialPage.close();
+
+  options.ui.mapUrl = null;
+  const noMapPage = await context.newPage();
+  noMapPage.on('pageerror', error => pageErrors.push(error.message));
+  await noMapPage.goto(`${origin}/ui/auto-run`);
+  await noMapPage.locator('#prepare-button:not(:disabled)').waitFor();
+  await noMapPage.locator('[name="source-mode"][value="Filters"]').check();
+  assert.ok(await noMapPage.locator('#open-area-map').isDisabled());
+  assert.match(await noMapPage.locator('#area-map-hint').textContent(), /AutoRun.Ui.MapUrl/);
+  assert.equal(await noMapPage.locator('#area-map-frame').getAttribute('src'), null);
+  await noMapPage.close();
+  options.ui.mapUrl = `${origin}/map-test`;
+
   options.enabled = false;
   const disabledPage = await context.newPage();
   disabledPage.on('pageerror', error => pageErrors.push(error.message));
@@ -798,7 +884,12 @@ try {
     'independent filters omit hidden targets, validate times, preserve bounded limits and bypass pipeline discovery',
     'rerun restores original filters and latest publication settings without auto-publishing',
     'rerun duplicate-click protection, conflict recovery, keyboard and mobile layout',
-    'rule and overlay-ID reruns work from retained deep links without configuration drafts'], screenshots }, null, 2));
+    'rule and overlay-ID reruns work from retained deep links without configuration drafts',
+    'grid-type and sortie filters absent from both search modes and submitted payloads',
+    'configured map modal loads on demand, supports keyboard focus and Escape, and unloads on close',
+    'map modal mobile layout and absent-configuration hint',
+    'redundant run refresh removed while automatic polling remains',
+    'memory, payload and response limits preserve explicitly startable partial previews with memory readouts'], screenshots }, null, 2));
 } finally {
   for (const release of pendingResponses) release();
   if (browser) await browser.close();

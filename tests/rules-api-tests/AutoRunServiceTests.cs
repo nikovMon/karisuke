@@ -420,7 +420,7 @@ public sealed class AutoRunServiceTests
     }
 
     [Fact]
-    public async Task MultipleRuleSearchesAlternatePagesAndKeepEachBranchCursor()
+    public async Task MultipleRuleSearchesFinishAllPagesBeforeStartingTheNextQuery()
     {
         await using var fixture = await Fixture.StartAsync([]);
         fixture.Resolver.Rules["rule-a"].Match = new() { Resolution = new() { Min = 0.5 } };
@@ -443,8 +443,8 @@ public sealed class AutoRunServiceTests
         });
 
         Assert.Equal(2, branches.Count);
-        Assert.Equal([0, 1, 0, 1], requests.Select(request => request.Branch));
-        Assert.Equal([null, null, "/branch-0-next", "/branch-1-next"], requests.Select(request => request.Cursor));
+        Assert.Equal([0, 0, 1, 1], requests.Select(request => request.Branch));
+        Assert.Equal([null, "/branch-0-next", null, "/branch-1-next"], requests.Select(request => request.Cursor));
         Assert.Equal(4, ready.Counters.Scanned);
         Assert.Equal(4, ready.Counters.Selected);
         Assert.True(ready.SourceExhausted);
@@ -469,21 +469,25 @@ public sealed class AutoRunServiceTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ByteBudgetFailureReleasesCandidatesAndAllowsLaterPreview(bool direct)
+    public async Task ByteBudgetStopPreservesCandidatesForPublicationAndAllowsLaterPreview(bool direct)
     {
         var oversized = Overlay("oversized", imageUrl: "https://example.invalid/" + new string('a', 8000));
         var options = EnabledOptions();
         options.PayloadBudgetBytes = 5000;
         await using var fixture = await Fixture.StartAsync([Overlay("small"), oversized], options);
         var first = await fixture.Service.PreviewAsync(Request(["small", "oversized"], direct ? [] : null), CancellationToken.None);
-        var failed = await fixture.WaitAsync(first.Id, AutoRunState.Failed);
+        var ready = await fixture.WaitAsync(first.Id, AutoRunState.Ready);
 
-        Assert.Equal(0, failed.Counters.Selected);
-        Assert.Contains(failed.Errors, error => error.Contains("payload budget", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(409, Assert.Throws<AutoRunRequestException>(() => fixture.Service.Start(first.Id)).StatusCode);
+        Assert.Equal(1, ready.Counters.Selected);
+        Assert.Equal("payloadBudget", ready.StoppedReason);
+        Assert.False(ready.SourceExhausted);
+        Assert.Contains(ready.Warnings, warning => warning.Contains("payload budget", StringComparison.OrdinalIgnoreCase));
+        fixture.Service.Start(first.Id);
+        await fixture.WaitAsync(first.Id, AutoRunState.Completed);
+        Assert.Equal("small", Assert.Single(fixture.Publisher.Calls).OverlayId);
         var next = await fixture.ReadyAsync(Request(["small"], direct ? [] : null));
         Assert.Equal(1, next.Counters.Selected);
-        Assert.Empty(fixture.Publisher.Calls);
+        Assert.Single(fixture.Publisher.Calls);
     }
 
     [Fact]
@@ -495,11 +499,92 @@ public sealed class AutoRunServiceTests
             [Overlay("large", imageUrl: "https://example.invalid/" + new string('a', 2200))], options);
         var first = await fixture.ReadyAsync(Request(["large"]));
         var second = await fixture.Service.PreviewAsync(Request(["large"]), CancellationToken.None);
-        await fixture.WaitAsync(second.Id, AutoRunState.Failed);
+        var partial = await fixture.WaitAsync(second.Id, AutoRunState.Ready);
+        Assert.Equal("payloadBudget", partial.StoppedReason);
+        Assert.Equal(0, partial.Counters.Selected);
+        Assert.Equal(409, Assert.Throws<AutoRunRequestException>(() => fixture.Service.Start(second.Id)).StatusCode);
         Assert.Equal(AutoRunState.Cancelled, fixture.Service.Cancel(first.Id).State);
 
         var afterRelease = await fixture.ReadyAsync(Request(["large"]));
         Assert.Equal(1, afterRelease.Counters.Selected);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MemoryPressureDuringAdmissionDoesNotRetainAnUnrunnableJob(bool duringRuleResolution)
+    {
+        var memory = new AutoRunMemoryTestGuard { Blocked = !duringRuleResolution };
+        await using var fixture = await Fixture.StartAsync([], memory: memory);
+        fixture.Resolver.OnResolved = () => memory.Blocked = true;
+
+        var error = await Assert.ThrowsAsync<AutoRunRequestException>(() =>
+            fixture.Service.PreviewAsync(Request(["one"]), CancellationToken.None));
+
+        Assert.Equal(409, error.StatusCode);
+        Assert.Contains("Memory", error.Message, StringComparison.Ordinal);
+        Assert.Equal(duringRuleResolution ? 1 : 0, fixture.Resolver.Calls);
+        Assert.Empty(fixture.Provider.GetCalls);
+        Assert.Empty(fixture.Service.List());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProcessMemoryPressureStopsPreparationButCollectedOverlaysCanRun(bool direct)
+    {
+        var memory = new AutoRunMemoryTestGuard();
+        await using var fixture = await Fixture.StartAsync([], memory: memory);
+        fixture.Provider.Get = (id, _) =>
+        {
+            if (id == "two") memory.Blocked = true;
+            return Task.FromResult(new ProviderOverlayResult(Overlay(id), null));
+        };
+        var ready = await fixture.ReadyAsync(Request(["one", "two", "three"], direct ? [] : null));
+
+        Assert.Equal("memoryLimit", ready.StoppedReason);
+        Assert.False(ready.SourceExhausted);
+        Assert.Equal(1, ready.Counters.Selected);
+        Assert.True(ready.Memory!.IsUnderPressure);
+        Assert.Equal(["one", "two"], fixture.Provider.GetCalls);
+        Assert.Empty(ready.Errors);
+        fixture.Service.Start(ready.Id);
+        await fixture.WaitAsync(ready.Id, AutoRunState.Completed);
+        Assert.Equal("one", Assert.Single(fixture.Publisher.Calls).OverlayId);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResourceLimitOnLaterPageKeepsTheEarlierSelection(bool responseLimit)
+    {
+        await using var fixture = await Fixture.StartAsync([]);
+        fixture.Provider.Search = (_, next, _) => next is null
+            ? Task.FromResult(new ProviderPage([new(Overlay("one"), null)], "/next"))
+            : throw (responseLimit ? new ProviderResponseLimitException(1000) : new AutoRunMemoryLimitException());
+        var ready = await fixture.ReadyAsync(Request([], []) with { Source = new() { Mode = AutoRunSourceMode.Filters } });
+
+        Assert.Equal(responseLimit ? "responseLimit" : "memoryLimit", ready.StoppedReason);
+        Assert.False(ready.SourceExhausted);
+        Assert.Equal(1, ready.Counters.Selected);
+        Assert.NotEmpty(ready.Warnings);
+        Assert.Empty(ready.Errors);
+        fixture.Service.Start(ready.Id);
+        await fixture.WaitAsync(ready.Id, AutoRunState.Completed);
+        Assert.Single(fixture.Publisher.Calls);
+    }
+
+    [Fact]
+    public async Task ResourceLimitBeforeAnyResultsProducesHonestEmptyPreview()
+    {
+        await using var fixture = await Fixture.StartAsync([]);
+        fixture.Provider.Search = (_, _, _) => throw new ProviderResponseLimitException(1000);
+        var ready = await fixture.ReadyAsync(Request([], []) with { Source = new() { Mode = AutoRunSourceMode.Filters } });
+        Assert.Equal("responseLimit", ready.StoppedReason);
+        Assert.Equal(0, ready.Counters.Selected);
+        Assert.False(ready.SourceExhausted);
+        Assert.Equal(409, Assert.Throws<AutoRunRequestException>(() => fixture.Service.Start(ready.Id)).StatusCode);
+        Assert.Empty(fixture.Publisher.Calls);
     }
 
     [Fact]
@@ -930,6 +1015,7 @@ public sealed class AutoRunServiceTests
 
     private sealed class FakeResolver : IAutoRunRuleResolver
     {
+        public Action? OnResolved { get; set; }
         public Dictionary<string, PipelineRuleDocument> Rules { get; } = new(StringComparer.Ordinal)
         {
             ["rule-a"] = Rule("rule-a"), ["rule-b"] = Rule("rule-b")
@@ -946,6 +1032,7 @@ public sealed class AutoRunServiceTests
                     JsonSerializer.SerializeToUtf8Bytes(Rules[target.RuleId], AutoRunJson.Options), AutoRunJson.Options)!;
                 return new AutoRunResolvedTarget(target with { }, rule, HistoricalRuleSnapshot.Build(rule, contract), contract);
             }).ToArray();
+            OnResolved?.Invoke();
             return Task.FromResult(resolved);
         }
     }
@@ -1000,13 +1087,14 @@ public sealed class AutoRunServiceTests
 
     private sealed class Fixture : IAsyncDisposable
     {
-        private Fixture(ProviderOverlay[] overlays, AutoRunOptions options, RecordingPublisher? publisher, TimeProvider? time)
+        private Fixture(ProviderOverlay[] overlays, AutoRunOptions options, RecordingPublisher? publisher, TimeProvider? time,
+            IAutoRunMemoryGuard? memory)
         {
             Resolver = new();
             Provider = new(overlays);
             Publisher = publisher ?? new();
             Service = new(Resolver, Provider, new ProviderQueryBuilder(Options.Create(new ElasticProviderOptions())),
-                Publisher, Options.Create(options), time ?? TimeProvider.System, NullLogger<AutoRunService>.Instance);
+                Publisher, Options.Create(options), time ?? TimeProvider.System, NullLogger<AutoRunService>.Instance, memory);
         }
 
         public FakeResolver Resolver { get; }
@@ -1016,9 +1104,9 @@ public sealed class AutoRunServiceTests
 
         public static async Task<Fixture> StartAsync(
             ProviderOverlay[] overlays, AutoRunOptions? options = null,
-            RecordingPublisher? publisher = null, TimeProvider? time = null)
+            RecordingPublisher? publisher = null, TimeProvider? time = null, IAutoRunMemoryGuard? memory = null)
         {
-            var fixture = new Fixture(overlays, options ?? EnabledOptions(), publisher, time);
+            var fixture = new Fixture(overlays, options ?? EnabledOptions(), publisher, time, memory);
             await fixture.Service.StartAsync(CancellationToken.None);
             return fixture;
         }

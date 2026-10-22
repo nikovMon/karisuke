@@ -9,7 +9,9 @@ namespace ImagingPipeline.Rules.Api.Controllers;
 [Produces("application/json")]
 public sealed class AutoRunsController(
     AutoRunService service,
-    IOptions<AutoRunOptions> configured) : ControllerBase
+    IOptions<AutoRunOptions> configured,
+    IAutoRunMemoryGuard memory,
+    IOptions<AutoRuns.Provider.ElasticProviderOptions> providerOptions) : ControllerBase
 {
     [HttpGet("options")]
     public IActionResult Options()
@@ -31,7 +33,10 @@ public sealed class AutoRunsController(
                 options.PayloadBudgetBytes, options.ReadyLifetimeMinutes, options.SummaryLifetimeMinutes,
                 MaxTargets = 100
             },
-            SingleInstance = true
+            SingleInstance = true,
+            Ui = options.Ui,
+            Memory = memory.Snapshot(),
+            Provider = new { providerOptions.Value.MaxResponseBytes }
         });
     }
 
