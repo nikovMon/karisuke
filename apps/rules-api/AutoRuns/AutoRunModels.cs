@@ -81,7 +81,8 @@ public sealed record AutoRunSummary(
     AutoRunCounters Counters, IReadOnlyList<AutoRunTargetSummary> Targets,
     AutoRunPublication Publication, AutoRunPublication ActivePublication, bool PublicationChangePending,
     bool SourceExhausted, string? StoppedReason, IReadOnlyList<string> Warnings,
-    IReadOnlyList<string> Errors, IReadOnlyList<JsonElement> Queries, double ConfirmedPerSecond);
+    IReadOnlyList<string> Errors, IReadOnlyList<JsonElement> Queries, double ConfirmedPerSecond,
+    AutoRunMemorySnapshot? Memory = null);
 
 public sealed record AutoRunItemTarget(string PipelineId, string RuleId);
 public sealed record AutoRunItem(

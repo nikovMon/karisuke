@@ -7,13 +7,14 @@ public sealed class ElasticProviderOptions
     public string BaseUrl { get; set; } = "";
     public string TableEntitiesPath { get; set; } = "/ErisImages/v2.0/ErisImages/Images/TableEntities";
     public int TimeoutSeconds { get; set; } = 30;
+    public int MaxResponseBytes { get; set; } = 64 * 1024 * 1024;
     public Dictionary<string, string> Headers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public ProviderRequestFields RequestFields { get; set; } = new();
     public ProviderResponseFields ResponseFields { get; set; } = new();
 }
 
 /// <summary>
-/// SENSOR, geo, date and CREATED are confirmed request aliases. Other aliases remain provisional
+/// SENSOR, geo, date, CREATED and hasalgorithmicregistration are confirmed request aliases. Other aliases remain provisional
 /// deployment defaults; response property names are configured separately.
 /// </summary>
 public sealed class ProviderRequestFields
@@ -22,7 +23,7 @@ public sealed class ProviderRequestFields
     public string SensorName { get; set; } = "SENSOR";
     public string SensorType { get; set; } = "IMAGINGTECHNIQUE";
     public string GridType { get; set; } = "SOLUTIONTYPE";
-    public string RegistrationQuality { get; set; } = "REGISTRATIONQUALITY";
+    public string RegistrationQuality { get; set; } = "hasalgorithmicregistration";
     public string SortieId { get; set; } = "SORTIE";
     public string IsRealtime { get; set; } = "ISREALTIME";
     public string CreatedTime { get; set; } = "CREATED";

@@ -11,10 +11,10 @@ using NetTopologySuite.IO;
 
 namespace ImagingPipeline.Rules.Api.AutoRuns.Provider;
 
-public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticProviderOptions> configured)
+public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticProviderOptions> configured,
+    IAutoRunMemoryGuard? memory = null)
     : IElasticOverlayProvider
 {
-    private const int ResponseByteLimit = 16 * 1024 * 1024;
     private const string OffsetlessResponseTimeZone = "Asia/Jerusalem";
     private readonly ElasticProviderOptions _options = configured.Value;
     private readonly IReadOnlyDictionary<string, string> _headers = ElasticProviderHeaders.Snapshot(configured.Value.Headers);
@@ -26,13 +26,22 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
         using var document = await SendAsync(request, allowNotFound: true, cancellationToken);
         if (document is null) return new(null, "Overlay was not found by Elastic Provider.");
+        memory?.ThrowIfUnsafe();
         var result = Map(document.RootElement);
         return result.Overlay is { } overlay && !string.Equals(overlay.Input.ImageId, id, StringComparison.Ordinal)
             ? new(null, "Provider returned an overlay ID different from the requested ID.")
             : result;
     }
 
-    public async Task<ProviderPage> SearchPageAsync(JsonElement query, string? nextPage, CancellationToken cancellationToken)
+    public Task<ProviderPage> SearchPageAsync(JsonElement query, string? nextPage, CancellationToken cancellationToken) =>
+        SearchPageCoreAsync(query, nextPage, null, cancellationToken);
+
+    public Task<ProviderPage> VisitPageAsync(JsonElement query, string? nextPage,
+        Func<ProviderOverlayResult, bool> accept, CancellationToken cancellationToken) =>
+        SearchPageCoreAsync(query, nextPage, accept, cancellationToken);
+
+    private async Task<ProviderPage> SearchPageCoreAsync(JsonElement query, string? nextPage,
+        Func<ProviderOverlayResult, bool>? accept, CancellationToken cancellationToken)
     {
         if (query.ValueKind != JsonValueKind.Object)
             throw new ArgumentException("Provider query must be an object.", nameof(query));
@@ -47,6 +56,8 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
         RequireObject(root, "Batch response");
         if (!root.TryGetProperty("entities_list", out var entities) || entities.ValueKind != JsonValueKind.Array)
             throw new ElasticProviderException("Provider batch response must contain an entities_list array.");
+        // An empty page is terminal; do not inspect an unused continuation URL.
+        if (entities.GetArrayLength() == 0) return new([], null);
 
         string? continuation = null;
         if (root.TryGetProperty("next_page", out var next) && next.ValueKind != JsonValueKind.Null)
@@ -58,14 +69,16 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
                 continuation = ContinuationUri(value).AbsoluteUri;
         }
 
-        var items = new List<ProviderOverlayResult>(entities.GetArrayLength());
+        var items = new List<ProviderOverlayResult>();
         foreach (var entity in entities.EnumerateArray())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            items.Add(Map(entity));
+            if (memory?.CanAllocate() == false) return new(items, null, "memoryLimit");
+            var item = Map(entity);
+            if (accept is null) items.Add(item);
+            else if (!accept(item)) return new([], null);
         }
-        // An empty page is the documented terminal page, even when a provider repeats its cursor.
-        return new(items, items.Count == 0 ? null : continuation);
+        return new(items, continuation);
     }
 
     private ProviderOverlayResult Map(JsonElement entity)
@@ -133,11 +146,14 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
 
     private async Task<JsonDocument?> SendAsync(HttpRequestMessage request, bool allowNotFound, CancellationToken cancellationToken)
     {
+        memory?.ThrowIfUnsafe();
         foreach (var (name, value) in _headers)
             if (!request.Headers.TryAddWithoutValidation(name, value))
                 throw new ElasticProviderException(ElasticProviderHeaders.ValidationError);
         if (_options.TimeoutSeconds <= 0)
             throw new ElasticProviderException("Provider timeout must be positive.");
+        if (_options.MaxResponseBytes is <= 0 or > 536_870_912)
+            throw new ElasticProviderException("Provider MaxResponseBytes must be between 1 and 536870912 bytes.");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
         try
@@ -148,8 +164,10 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
                 throw new ElasticProviderException($"Elastic Provider returned HTTP {(int)response.StatusCode}.");
             if (response.RequestMessage?.RequestUri is { } effective && !SameOrigin(effective, TableUri()))
                 throw new ElasticProviderException("Provider response redirected outside the configured origin.");
-            if (response.Content.Headers.ContentLength > ResponseByteLimit)
-                throw new ElasticProviderException("Provider response exceeds the 16 MiB response limit.");
+            if (response.Content.Headers.ContentLength > _options.MaxResponseBytes)
+                throw new ProviderResponseLimitException(_options.MaxResponseBytes);
+            if (response.Content.Headers.ContentLength is > 0 and var length)
+                memory?.ThrowIfUnsafe(length * 3);
             await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
             using var buffer = new MemoryStream();
             var chunk = ArrayPool<byte>.Shared.Rent(16 * 1024);
@@ -158,10 +176,21 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
                 int read;
                 while ((read = await stream.ReadAsync(chunk.AsMemory(0, chunk.Length), timeout.Token)) != 0)
                 {
-                    if (buffer.Length + read > ResponseByteLimit)
-                        throw new ElasticProviderException("Provider response exceeds the 16 MiB response limit.");
+                    var required = buffer.Length + read;
+                    if (required > _options.MaxResponseBytes)
+                        throw new ProviderResponseLimitException(_options.MaxResponseBytes);
+                    if (required > buffer.Capacity)
+                    {
+                        var capacity = Math.Min(_options.MaxResponseBytes,
+                            Math.Max(required, Math.Max(256L, 2L * buffer.Capacity)));
+                        // Growth temporarily retains both arrays. Current usage includes the old
+                        // array; reserve the new one and parsing space before allocating it.
+                        memory?.ThrowIfUnsafe(capacity + required * 2);
+                        buffer.Capacity = checked((int)capacity);
+                    }
                     buffer.Write(chunk, 0, read);
                 }
+                memory?.ThrowIfUnsafe(buffer.Length * 2);
                 return JsonDocument.Parse(buffer.GetBuffer().AsMemory(0, checked((int)buffer.Length)));
             }
             finally { ArrayPool<byte>.Shared.Return(chunk); }

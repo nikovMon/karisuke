@@ -57,14 +57,18 @@ In **Overlay IDs** mode, direct submission is the default: enter IDs, prepare a 
 
 In **From filters**, the UI shows overlay filters and overall quotas without rule selection. It sends `targets: []` and prepares ordinary gateway input. Its default overall maximum is 100 overlays, capped by the server's configured maximum. Use **From rules** with optional filters when the preview should evaluate specific saved rules and freeze their assignments.
 
+The optional filter forms in both modes omit grid types and sortie IDs. Existing API clients can still supply `source.filters.gridTypes` and `source.filters.sortieIds`; saved rules' grid-type conditions are still honored. The run page refreshes automatically while active; its redundant circular refresh control has been removed.
+
+**Open map**, beside Search area, opens the website configured in `AutoRun:Ui:MapUrl` in an iframe dialog. The default is blank, which disables the button and shows a configuration hint. Supply an absolute HTTP(S) URL without embedded credentials. The map loads only when opened and unloads on close. Copy WKT from the map and paste it into Search area; no cross-site geometry transfer protocol is assumed. The configured website must permit iframe embedding. An **Open map in new tab** link is available when embedding is blocked. The dialog supports keyboard navigation, Escape from its own controls, and focus return to the trigger; the embedded website controls its own keyboard events.
+
 ### Workflow and routes
 
 | Method and route | Behavior |
 | --- | --- |
-| `GET /auto-runs/options` | Feature status, publication defaults, effective limits, configured provider timezone, and `singleInstance: true`. |
+| `GET /auto-runs/options` | Feature status, publication defaults, effective limits, `ui.mapUrl`, `provider.maxResponseBytes`, current `memory` measurements, and `singleInstance: true`. |
 | `POST /auto-runs/preview` | Accepts a preview request and returns `202 Accepted`, a run summary, and its `Location` URL. No messages are published. |
 | `GET /auto-runs` | Lists retained run summaries, newest first. |
-| `GET /auto-runs/{id}` | Returns state, counters, target quotas, frozen rules, provider queries, warnings, and errors. |
+| `GET /auto-runs/{id}` | Returns state, counters, target quotas, frozen rules, provider queries, warnings, errors, and current process `memory` measurements. |
 | `GET /auto-runs/{id}/items?from=0&size=50` | Pages through selected overlays and their assigned pipeline/rule pairs. `size` is 1–200; optional `outcome` filters by `Pending`, `InFlight`, `Confirmed`, `Failed`, or `Uncertain`. |
 | `POST /auto-runs/{id}/start` | Starts a ready, unexpired preview. Repeating start for a run that has already started returns its current state without publishing it again. |
 | `POST /auto-runs/{id}/rerun` | Prepares a new run from retained criteria with the latest publication settings. Returns `202 Accepted`, a new run summary, and its `Location` URL. No messages are published. |
@@ -81,7 +85,7 @@ Invalid requests return `400`; missing or forgotten runs return `404`; a busy wo
 
 `Rules` requires 1–100 unique `(pipelineId, ruleId)` targets. `Filters` and `OverlayIds` accept omitted or empty `targets` for direct gateway submission. Existing API callers may continue to supply targets in `Filters` mode for local rule matching; the UI uses the direct form. When targets are supplied, IDs reference existing schema-version-2 rules from `/pipelines/{pipelineId}/rules`, and the pipeline must be enabled in the catalog. An explicitly selected inactive rule is allowed. Historical matching with selected targets ignores only `maxPhotoAgeDays`; sensor, registration quality, grid type, sensor type, resolution, geometry, and `modeSAR` conditions still apply. `sensorTypes` is also sent to the provider as a sensor-type filter.
 
-`Rules` derives provider queries from the selected rules. Each sensor branch retains its own quality and grid conditions. Queries are paged in round-robin order, and repeated overlay IDs are deduplicated across queries. Optional `source.filters` narrows those searches:
+`Rules` derives provider queries from the selected rules. Each sensor branch retains its own quality and grid conditions. The adapter finishes every page of one query before starting the next query, preserving that query's filter and sort body throughout its continuation chain. Searches are not interleaved because the provider does not support multiple active filter/sort searches. Identical queries and repeated overlay IDs are deduplicated. Optional `source.filters` narrows those searches:
 
 ```json
 {
@@ -193,7 +197,7 @@ Each selected target requires `maxOverlays`; its `minOverlays` defaults to zero 
 
 Selection prioritizes overlays that help the most unmet target minimums, then fills available target maxima. Ties prefer newer photo times, then ordinal overlay ID. This is a deterministic greedy selection, not a proof that no other assignment could meet the minimums. Maxima are hard limits; minimum shortfalls are reported per target and overall, and do not prevent starting the available selection. Quotas measure selected overlays, not successful downstream processing.
 
-`counters.scanned` counts processed provider records, including invalid records and duplicates. `observedMatches` counts distinct eligible candidates found before selection; it is not the provider's total hit count. A malformed entity or missing explicit ID is reported as invalid and preparation continues. A failed provider request, malformed page, or invalid continuation fails preparation.
+`counters.scanned` counts processed provider records, including invalid records and duplicates. `observedMatches` counts distinct eligible candidates found before selection; it is not the provider's total hit count. A malformed entity or missing explicit ID is reported as invalid and preparation continues. A failed provider request, malformed page, or invalid continuation fails preparation. Memory safeguards and the response-size limit instead stop collection and preserve eligible candidates already collected for a partial preview.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -201,13 +205,33 @@ Selection prioritizes overlays that help the most unmet target minimums, then fi
 | `AutoRun:MaxScannedRecords` | 1,000,000 | Maximum processed source records per preview; configurable downward. |
 | `AutoRun:MaxCandidates` | 200,000 | Maximum eligible candidates retained for selection; configurable downward. |
 | `AutoRun:PayloadBudgetBytes` | 536,870,912 | Process-wide retained serialized request, rule, query, and overlay byte budget; configurable downward. |
+| `AutoRun:Provider:MaxResponseBytes` | 67,108,864 (64 MiB) | Maximum raw bytes per provider response, including responses without Content-Length; positive and at most 536,870,912 bytes. |
+| `AutoRun:Memory:LimitBytes` | 0 | Optional additional process-memory ceiling in bytes; zero derives the ceiling from runtime measurements and the following two settings. |
+| `AutoRun:Memory:MaxUsagePercent` | 80 | Percentage of runtime-reported available memory allowed before stopping collection; integer 1–99. |
+| `AutoRun:Memory:MinimumFreeBytes` | 268,435,456 (256 MiB) | Minimum reserve below runtime-reported available memory; nonnegative. |
 | `AutoRun:ReadyLifetimeMinutes` | 30 | Time from readiness until an unstarted preview expires. |
 | `AutoRun:SummaryLifetimeMinutes` | 60 | Retention after a terminal state; payloads are released when the run becomes terminal. |
 | `AutoRun:MaxRetainedJobs` | 100 | Maximum retained previews and summaries on the instance. |
 
-Reaching a scan or candidate limit can produce a ready preview with `sourceExhausted: false`, a `stoppedReason` of `scanLimit` or `candidateLimit`, and a warning. It does not establish the source's total count or guarantee the newest overlays outside the scanned subset. Exceeding the retained payload budget fails preparation instead of creating a runnable partial preview. `sourceExhausted: true` means the adapter exhausted the supplied IDs or returned continuation chain; it is not a transactional snapshot of Elasticsearch.
+Reaching a preparation limit produces a partial preview from the eligible candidates already collected, with `sourceExhausted: false`, a warning, and one of these `stoppedReason` values:
 
-The payload budget counts serialized bytes, not total heap usage: object overhead and transient provider page buffers use additional memory. Each provider response has a fixed internal limit of 16 MiB (16,777,216 bytes), including streamed responses. Terminal jobs release overlay payloads immediately; their retained requests, rule snapshots, and queries remain charged until summary expiry.
+| Reason | Collection stopped because |
+| --- | --- |
+| `scanLimit` | The processed-record limit was reached. |
+| `candidateLimit` | The retained-candidate limit was reached. |
+| `payloadBudget` | The serialized payload budget could not admit more preparation data. |
+| `memoryLimit` | The memory guard could not safely admit more work, or memory measurements were unavailable. |
+| `responseLimit` | A provider response exceeded `MaxResponseBytes`. |
+
+The UI marks a ready selection stopped by memory, payload, or response limits as **Partial selection ready**. Review its warnings and minimum shortfalls, then explicitly start the retained selection. A preview with zero selected overlays cannot start. Partial results do not establish the source's total count or guarantee the newest overlays outside the scanned subset; later query branches may never have run. An oversized response that was not parsed contributes no records, while candidates from earlier responses remain available. `sourceExhausted: true` means the adapter exhausted the supplied IDs or returned continuation chain; it is not a transactional snapshot of Elasticsearch.
+
+The payload budget counts serialized bytes, not total heap usage: object overhead, geometry, deduplication structures, and transient provider buffers require additional memory. Its 512 MiB maximum remains separate from the configurable provider response limit and the process-memory guard. Provider responses are read into bounded buffers and parsed; batch entities are then normalized and consumed one at a time instead of retaining a second normalized list for the entire page. Raising `MaxResponseBytes` allows larger pages but can increase peak memory while buffering and parsing.
+
+The guard reads `GC.GetGCMemoryInfo().TotalAvailableMemoryBytes` when it initializes. This value reflects the runtime's effective available memory and can be lower than the container's memory limit. Its effective ceiling is the smallest of the percentage limit, available memory minus the free-byte reserve, and a positive explicit `LimitBytes`. For example, if the runtime reports 12 GiB, the default 80% ceiling is 9.6 GiB; a lower runtime report produces a lower ceiling. Kubernetes CPU and memory requests do not automatically change these application settings.
+
+Before buffering, parsing, and retaining additional data, admission checks compare estimated allocations against remaining headroom. Current usage is the larger of process working set and managed-memory usage; the managed heap is already part of process memory and is not added twice. These checks are conservative estimates, not an OOM guarantee: concurrent service work, native allocations, geometry parsing, and garbage collection can change memory between checks. Keep reserve for those operations and monitor actual deployment usage before increasing limits. Terminal jobs release overlay payload references immediately; garbage collection reclaims their memory later. Retained requests, rule snapshots, and queries remain charged until summary expiry.
+
+Options and run summaries expose `memory.availableBytes`, `processBytes`, `managedBytes`, `limitBytes`, `headroomBytes`, and `isUnderPressure`. `availableBytes` is the initialization-time capacity measurement, while the usage fields are current process measurements. A negative usage value means the measurement was unavailable; the guard stops further collection. The UI displays process usage, the safeguard ceiling, remaining headroom, and partial-selection warnings.
 
 ### Publication and outcomes
 
@@ -281,7 +305,7 @@ Request construction follows the supplied working logical-operator example, not 
 }
 ```
 
-Different rule/sensor branches use separate AND queries. The adapter does not invent an OR grammar or retry by dropping a rejected condition. Provider request aliases are configurable under `AutoRun:Provider:RequestFields`:
+Different rule/sensor branches use separate AND queries, and each query's entire continuation chain finishes before the next query begins. The adapter does not invent an OR grammar or retry by dropping a rejected condition. Provider request aliases are configurable under `AutoRun:Provider:RequestFields`:
 
 | Option | Default request alias |
 | --- | --- |
@@ -289,7 +313,7 @@ Different rule/sensor branches use separate AND queries. The adapter does not in
 | `SensorName` | `SENSOR` |
 | `SensorType` | `IMAGINGTECHNIQUE` |
 | `GridType` | `SOLUTIONTYPE` |
-| `RegistrationQuality` | `REGISTRATIONQUALITY` |
+| `RegistrationQuality` | `hasalgorithmicregistration` |
 | `SortieId` | `SORTIE` |
 | `IsRealtime` | `ISREALTIME` |
 | `CreatedTime` | `CREATED` |
@@ -301,11 +325,21 @@ Different rule/sensor branches use separate AND queries. The adapter does not in
 
 The UI's **Photo taken from/to** bounds use the provider search field `date` (or `DATE` through `RequestFields.PhotoTime`), distinct from the response property `PhotoTime`. **Created from/to** bounds use `CREATED` by default; `RequestFields.CreatedTime` can select the provider's `created` or `updated` alias. These settings name the outbound query fields; they do not change the separately configured response fields, whose defaults remain `PhotoTime` and `Created`.
 
+Registration quality is encoded as native JSON booleans in provider queries: `Accurate` becomes `true`, `Sensor` becomes `false`, and selecting both produces both values. For example:
+
+```json
+{ "match": { "hasalgorithmicregistration": { "type": "IN", "values": [true, false] } } }
+```
+
+This conversion applies to each saved rule's sensor conditions and to explicit registration-quality filters. The UI, preview request, local matcher, and response property `properties_list.RegistrationQuality` continue to use `Accurate`/`Sensor`.
+
 All generated photo-time and creation-time bounds are converted to UTC and formatted with exactly three fractional digits and a `Z` suffix: `yyyy-MM-ddTHH:mm:ss.fffZ`. For example, `2026-10-04T19:40:00+03:00` becomes `2026-10-04T16:40:00.000Z`.
 
 **Deployment migration:** if configuration explicitly sets `AutoRun:Provider:RequestFields:PhotoTime` to `PHOTOTIME`, remove that override to use the corrected `date` default, or change it to `date`/`DATE`. This includes the environment variable `AutoRun__Provider__RequestFields__PhotoTime`. Existing explicit aliases take precedence over code defaults. Leave `ResponseFields:PhotoTime` as `PhotoTime` unless your provider response uses a different property.
 
-Other request aliases remain deployment assumptions. Confirmed aliases include `SENSOR`, `geo`, photo-time `date`/`DATE`, and the creation-time aliases above, together with the logical grammar; not every alias in the table has been verified. Requests always use native JSON numbers and booleans, such as `1`, `20`, and `false`.
+Also remove or update any explicit `RequestFields:RegistrationQuality` value of `REGISTRATIONQUALITY`, including `AutoRun__Provider__RequestFields__RegistrationQuality`, so queries use `hasalgorithmicregistration`. Explicit aliases still override the default; changing the alias does not revert the boolean encoding. Keep `ResponseFields:RegistrationQuality` unchanged unless the response property itself differs.
+
+Other request aliases remain deployment assumptions. Confirmed aliases include `SENSOR`, `geo`, `hasalgorithmicregistration`, photo-time `date`/`DATE`, and the creation-time aliases above, together with the logical grammar; not every alias in the table has been verified. Requests always use native JSON numbers and booleans, such as `1`, `20`, and `false`.
 
 The response contract is separate from request aliases. Both GET and each batch entity contain `properties_list` and `geo.wkt`. These configured response mappings use the supplied example and confirmed provider property names:
 
@@ -330,7 +364,7 @@ Response aliases can be changed under `AutoRun:Provider:ResponseFields` using th
 
 Provider dates without offsets are interpreted as Israel local time (`Asia/Jerusalem`) in code. Dates carrying explicit offsets honor those offsets. Ambiguous or nonexistent daylight-saving times make that record invalid instead of being guessed. Accepted local date shapes are `dd/MM/yyyy HH:mm:ss` and `yyyy-MM-ddTHH:mm:ss`, optionally with fractional seconds.
 
-The provider timezone, response byte limit, and string-encoding flags are no longer configuration options. Remove old `SourceTimeZoneId`, `MaxResponseBytes`, `StringEncodedNumbers`, and `StringEncodedBooleans` entries from deployment configuration; they no longer affect behavior.
+The provider timezone and string-encoding flags remain fixed in code. Remove old `SourceTimeZoneId`, `StringEncodedNumbers`, and `StringEncodedBooleans` entries from deployment configuration; they no longer affect behavior. `AutoRun:Provider:MaxResponseBytes` is configurable again and defaults to 64 MiB. An existing explicit value overrides that default, so remove an old 16 MiB override or raise it deliberately if larger provider pages are needed.
 
 Optional `ResponseFields.ModeSar`, `AreaOfInterest`, `LegId`, `PrevOverlayId`, and `NextOverlayId` are unset until their real provider property names are configured. Rules with `modeSAR` always enforce that condition locally; configure its response alias before expecting matches, and configure `RequestFields.ModeSar` separately only if provider filtering is verified. Missing SAR metadata does not silently disable the rule condition.
 
@@ -345,10 +379,18 @@ The auto-run destination is the **Unified Gateway input queue**, independently o
   "AutoRun": {
     "Enabled": false,
     "Publication": { "BatchSize": 10, "DelayMs": 1000 },
+    "PayloadBudgetBytes": 536870912,
+    "Ui": { "MapUrl": "" },
+    "Memory": {
+      "LimitBytes": 0,
+      "MaxUsagePercent": 80,
+      "MinimumFreeBytes": 268435456
+    },
     "Provider": {
       "BaseUrl": "https://elastic-provider.example",
       "TableEntitiesPath": "/ErisImages/v2.0/ErisImages/Images/TableEntities",
       "TimeoutSeconds": 30,
+      "MaxResponseBytes": 67108864,
       "Headers": {}
     },
     "Destination": {
@@ -395,7 +437,7 @@ The implementation has local automated coverage; **the real Elastic Provider, Ra
 
 Preparation and publication emit `auto_run.prepare` and `auto_run.publish` spans with `auto_run.id`, plus correlated logs for state, selected counts, and confirmed/failed/uncertain publications. The Rules API meter exposes `auto_run.selected.overlays` and `auto_run.publications`; the latter has a bounded `outcome` dimension. IDs remain in spans/logs and are not metric labels.
 
-The summary exposes current counts, per-target shortfalls, `confirmedPerSecond`, and bounded warning/error samples. Gateway telemetry identifies historical envelopes through `auto_run.run_id` and `unified_gateway.input_kind`. Direct input follows ordinary gateway telemetry, with the run ID retained in the message correlation ID. Use gateway events to distinguish confirmed enqueueing from later dispatch or downstream failures.
+The summary exposes current counts, per-target shortfalls, `confirmedPerSecond`, current memory measurements, `sourceExhausted`, `stoppedReason`, and bounded warning/error samples. Preparation logs identify collection limits and how many candidates were retained. Gateway telemetry identifies historical envelopes through `auto_run.run_id` and `unified_gateway.input_kind`. Direct input follows ordinary gateway telemetry, with the run ID retained in the message correlation ID. Use gateway events to distinguish confirmed enqueueing from later dispatch or downstream failures.
 
 ## Rule Schema
 

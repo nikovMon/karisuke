@@ -32,12 +32,16 @@ public static class AutoRunRegistration
                 ElasticProviderHeaders.ValidationError)
             .Validate(options => options.TimeoutSeconds > 0,
                 "Elastic Provider timeout must be positive.")
+            .Validate(options => options.MaxResponseBytes is > 0 and <= 536_870_912,
+                "Elastic Provider MaxResponseBytes must be between 1 and 536870912 bytes.")
             .Validate(options => !configuration.GetValue<bool>("AutoRun:Enabled") ||
                 Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var uri) &&
                 uri.Scheme is "http" or "https" && string.IsNullOrEmpty(uri.UserInfo),
                 "Enabled auto-run requires an HTTP(S) Elastic Provider BaseUrl without credentials.")
             .ValidateOnStart();
         services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<IAutoRunMemoryGuard>(provider =>
+            new AutoRunMemoryGuard(provider.GetRequiredService<IOptions<AutoRunOptions>>()));
         services.AddRabbitMqDestinationPublisher(configuration);
         services.AddHttpClient<IElasticOverlayProvider, ElasticOverlayProvider>((provider, client) =>
             client.Timeout = TimeSpan.FromSeconds(provider.GetRequiredService<IOptions<ElasticProviderOptions>>().Value.TimeoutSeconds))

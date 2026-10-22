@@ -13,7 +13,7 @@ namespace ImagingPipeline.Rules.Api.AutoRuns.Provider;
 /// Uses only the verified AND grammar. Separate sensor branches keep each sensor's qualities
 /// and grid types together; callers union pages locally instead of guessing provider OR syntax.
 /// </summary>
-public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> configured)
+public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> configured, IAutoRunMemoryGuard? memory = null)
 {
     private readonly ElasticProviderOptions _options = configured.Value;
     private static readonly ConditionalWeakTable<AutoRunFilters, CompiledFilter> FilterCache = new();
@@ -57,7 +57,7 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
                         };
                         if (sensor.RegistrationQualities is { Count: > 0 } qualities)
                             branch.Add(Clause("match", _options.RequestFields.RegistrationQuality,
-                                qualities.Select(value => value.ToJsonValue()).ToArray()));
+                                qualities.Select(HasAlgorithmicRegistration).Distinct().ToArray()));
                         if (sensor.GridTypes is { Count: > 0 } grids)
                             branch.Add(Clause("match", _options.RequestFields.GridType, grids.ToArray()));
                         AddQuery(branch);
@@ -71,12 +71,15 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
 
         void AddQuery(List<object> clauses)
         {
+            memory?.ThrowIfUnsafe();
             var query = JsonSerializer.SerializeToElement(new
             {
                 filter = new { logical_operators = new Dictionary<string, object> { ["AND"] = clauses } },
                 sort = new Dictionary<string, string> { [Field(_options.RequestFields.SortDate)] = "desc" }
             });
-            if (seen.Add(query.GetRawText())) result.Add(query);
+            var raw = query.GetRawText();
+            memory?.ThrowIfUnsafe((long)raw.Length * sizeof(char));
+            if (seen.Add(raw)) result.Add(query);
         }
     }
 
@@ -142,7 +145,12 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
         AddList(fields.SensorName, filters.SensorNames);
         AddList(fields.SensorType, filters.SensorTypes);
         AddList(fields.GridType, filters.GridTypes);
-        AddList(fields.RegistrationQuality, filters.RegistrationQualities);
+        if (filters.RegistrationQualities is { } qualities)
+            clauses.Add(Clause("match", fields.RegistrationQuality, qualities.Select(value =>
+                RegistrationQualityExtensions.TryParseJsonValue(value.Trim(), out var quality)
+                    ? HasAlgorithmicRegistration(quality)
+                    : throw new ArgumentException($"registrationQualities must contain {RegistrationQualityContract.AllowedJsonValues}."))
+                .Distinct().ToArray()));
         AddList(fields.SortieId, filters.SortieIds);
         if (filters.IsRealtime is { } realtime)
             clauses.Add(Clause("match", fields.IsRealtime, new[] { realtime }));
@@ -171,6 +179,14 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
         ProviderDates.TryExplicitOffset(value, out var time)
             ? time.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture)
             : throw new ArgumentException("Time ranges require explicit UTC offsets.");
+
+    // The provider searches a boolean flag; the public filter/rule and response contracts retain their enum names.
+    private static bool HasAlgorithmicRegistration(RegistrationQuality quality) => quality switch
+    {
+        RegistrationQuality.Accurate => true,
+        RegistrationQuality.Sensor => false,
+        _ => throw new ArgumentOutOfRangeException(nameof(quality), quality, "Unsupported registration quality.")
+    };
 
     private static object Clause(string operation, string field, object values) =>
         new Dictionary<string, object>

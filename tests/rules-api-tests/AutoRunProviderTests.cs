@@ -64,10 +64,10 @@ public sealed class AutoRunProviderTests
         var first = Clauses(queries[0]); var second = Clauses(queries[1]);
         Assert.Equal("A", Find(first, "match", "SENSOR")[0].GetString());
         Assert.Equal("grid-A", Find(first, "match", "SOLUTIONTYPE")[0].GetString());
-        Assert.Equal("Accurate", Find(first, "match", "REGISTRATIONQUALITY")[0].GetString());
+        Assert.True(Find(first, "match", "hasalgorithmicregistration")[0].GetBoolean());
         Assert.Equal("B", Find(second, "match", "SENSOR")[0].GetString());
         Assert.Equal("grid-B", Find(second, "match", "SOLUTIONTYPE")[0].GetString());
-        Assert.Equal("Sensor", Find(second, "match", "REGISTRATIONQUALITY")[0].GetString());
+        Assert.False(Find(second, "match", "hasalgorithmicregistration")[0].GetBoolean());
         Assert.All([first, second], clauses => Assert.Equal("SAR", Find(clauses, "match", "IMAGINGTECHNIQUE")[0].GetString()));
         Assert.All(queries, query =>
         {
@@ -318,34 +318,117 @@ public sealed class AutoRunProviderTests
     }
 
     [Fact]
-    public async Task Declared_response_over_16_MiB_is_rejected_before_reading()
+    public async Task Declared_response_over_configured_limit_is_rejected_before_reading()
     {
         using var stream = new RepeatingResponseStream(16 * 1024 * 1024 + 1);
         var content = new StreamContent(stream);
         content.Headers.ContentLength = 16 * 1024 * 1024 + 1;
 
-        var error = await Assert.ThrowsAsync<ElasticProviderException>(() =>
-            Provider(_ => new(HttpStatusCode.OK) { Content = content }).GetAsync("1", CancellationToken.None));
+        var options = Config(); options.MaxResponseBytes = 16 * 1024 * 1024;
+        var error = await Assert.ThrowsAsync<ProviderResponseLimitException>(() =>
+            Provider(_ => new(HttpStatusCode.OK) { Content = content }, options).GetAsync("1", CancellationToken.None));
 
-        Assert.Contains("16 MiB", error.Message, StringComparison.Ordinal);
+        Assert.Contains("MaxResponseBytes", error.Message, StringComparison.Ordinal);
         Assert.Equal(0, stream.BytesRead);
     }
 
     [Theory]
     [InlineData(null)]
     [InlineData(1L)]
-    public async Task Streaming_response_over_16_MiB_is_rejected_even_without_a_reliable_length(long? declaredLength)
+    public async Task Streaming_response_over_configured_limit_is_rejected_even_without_a_reliable_length(long? declaredLength)
     {
         const int responseLength = 16 * 1024 * 1024 + 1;
         using var stream = new RepeatingResponseStream(responseLength);
         var content = new StreamContent(stream);
         content.Headers.ContentLength = declaredLength;
 
-        var error = await Assert.ThrowsAsync<ElasticProviderException>(() =>
-            Provider(_ => new(HttpStatusCode.OK) { Content = content }).GetAsync("1", CancellationToken.None));
+        var options = Config(); options.MaxResponseBytes = 16 * 1024 * 1024;
+        var error = await Assert.ThrowsAsync<ProviderResponseLimitException>(() =>
+            Provider(_ => new(HttpStatusCode.OK) { Content = content }, options).GetAsync("1", CancellationToken.None));
 
-        Assert.Contains("16 MiB", error.Message, StringComparison.Ordinal);
+        Assert.Contains("MaxResponseBytes", error.Message, StringComparison.Ordinal);
         Assert.Equal(responseLength, stream.BytesRead);
+    }
+
+    [Fact]
+    public void Query_preparation_stops_before_allocating_when_memory_is_under_pressure()
+    {
+        var memory = new AutoRunMemoryTestGuard { Blocked = true };
+        var builder = new ProviderQueryBuilder(Options.Create(Config()), memory);
+        Assert.Throws<AutoRunMemoryLimitException>(() => builder.Build(new() { Mode = AutoRunSourceMode.Filters }, []));
+    }
+
+    [Fact]
+    public async Task Default_response_limit_accepts_valid_pages_larger_than_sixteen_MiB()
+    {
+        var response = Json(new
+        {
+            entities_list = new[] { Entity() }, next_page = "",
+            padding = new string('x', 16 * 1024 * 1024)
+        });
+        Assert.True(response.Content.Headers.ContentLength > 16 * 1024 * 1024);
+        var result = await Provider(_ => response).SearchPageAsync(
+            JsonSerializer.SerializeToElement(new { }), null, CancellationToken.None);
+        Assert.Equal("overlay-1", Assert.Single(result.Items).Overlay!.Input.ImageId);
+        Assert.Null(result.StoppedReason);
+    }
+
+    [Fact]
+    public async Task Empty_terminal_page_ignores_unused_foreign_continuation()
+    {
+        var provider = Provider(_ => Json(new
+        {
+            entities_list = Array.Empty<object>(), next_page = "https://other.example/unused"
+        }));
+        var page = await provider.SearchPageAsync(JsonSerializer.SerializeToElement(new { }), null, CancellationToken.None);
+        Assert.Empty(page.Items);
+        Assert.Null(page.NextPage);
+        Assert.Null(page.StoppedReason);
+    }
+
+    [Fact]
+    public async Task Page_visitor_preserves_accepted_overlays_when_memory_becomes_low_midpage()
+    {
+        var memory = new AutoRunMemoryTestGuard();
+        var properties = Properties(); properties["GlobalId"] = "overlay-2";
+        var provider = new ElasticOverlayProvider(new HttpClient(new Handler(_ => Json(new
+        {
+            entities_list = new[] { Entity(), Entity(properties) }, next_page = "/next"
+        }))), Options.Create(Config()), memory);
+        var accepted = new List<ProviderOverlay>();
+        var page = await provider.VisitPageAsync(JsonSerializer.SerializeToElement(new { }), null, item =>
+        {
+            accepted.Add(item.Overlay!);
+            memory.Blocked = true;
+            return true;
+        }, CancellationToken.None);
+
+        var first = Assert.Single(accepted);
+        Assert.Equal("overlay-1", first.Input.ImageId);
+        using var payload = JsonDocument.Parse(first.Payload);
+        Assert.Equal("overlay-1", payload.RootElement.GetProperty("id").GetString());
+        Assert.Empty(page.Items);
+        Assert.Null(page.NextPage);
+        Assert.Equal("memoryLimit", page.StoppedReason);
+    }
+
+    [Fact]
+    public async Task Page_visitor_can_stop_before_mapping_later_records()
+    {
+        var provider = Provider(_ => Json(new
+        {
+            entities_list = new object[] { Entity(), new { invalid = "must not be visited" } }, next_page = "/next"
+        }));
+        var visited = 0;
+        var page = await provider.VisitPageAsync(JsonSerializer.SerializeToElement(new { }), null, item =>
+        {
+            Assert.NotNull(item.Overlay);
+            visited++;
+            return false;
+        }, CancellationToken.None);
+        Assert.Equal(1, visited);
+        Assert.Empty(page.Items);
+        Assert.Null(page.NextPage);
     }
 
     private static JsonElement[] Clauses(JsonElement query) =>

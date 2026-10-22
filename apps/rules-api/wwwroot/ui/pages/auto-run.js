@@ -3,6 +3,12 @@ import { navigate } from '../router.js';
 
 const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const number = value => Number(value || 0).toLocaleString();
+const bytes = value => {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount < 0) return '—';
+  const divisor = amount >= 1024 ** 3 ? 1024 ** 3 : 1024 ** 2;
+  return `${(amount / divisor).toLocaleString(undefined, { maximumFractionDigits: 1 })} ${divisor === 1024 ** 3 ? 'GiB' : 'MiB'}`;
+};
 const splitValues = value => [...new Set(value.split(/[\n,]+/).map(v => v.trim()).filter(Boolean))];
 const terminal = state => ['Completed', 'CompletedWithErrors', 'Failed', 'Cancelled', 'Expired'].includes(state);
 const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -51,6 +57,7 @@ function syncPublicationPresets(prefix = '', disabled = false) {
 
 export async function showAutoRun(id = null) {
   cancelRuleSelection();
+  if ($('area-map-dialog')?.open) $('area-map-dialog').close();
   if (!state.initialized || !$('configuration')) {
     state.initialized = true;
     state.options = null;
@@ -96,10 +103,9 @@ function configurationMarkup() {
       </div>
       <details id="filter-details" class="filter-details"><summary>Overlay filters <span id="filters-description" class="muted">Optional for rule-derived searches</span></summary><div>
         <div class="field-row">${field('sensor-names', 'Sensor names', 'e.g. SENSOR_A, SENSOR_B')}${field('sensor-types', 'Sensor types', 'Comma-separated values')}</div>
-        <div class="field-row">${field('grid-types', 'Grid types', 'Comma-separated values')}${field('sortie-ids', 'Sortie IDs', 'Comma-separated values')}</div>
         <div class="field-row"><label class="field" for="registration-quality"><span>Registration quality</span><select id="registration-quality"><option value="">Any quality</option><option value="Accurate">Accurate</option><option value="Sensor">Sensor</option><option value="Accurate,Sensor">Accurate or Sensor</option></select></label><label class="field" for="is-realtime"><span>Realtime overlay</span><select id="is-realtime"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label></div>
         <div class="field-row">${field('resolution-min', 'Minimum resolution', 'No lower bound', 'number', 'min="0" step="any"')}${field('resolution-max', 'Maximum resolution', 'No upper bound', 'number', 'min="0" step="any"')}</div>
-        <label class="field" for="area-wkt"><span>Search area · WKT</span><textarea id="area-wkt" class="mono" placeholder="POLYGON ((...)) or MULTIPOLYGON (((...)))" spellcheck="false"></textarea><small>Selects intersecting overlays. Gateway rules determine the dispatched ROI.</small></label>
+        <div class="field search-area-field"><div class="search-area-heading"><label class="field-label" for="area-wkt">Search area · WKT</label><button id="open-area-map" type="button" class="button compact ghost" aria-haspopup="dialog" aria-controls="area-map-dialog" aria-describedby="area-map-hint" disabled>Open map</button></div><textarea id="area-wkt" class="mono" placeholder="POLYGON ((...)) or MULTIPOLYGON (((...)))" spellcheck="false"></textarea><small>Selects intersecting overlays. Gateway rules determine the dispatched ROI.</small><small id="area-map-hint">Loading map settings…</small></div>
         <div class="filter-subheading">Time ranges</div>
         <p class="filter-note">Times use your browser’s local timezone (${escape(localZone)}) and are sent as UTC. Both boundaries are optional.</p>
         <div class="field-row">${field('created-from', 'Created from', '', 'datetime-local')}${field('created-to', 'Created to', '', 'datetime-local')}</div>
@@ -131,11 +137,30 @@ function configurationMarkup() {
     <section class="aside-card"><div class="eyebrow">HOW IT WORKS</div><ol class="process-steps"><li><span id="process-find-title">Find & match</span><p id="process-find-description">Fetch historical overlays and evaluate your selected rules.</p></li><li>Review the selection<p id="process-review-description">Inspect overlaps, quotas, and any shortfalls before starting.</p></li><li>Send to the gateway<p>Track confirmed submissions and inspect failed or uncertain items.</p></li></ol></section>
     <section class="aside-card"><h3>Workspace limits</h3><div id="server-limits"><p class="hint" style="margin-top:12px">Loading server options…</p></div><p>Previews and jobs live in this instance’s memory. A restart clears them.</p></section>
     <section class="aside-card history-card"><div class="history-head"><h3>Recent runs</h3><button class="button compact ghost" type="button" id="refresh-history" aria-label="Refresh recent runs">↻</button></div><div id="history-list" class="history-list"><p class="hint">Loading recent runs…</p></div></section>
-  </aside></div>`;
+  </aside></div>
+  <dialog id="area-map-dialog" class="map-dialog" aria-labelledby="area-map-title" aria-describedby="area-map-instructions">
+    <div class="map-dialog-heading"><div><h2 id="area-map-title">Search area map</h2><p id="area-map-instructions">Find your area in the map, then copy its WKT and paste it into Search area after closing this window.</p></div><button id="close-area-map" type="button" class="button ghost" autofocus>Close map</button></div>
+    <iframe id="area-map-frame" title="Map for finding the overlay search area" referrerpolicy="no-referrer"></iframe>
+    <div class="map-dialog-footer"><p>If the map cannot be displayed here, open it in a new tab.</p><a id="area-map-external" class="button compact ghost" target="_blank" rel="noopener noreferrer">Open map in new tab ↗</a></div>
+  </dialog>`;
 }
 
 function attachConfiguration() {
   $('preview-form').addEventListener('submit', submitPreview);
+  $('open-area-map').addEventListener('click', openAreaMap);
+  $('close-area-map').addEventListener('click', () => $('area-map-dialog').close());
+  $('area-map-dialog').addEventListener('keydown', event => {
+    if (event.key !== 'Tab') return;
+    if (event.shiftKey && document.activeElement === $('close-area-map')) {
+      event.preventDefault(); $('area-map-external').focus();
+    } else if (!event.shiftKey && document.activeElement === $('area-map-external')) {
+      event.preventDefault(); $('close-area-map').focus();
+    }
+  });
+  $('area-map-dialog').addEventListener('close', () => {
+    $('area-map-frame').removeAttribute('src');
+    if (!$('configuration').hidden) $('open-area-map').focus();
+  });
   attachPublicationPresets();
   document.querySelectorAll('[name="source-mode"]').forEach(radio => radio.addEventListener('change', updateSource));
   document.querySelectorAll('[name="id-processing"]').forEach(radio => radio.addEventListener('change', updateSource));
@@ -175,6 +200,7 @@ async function loadOptions() {
   try {
     const options = await api.options();
     state.options = options;
+    configureAreaMap();
     const { limits, defaults } = options;
     $('batch-size').value = defaults.publication.batchSize;
     $('delay-ms').value = defaults.publication.delayMs;
@@ -187,14 +213,41 @@ async function loadOptions() {
     updateSource();
     $('server-limits').innerHTML = [
       ['Selected overlays', number(limits.maxSelectedOverlays)], ['Records scanned', number(limits.maxScannedRecords)],
-      ['Ready preview', `${limits.readyLifetimeMinutes} min`], ['Active operation', '1 at a time']
+      ['Ready preview', `${limits.readyLifetimeMinutes} min`], ['Active operation', '1 at a time'],
+      ...(options.memory ? [['Process memory', `${bytes(options.memory.processBytes)} / ${bytes(options.memory.limitBytes)}`]] : [])
     ].map(([key, value]) => `<div class="limit-line"><span>${key}</span><strong>${value}</strong></div>`).join('');
     $('connection-state').textContent = options.enabled ? 'API connected' : 'Auto-run disabled';
     if (!options.enabled) showError('global-notice', new Error('Auto-run is disabled on this instance. Enable it in the service configuration to prepare runs.'));
   } catch (error) {
     $('connection-state').textContent = 'API unavailable';
+    $('area-map-hint').textContent = 'Map settings are unavailable. Reload when the API connection is restored.';
     showError('global-notice', error);
   } finally { syncSelectionControls(); }
+}
+
+function configuredMapUrl() {
+  const value = state.options?.ui?.mapUrl;
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password ? url.href : null;
+  } catch { return null; }
+}
+
+function configureAreaMap() {
+  const url = configuredMapUrl();
+  $('open-area-map').disabled = !url;
+  $('area-map-hint').textContent = url
+    ? 'Open the map to find your area and copy its WKT.'
+    : 'Map unavailable. Configure AutoRun.Ui.MapUrl to enable it.';
+}
+
+function openAreaMap() {
+  const url = configuredMapUrl();
+  if (!url || $('area-map-dialog').open) return;
+  $('area-map-frame').src = url;
+  $('area-map-external').href = url;
+  $('area-map-dialog').showModal();
 }
 
 async function loadPipelines() {
@@ -338,6 +391,7 @@ function ruleDescription(rule) {
   const parts = [];
   if (rule.matchAll) parts.push('Matches all overlays');
   if (match.sensors?.length) parts.push(match.sensors.map(s => `${s.name}${s.registrationQualities?.length ? ` · ${s.registrationQualities.join('/')}` : ''}${s.gridTypes?.length ? ` · ${s.gridTypes.join('/')}` : ''}`).join('; '));
+  if (match.sensorTypes?.length) parts.push(`Sensor types: ${match.sensorTypes.join(', ')}`);
   if (match.resolution) parts.push(`Resolution ${match.resolution.min ?? 'any'}–${match.resolution.max ?? 'any'}`);
   if (match.locationWkt) parts.push('Geographic area');
   if (match.modeSAR?.length) parts.push(`SAR: ${match.modeSAR.join(', ')}`);
@@ -456,7 +510,7 @@ function timeValue(id) {
 
 function collectFilters() {
   const result = {};
-  for (const [id, key] of [['sensor-names', 'sensorNames'], ['sensor-types', 'sensorTypes'], ['grid-types', 'gridTypes'], ['sortie-ids', 'sortieIds']]) {
+  for (const [id, key] of [['sensor-names', 'sensorNames'], ['sensor-types', 'sensorTypes']]) {
     const values = splitValues($(id).value); if (values.length) result[key] = values;
   }
   if ($('registration-quality').value) result.registrationQualities = $('registration-quality').value.split(',');
@@ -532,13 +586,13 @@ async function loadHistory() {
 
 function detailMarkup(id) {
   return `<a class="back-link" href="/ui/auto-run" data-route>← Back to configuration</a>
-  <div class="page-heading run-heading"><div><div class="eyebrow">RUN WORKSPACE</div><h1>Review. Launch. Follow through.</h1><div class="run-id mono">${escape(id)}</div></div><div class="run-heading-actions"><span id="run-state">${badge('Loading')}</span><button id="refresh-run" type="button" class="button ghost" aria-label="Refresh run">↻</button><button id="cancel-run" type="button" class="button danger" hidden>Cancel</button><button id="rerun-run" type="button" class="button" title="Prepare a fresh preview using the original configuration and saved publication settings. Rules are read again; publication requires Start." hidden>Rerun</button><button id="start-run" type="button" class="button primary" hidden>Start run ↗</button></div></div>
+  <div class="page-heading run-heading"><div><div class="eyebrow">RUN WORKSPACE</div><h1>Review. Launch. Follow through.</h1><div class="run-id mono">${escape(id)}</div></div><div class="run-heading-actions"><span id="run-state">${badge('Loading')}</span><button id="cancel-run" type="button" class="button danger" hidden>Cancel</button><button id="rerun-run" type="button" class="button" title="Prepare a fresh preview using the original configuration and saved publication settings. Rules are read again; publication requires Start." hidden>Rerun</button><button id="start-run" type="button" class="button primary" hidden>Start run ↗</button></div></div>
   <div id="run-error" class="notice error" role="alert" hidden></div>
   <div id="run-notices" hidden></div>
   <div id="run-content" hidden>
     <div class="stat-grid">${[['selected', 'Selected', ''], ['confirmed', 'Confirmed', 'good'], ['failed', 'Failed', 'bad'], ['uncertain', 'Uncertain', 'warning'], ['remaining', 'Remaining', '']].map(([key, label, style]) =>
       `<div class="stat ${style}"><div class="stat-label">${label}</div><div class="stat-value" id="count-${key}">0</div></div>`).join('')}</div>
-    <section class="panel"><div class="progress-block"><div class="progress-text"><span id="progress-label"></span><span id="progress-value" class="mono"></span></div><div id="run-progress" class="progress-track" role="progressbar" aria-label="Publication progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-fill"></div></div><div class="run-meta" id="run-meta"></div></div></section>
+    <section class="panel"><div class="progress-block"><div class="progress-text"><span id="progress-label"></span><span id="progress-value" class="mono"></span></div><div id="run-progress" class="progress-track" role="progressbar" aria-label="Publication progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-fill"></div></div><div class="run-meta" id="run-meta"></div><p id="run-memory" class="memory-status hint" hidden></p></div></section>
     <div class="run-layout"><section class="panel"><div class="panel-header"><div><h2 id="run-target-heading">Rule assignments</h2><p id="run-target-description">Exact counts for this frozen selection.</p></div></div><div id="direct-run-note" class="panel-body" hidden><p>The gateway chooses pipelines and applies its current rules, including photo-age limits. This preview freezes overlay data only.</p><p id="direct-run-limits" class="hint"></p></div><div id="run-target-table" class="table-wrap"><table><thead><tr><th>Rule / pipeline</th><th>Min / max</th><th>Selected</th><th>Confirmed</th><th>Failed</th><th>Uncertain</th><th>Shortfall</th></tr></thead><tbody id="run-targets"></tbody></table></div></section>
     <section class="panel run-publication"><div class="panel-header"><div><h2>Publication settings</h2><p>Control the pace of this run.</p></div></div><form id="publication-form" class="panel-body">${publicationPresets('run-')}<div class="field-row">${field('run-batch-size', 'Batch size', '', 'number', 'min="1" max="100" required step="1"')}${field('run-delay-ms', 'Delay · ms', '', 'number', 'min="0" max="60000" required step="1"')}</div><button class="button full" id="update-publication" type="submit">Apply settings</button><p id="publication-status" class="publication-status" role="status"></p><p class="hint">Changes apply at a batch boundary. Confirmed means queued to the gateway, not processed downstream.</p></form></section></div>
     <section class="panel"><div class="panel-header items-toolbar"><div><h2>Selected overlays</h2><p id="items-description">Assigned targets and publication outcomes.</p></div><label class="field" for="item-outcome"><span class="visually-hidden">Filter items by outcome</span><select id="item-outcome"><option value="">All outcomes</option>${['Pending', 'InFlight', 'Confirmed', 'Failed', 'Uncertain'].map(v => `<option>${v}</option>`).join('')}</select></label></div><div class="table-wrap"><table class="items-table"><thead><tr><th>Overlay / sensor</th><th>Photo time</th><th id="items-target-heading">Assigned rules</th><th>Outcome</th></tr></thead><tbody id="run-items"></tbody></table></div><div class="browser-footer"><span id="items-count" class="hint"></span><div class="pagination"><button id="items-prev" class="button compact ghost" type="button">← Previous</button><button id="items-next" class="button compact ghost" type="button">Next →</button></div></div></section>
@@ -547,7 +601,6 @@ function detailMarkup(id) {
 }
 
 function attachDetail() {
-  $('refresh-run').addEventListener('click', () => refreshRun(true));
   $('start-run').addEventListener('click', () => runAction('start'));
   $('cancel-run').addEventListener('click', () => runAction('cancel'));
   $('rerun-run').addEventListener('click', rerun);
@@ -588,6 +641,7 @@ function renderRun(run) {
   const direct = directRun(run);
   $('run-state').innerHTML = badge(run.state);
   $('start-run').hidden = run.state !== 'Ready';
+  $('start-run').disabled = run.counters.selected === 0;
   $('rerun-run').hidden = ['Preparing', 'Publishing'].includes(run.state);
   $('rerun-run').disabled = state.rerunPending;
   $('cancel-run').hidden = terminal(run.state);
@@ -612,11 +666,23 @@ function renderRun(run) {
     `In flight ${number(run.counters.inFlight)}`, `Source ${run.sourceExhausted ? 'exhausted' : 'not exhausted'}`,
     `Created ${formatTime(run.createdAt)}`, ...(run.expiresAt ? [`Expires ${formatTime(run.expiresAt)}`] : [])
   ].map(value => `<span>${escape(value)}</span>`).join('');
+  $('run-memory').hidden = !run.memory;
+  if (run.memory) {
+    $('run-memory').textContent = `Process memory: ${bytes(run.memory.processBytes)} / ${bytes(run.memory.limitBytes)} safeguard limit · Headroom: ${bytes(run.memory.headroomBytes)}${run.memory.isUnderPressure ? ' · Memory is near the safeguard limit.' : ''}`;
+    $('run-memory').classList.toggle('under-pressure', Boolean(run.memory.isUnderPressure));
+  }
   const warnings = [...run.warnings];
   if (run.shortfall > 0) warnings.unshift(`Overall minimum shortfall: ${number(run.shortfall)} overlays. The available selection can still run.`);
-  if (run.stoppedReason && !run.sourceExhausted) warnings.push(`Search stopped: ${run.stoppedReason}. Observed counts are not a complete source total.`);
+  const limitedSearch = !run.sourceExhausted && ({
+    memoryLimit: 'Scanning stopped to protect service memory.',
+    payloadBudget: 'Scanning stopped at the retained payload budget.',
+    responseLimit: 'Scanning stopped because a provider page exceeded the response size limit.'
+  })[run.stoppedReason];
+  if (run.stoppedReason && !run.sourceExhausted) warnings.push(`${limitedSearch || `Search stopped: ${run.stoppedReason}.`} Observed counts are not a complete source total.`);
+  const partialReady = limitedSearch && run.state === 'Ready' && run.counters.selected > 0;
   $('run-notices').hidden = !warnings.length && !run.errors.length;
   $('run-notices').innerHTML = [
+    partialReady ? `<div id="partial-selection-note" class="notice warning" role="status"><strong>Partial selection ready</strong>${number(run.counters.selected)} selected overlays were retained. You can start this selection now. Results may be incomplete and minimum quotas may not be met.</div>` : '',
     warnings.length ? `<div class="notice warning"><strong>Selection & run notes</strong><ul class="message-list">${warnings.map(w => `<li>${escape(w)}</li>`).join('')}</ul></div>` : '',
     run.errors.length ? `<div class="notice error"><strong>Run errors</strong>${run.errors.map(error => `<div>${escape(error)}</div>`).join('')}</div>` : ''
   ].join('');

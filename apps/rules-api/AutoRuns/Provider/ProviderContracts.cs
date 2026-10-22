@@ -7,6 +7,19 @@ public interface IElasticOverlayProvider
 {
     Task<ProviderOverlayResult> GetAsync(string id, CancellationToken cancellationToken);
     Task<ProviderPage> SearchPageAsync(JsonElement query, string? nextPage, CancellationToken cancellationToken);
+    // Consume normalized records as they are mapped, so the coordinator can stop before
+    // retaining another candidate. Implementations need not keep a second page-sized list.
+    async Task<ProviderPage> VisitPageAsync(JsonElement query, string? nextPage,
+        Func<ProviderOverlayResult, bool> accept, CancellationToken cancellationToken)
+    {
+        var page = await SearchPageAsync(query, nextPage, cancellationToken);
+        foreach (var item in page.Items)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!accept(item)) return new([], null, page.StoppedReason);
+        }
+        return page with { Items = [], NextPage = page.Items.Count == 0 ? null : page.NextPage };
+    }
 }
 
 /// <summary>Owns its normalized payload; it never retains a disposed provider response document.</summary>
@@ -20,7 +33,11 @@ public sealed record ProviderOverlay(
 /// <summary>An invalid record remains in the page so it still counts against scanning limits.</summary>
 public sealed record ProviderOverlayResult(ProviderOverlay? Overlay, string? Error);
 
-public sealed record ProviderPage(IReadOnlyList<ProviderOverlayResult> Items, string? NextPage);
+public sealed record ProviderPage(IReadOnlyList<ProviderOverlayResult> Items, string? NextPage,
+    string? StoppedReason = null);
+
+public sealed class ProviderResponseLimitException(long maximumBytes)
+    : Exception($"Provider response exceeds the configured {maximumBytes:N0} byte limit (AutoRun.Provider.MaxResponseBytes).");
 
 public sealed class ElasticProviderException(string message, Exception? innerException = null)
     : Exception(message, innerException);

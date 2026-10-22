@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 namespace ImagingPipeline.Rules.Api.Tests;
 
@@ -334,8 +335,9 @@ public sealed class AutoRunApiTests
         Assert.Single(fixture.Broker.Messages);
         using var originalResponse = await fixture.Client.GetAsync($"/auto-runs/{original.Id}");
         var retainedOriginal = await Read<AutoRunSummary>(originalResponse);
-        Assert.Equal(JsonSerializer.Serialize(originalCompleted, AutoRunJson.Options),
-            JsonSerializer.Serialize(retainedOriginal, AutoRunJson.Options));
+        // Memory is sampled per response; frozen run data must remain unchanged as the rerun progresses.
+        Assert.Equal(JsonSerializer.Serialize(originalCompleted with { Memory = null }, AutoRunJson.Options),
+            JsonSerializer.Serialize(retainedOriginal with { Memory = null }, AutoRunJson.Options));
 
         using var startRerun = await fixture.Client.PostAsync($"/auto-runs/{rerun.Id}/start", null);
         await AssertStatus(startRerun, HttpStatusCode.OK);
@@ -475,6 +477,127 @@ public sealed class AutoRunApiTests
         Assert.Empty(fixture.Broker.Messages);
     }
 
+    [Fact]
+    public async Task OptionsExposeConfiguredMapResponseLimitAndMemorySnapshotWithoutProviderSecrets()
+    {
+        const string mapUrl = "https://maps.example/viewer?mode=selection";
+        const string secret = "options-provider-secret-canary";
+        const int responseLimit = 96 * 1024 * 1024;
+        const long memoryLimit = 1024L * 1024 * 1024;
+        using var fixture = new Fixture(providerHeaders: new Dictionary<string, string>
+        {
+            ["Authorization"] = "Bearer " + secret,
+            ["X-Private-Provider-Key"] = secret
+        }, configurationOverrides: new Dictionary<string, string?>
+        {
+            ["AutoRun:Ui:MapUrl"] = mapUrl,
+            ["AutoRun:Provider:MaxResponseBytes"] = responseLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["AutoRun:Memory:LimitBytes"] = memoryLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["AutoRun:Memory:MaxUsagePercent"] = "75",
+            ["AutoRun:Memory:MinimumFreeBytes"] = "33554432"
+        });
+
+        using var response = await fixture.Client.GetAsync("/auto-runs/options");
+        await AssertStatus(response, HttpStatusCode.OK);
+        var json = await response.Content.ReadAsStringAsync();
+        using var document = JsonDocument.Parse(json);
+        var options = document.RootElement;
+        Assert.Equal(mapUrl, options.GetProperty("ui").GetProperty("mapUrl").GetString());
+        Assert.Equal(responseLimit, options.GetProperty("provider").GetProperty("maxResponseBytes").GetInt32());
+        var memory = options.GetProperty("memory");
+        Assert.InRange(memory.GetProperty("limitBytes").GetInt64(), 0, memoryLimit);
+        Assert.True(memory.GetProperty("availableBytes").GetInt64() >= 0);
+        Assert.True(memory.GetProperty("processBytes").GetInt64() >= -1);
+        Assert.True(memory.GetProperty("managedBytes").GetInt64() >= -1);
+        Assert.True(memory.GetProperty("headroomBytes").GetInt64() >= 0);
+        Assert.Contains(memory.GetProperty("isUnderPressure").ValueKind, new[] { JsonValueKind.True, JsonValueKind.False });
+        Assert.DoesNotContain("Authorization", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("X-Private-Provider-Key", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(secret, json, StringComparison.Ordinal);
+        Assert.False(options.GetProperty("provider").TryGetProperty("headers", out _));
+        Assert.Empty(fixture.Provider.Calls);
+        Assert.Empty(fixture.Broker.Messages);
+    }
+
+    [Fact]
+    public async Task OptionsExposeDefaultResponseLimitAndUnconfiguredMap()
+    {
+        using var fixture = new Fixture(enabled: false);
+        using var response = await fixture.Client.GetAsync("/auto-runs/options");
+        await AssertStatus(response, HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal(64 * 1024 * 1024, document.RootElement.GetProperty("provider").GetProperty("maxResponseBytes").GetInt32());
+        var ui = document.RootElement.GetProperty("ui");
+        Assert.True(!ui.TryGetProperty("mapUrl", out var mapUrl) ||
+            mapUrl.ValueKind == JsonValueKind.Null || string.IsNullOrWhiteSpace(mapUrl.GetString()));
+    }
+
+    [Fact]
+    public void ConfigurationDefaultsPreserveAutomaticMemoryLimitAndHeadroom()
+    {
+        using var configuration = (ConfigurationRoot)new ConfigurationBuilder().Build();
+        using var services = ConfigurationServices(configuration);
+        services.GetRequiredService<IStartupValidator>().Validate();
+        var options = services.GetRequiredService<IOptions<AutoRunOptions>>().Value;
+        Assert.Equal(0, options.Memory.LimitBytes);
+        Assert.Equal(80, options.Memory.MaxUsagePercent);
+        Assert.Equal(256L * 1024 * 1024, options.Memory.MinimumFreeBytes);
+        Assert.Equal(64 * 1024 * 1024, services.GetRequiredService<IOptions<ElasticProviderOptions>>().Value.MaxResponseBytes);
+    }
+
+    [Theory]
+    [InlineData("AutoRun:Ui:MapUrl", "javascript:alert(1)")]
+    [InlineData("AutoRun:Ui:MapUrl", "/relative-map")]
+    [InlineData("AutoRun:Ui:MapUrl", "https://user:password@maps.example")]
+    [InlineData("AutoRun:Ui:MapUrl", "file:///map.html")]
+    [InlineData("AutoRun:Memory:LimitBytes", "-1")]
+    [InlineData("AutoRun:Memory:MaxUsagePercent", "0")]
+    [InlineData("AutoRun:Memory:MaxUsagePercent", "100")]
+    [InlineData("AutoRun:Memory:MinimumFreeBytes", "-1")]
+    [InlineData("AutoRun:Provider:MaxResponseBytes", "0")]
+    [InlineData("AutoRun:Provider:MaxResponseBytes", "-1")]
+    [InlineData("AutoRun:Provider:MaxResponseBytes", "536870913")]
+    public void InvalidMapOrMemoryConfigurationFailsStartup(string name, string value)
+    {
+        using var configuration = (ConfigurationRoot)new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { [name] = value }).Build();
+        using var services = ConfigurationServices(configuration);
+
+        var error = Assert.Throws<OptionsValidationException>(() => services.GetRequiredService<IStartupValidator>().Validate());
+
+        Assert.DoesNotContain("password", error.Message, StringComparison.Ordinal);
+        Assert.NotEmpty(error.Failures);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    [InlineData("https://maps.example/viewer")]
+    [InlineData("http://maps.example:8080/viewer")]
+    public void OptionalOrAbsoluteHttpMapAndMaximumResponseLimitPassStartup(string? mapUrl)
+    {
+        using var configuration = (ConfigurationRoot)new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["AutoRun:Ui:MapUrl"] = mapUrl,
+            ["AutoRun:Provider:MaxResponseBytes"] = "536870912"
+        }).Build();
+        using var services = ConfigurationServices(configuration);
+
+        services.GetRequiredService<IStartupValidator>().Validate();
+
+        Assert.Equal(mapUrl, services.GetRequiredService<IOptions<AutoRunOptions>>().Value.Ui.MapUrl);
+        Assert.Equal(536870912, services.GetRequiredService<IOptions<ElasticProviderOptions>>().Value.MaxResponseBytes);
+    }
+
+    private static ServiceProvider ConfigurationServices(IConfiguration configuration)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAutoRuns(configuration);
+        return services.BuildServiceProvider();
+    }
+
     [Theory]
     [InlineData(AutoRunSourceMode.OverlayIds, false)]
     [InlineData(AutoRunSourceMode.OverlayIds, true)]
@@ -583,7 +706,8 @@ public sealed class AutoRunApiTests
         public CapturingBroker Broker { get; } = new();
         public HttpClient Client { get; }
 
-        public Fixture(bool enabled = true, IReadOnlyDictionary<string, string>? providerHeaders = null, int maxSelectedOverlays = 100000)
+        public Fixture(bool enabled = true, IReadOnlyDictionary<string, string>? providerHeaders = null, int maxSelectedOverlays = 100000,
+            IReadOnlyDictionary<string, string?>? configurationOverrides = null)
         {
             _baseFactory = new(Store);
             _app = _baseFactory.WithWebHostBuilder(builder =>
@@ -605,6 +729,9 @@ public sealed class AutoRunApiTests
                 if (providerHeaders is not null)
                     foreach (var (name, value) in providerHeaders)
                         configuration[$"AutoRun:Provider:Headers:{name}"] = value;
+                if (configurationOverrides is not null)
+                    foreach (var (name, value) in configurationOverrides)
+                        configuration[name] = value;
                 builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(configuration));
                 builder.ConfigureServices(services =>
                 {

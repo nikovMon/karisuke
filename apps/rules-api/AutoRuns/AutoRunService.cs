@@ -23,7 +23,8 @@ public sealed class AutoRunService(
     IAutoRunPublisher publisher,
     IOptions<AutoRunOptions> configured,
     TimeProvider time,
-    ILogger<AutoRunService> logger) : BackgroundService
+    ILogger<AutoRunService> logger,
+    IAutoRunMemoryGuard? memory = null) : BackgroundService
 {
     private static readonly Counter<long> SelectedMetric = TelemetryMeters.RulesApi.CreateCounter<long>("auto_run.selected.overlays");
     private static readonly Counter<long> PublicationsMetric = TelemetryMeters.RulesApi.CreateCounter<long>("auto_run.publications");
@@ -41,10 +42,13 @@ public sealed class AutoRunService(
         request = request with { Publication = request.Publication ?? _options.Publication with { } };
         Validate(request);
         cancellationToken.ThrowIfCancellationRequested();
+        EnsureMemoryAvailable();
         lock (_gate) EnsureAvailable();
         IReadOnlyList<AutoRunResolvedTarget> targets = request.Targets.Count == 0
             ? [] : await resolver.ResolveAsync(request.Targets, cancellationToken);
+        EnsureMemoryAvailable();
         var requestBytes = JsonSerializer.SerializeToUtf8Bytes(request, AutoRunJson.Options);
+        EnsureMemoryAvailable(requestBytes.LongLength * 3);
         var frozen = JsonSerializer.Deserialize<AutoRunPreviewRequest>(requestBytes, AutoRunJson.Options)!;
         var rulesBytes = requestBytes.LongLength +
             targets.Sum(t => (long)JsonSerializer.SerializeToUtf8Bytes(t.Rule, AutoRunJson.Options).Length);
@@ -54,6 +58,7 @@ public sealed class AutoRunService(
         lock (_gate)
         {
             EnsureAvailable();
+            EnsureMemoryAvailable(rulesBytes + 4096);
             if (_jobs.Count >= _options.MaxRetainedJobs)
                 throw new AutoRunRequestException(409, "The retained-job limit is reached. Wait for previews/summaries to expire.");
             if (rulesBytes > _options.PayloadBudgetBytes - _retainedBytes)
@@ -64,6 +69,12 @@ public sealed class AutoRunService(
             _active = job.Id;
             _work.Writer.TryWrite(job);
             return Summary(job);
+        }
+
+        void EnsureMemoryAvailable(long additionalBytes = 0)
+        {
+            if (memory?.CanAllocate(additionalBytes) == false)
+                throw new AutoRunRequestException(409, "Memory is near the preparation limit. Start or cancel an existing preview, or wait for memory to be released.");
         }
     }
 
@@ -117,6 +128,8 @@ public sealed class AutoRunService(
             if (job.StartedAt is not null) return Summary(job);
             if (job.State != AutoRunState.Ready)
                 throw new AutoRunRequestException(409, "Only a ready, unexpired preview can be started.");
+            if (job.Items.Count == 0)
+                throw new AutoRunRequestException(409, "This preview has no selected overlays to publish. Narrow the search or adjust its resource limits and prepare again.");
             EnsureAvailable();
             job.State = AutoRunState.Publishing;
             job.StartedAt = time.GetUtcNow();
@@ -214,53 +227,71 @@ public sealed class AutoRunService(
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var matcher = job.IsDirect ? null : new RuleMatcher(time);
         var matchRules = job.Targets.Select(t => t.MatchRule).ToArray();
-        var queryBodies = queryBuilder.Build(job.Request.Source, job.Targets.Select(t => t.Rule).ToArray());
-        lock (_gate)
+        IReadOnlyList<JsonElement> queryBodies = [];
+        try
         {
+            memory?.ThrowIfUnsafe();
+            queryBodies = queryBuilder.Build(job.Request.Source, job.Targets.Select(t => t.Rule).ToArray());
             var queryBytes = queryBodies.Sum(q => (long)JsonSerializer.SerializeToUtf8Bytes(q).Length);
-            if (queryBytes > _options.PayloadBudgetBytes - _retainedBytes)
-                throw new InvalidOperationException("The process-wide payload budget was exceeded while preparing queries.");
-            _retainedBytes += queryBytes;
-            job.RuleBytes += queryBytes;
-            job.Queries = queryBodies;
-            if (job.Targets.Any(t => t.MatchRule.ModeSar is { Count: > 0 }))
-                AddWarning(job, "SAR mode is verified locally; its provider response mapping must match your deployment.");
-        }
-
-        if (job.Request.Source.Mode == AutoRunSourceMode.OverlayIds)
-        {
-            foreach (var id in job.Request.Source.OverlayIds!.Distinct(StringComparer.Ordinal))
+            lock (_gate)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (AtLimit()) break;
-                Accept(await provider.GetAsync(id, cancellationToken));
+                if (queryBytes > _options.PayloadBudgetBytes - _retainedBytes)
+                    Stop("payloadBudget", "The retained payload budget was reached while preparing queries.");
+                else if (memory?.CanAllocate(queryBytes) == false)
+                    Stop("memoryLimit", "Memory is near the preparation limit.");
+                else
+                {
+                    _retainedBytes += queryBytes;
+                    job.RuleBytes += queryBytes;
+                    job.Queries = queryBodies;
+                }
+                if (job.Targets.Any(t => t.MatchRule.ModeSar is { Count: > 0 }))
+                    AddWarning(job, "SAR mode is verified locally; its provider response mapping must match your deployment.");
             }
-            lock (_gate) job.SourceExhausted = job.StoppedReason is null;
         }
-        else
+        catch (AutoRunMemoryLimitException) { Stop("memoryLimit", "Memory is near the preparation limit."); }
+
+        try
         {
-            var searches = new Queue<Search>(queryBodies.Select(q => new Search(q)));
-            while (searches.TryDequeue(out var search))
+            if (job.Request.Source.Mode == AutoRunSourceMode.OverlayIds)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (AtLimit()) break;
-                var page = await provider.SearchPageAsync(search.Query, search.NextPage, cancellationToken);
-                foreach (var item in page.Items)
+                foreach (var id in job.Request.Source.OverlayIds!.Distinct(StringComparer.Ordinal))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (AtLimit()) break;
-                    Accept(item);
-                }
-                if (job.StoppedReason is not null) break;
-                if (page.Items.Count > 0 && page.NextPage is { Length: > 0 } next)
-                {
-                    if (!search.Visited.Add(next)) throw new InvalidOperationException("Elastic Provider returned a repeated next_page URL.");
-                    search.NextPage = next;
-                    searches.Enqueue(search);
+                    Accept(await provider.GetAsync(id, cancellationToken));
                 }
             }
-            lock (_gate) job.SourceExhausted = job.StoppedReason is null;
+            else
+            {
+                // The provider owns one search context: finish its cursor before starting another query.
+                foreach (var query in queryBodies)
+                {
+                    string? nextPage = null;
+                    var visited = new HashSet<string>(StringComparer.Ordinal);
+                    do
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (AtLimit()) break;
+                        var page = await provider.VisitPageAsync(query, nextPage, item =>
+                        {
+                            Accept(item);
+                            return job.StoppedReason is null;
+                        }, cancellationToken);
+                        if (page.StoppedReason is { } reason)
+                            Stop(reason, "Memory is near the preparation limit.");
+                        if (job.StoppedReason is not null || string.IsNullOrEmpty(page.NextPage)) break;
+                        nextPage = page.NextPage;
+                        if (!visited.Add(nextPage))
+                            throw new InvalidOperationException("Elastic Provider returned a repeated next_page URL.");
+                    } while (true);
+                    if (job.StoppedReason is not null) break;
+                }
+            }
         }
+        catch (AutoRunMemoryLimitException) { Stop("memoryLimit", "Memory is near the preparation limit."); }
+        catch (ProviderResponseLimitException ex) { Stop("responseLimit", ex.Message); }
+        lock (_gate) job.SourceExhausted = job.StoppedReason is null;
         cancellationToken.ThrowIfCancellationRequested();
         IReadOnlyList<AutoRunSelection> selection = job.IsDirect
             ? candidates.OrderByDescending(c => c.Overlay.Input.PhotoTime)
@@ -288,6 +319,12 @@ public sealed class AutoRunService(
         {
             lock (_gate)
             {
+                if (job.StoppedReason is not null) return true;
+                if (memory?.CanAllocate() == false)
+                {
+                    Stop("memoryLimit", "Memory is near the preparation limit.");
+                    return true;
+                }
                 if (job.Scanned < _options.MaxScannedRecords && candidates.Count < _options.MaxCandidates) return false;
                 job.StoppedReason = job.Scanned >= _options.MaxScannedRecords ? "scanLimit" : "candidateLimit";
                 AddWarning(job, $"Preparation stopped at {job.StoppedReason}; observed matches are not the total source count.");
@@ -297,6 +334,7 @@ public sealed class AutoRunService(
 
         void Accept(ProviderOverlayResult result)
         {
+            if (AtLimit()) return;
             lock (_gate) job.Scanned++;
             if (result.Overlay is not { } overlay)
             {
@@ -357,12 +395,31 @@ public sealed class AutoRunService(
             {
                 job.ObservedMatches++;
                 if (overlay.Payload.LongLength > _options.PayloadBudgetBytes - _retainedBytes)
-                    throw new InvalidOperationException("The process-wide payload budget was exceeded; no runnable preview was created.");
+                {
+                    Stop("payloadBudget", "The retained payload budget was reached.");
+                    return;
+                }
+                if (memory?.CanAllocate(overlay.Payload.LongLength + 4096) == false)
+                {
+                    Stop("memoryLimit", "Memory is near the preparation limit.");
+                    return;
+                }
                 _retainedBytes += overlay.Payload.LongLength;
                 job.PayloadBytes += overlay.Payload.LongLength;
             }
             // Direct submission owns the exact normalized bytes selected by preview.
             candidates.Add(new(job.IsDirect ? overlay with { Payload = overlay.Payload.ToArray() } : overlay, matches));
+        }
+
+        void Stop(string reason, string message)
+        {
+            lock (_gate)
+            {
+                if (job.StoppedReason is not null) return;
+                job.StoppedReason = reason;
+                AddWarning(job, message + " Search coverage is incomplete. Already collected overlays will be selected and can be started; narrow the search for a smaller preparation.");
+                logger.LogWarning("Auto-run preparation stopped at {StoppedReason}; retaining {CandidateCount} candidates.", reason, candidates.Count);
+            }
         }
     }
 
@@ -487,7 +544,8 @@ public sealed class AutoRunService(
             Math.Max(0, t.Target.MinOverlays - job.SelectedByTarget[i]), t.Rule)).ToArray(),
         job.Publication, job.ActivePublication, job.Publication != job.ActivePublication,
         job.SourceExhausted, job.StoppedReason, job.Warnings.ToArray(), job.Errors.ToArray(), job.Queries,
-        job.StartedAt is { } start ? job.Confirmed / Math.Max(1, ((job.FinishedAt ?? time.GetUtcNow()) - start).TotalSeconds) : 0);
+        job.StartedAt is { } start ? job.Confirmed / Math.Max(1, ((job.FinishedAt ?? time.GetUtcNow()) - start).TotalSeconds) : 0,
+        memory?.Snapshot());
 
     private void Validate(AutoRunPreviewRequest request)
     {
@@ -541,12 +599,6 @@ public sealed class AutoRunService(
     private static void AddError(Job job, string text) { if (job.Errors.Count < 100) job.Errors.Add(Truncate(text)!); }
     private static void AddWarning(Job job, string text) { if (job.Warnings.Count < 100 && !job.Warnings.Contains(text)) job.Warnings.Add(text); }
 
-    private sealed class Search(JsonElement query)
-    {
-        public JsonElement Query { get; } = query;
-        public string? NextPage { get; set; }
-        public HashSet<string> Visited { get; } = new(StringComparer.Ordinal);
-    }
     private sealed class Item(ProviderOverlay overlay, int[] assignments)
     {
         public string Id { get; } = overlay.Input.ImageId;
