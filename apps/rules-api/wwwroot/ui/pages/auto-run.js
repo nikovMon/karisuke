@@ -10,12 +10,13 @@ const state = {
   initialized: false, options: null, targets: [], rules: [], rulesFrom: 0, rulesSize: 10,
   pipelines: [], runId: null, run: null, timer: null, itemsFrom: 0, itemsSize: 20,
   itemsOutcome: '', publicationDirty: false, refreshVersion: 0, rulesVersion: 0,
-  rulesLoading: false, rulesPipeline: '', selectionOperation: null, setupReady: false, preparing: false
+  rulesLoading: false, rulesPipeline: '', selectionOperation: null, setupReady: false, preparing: false, rerunPending: false
 };
 const $ = id => document.getElementById(id);
-const directSource = () => document.querySelector('[name="source-mode"]:checked')?.value === 'OverlayIds'
-  && document.querySelector('[name="id-processing"]:checked')?.value === 'direct';
-const directRun = run => run?.sourceMode === 'OverlayIds' && run.targets?.length === 0;
+const directSource = () => document.querySelector('[name="source-mode"]:checked')?.value === 'Filters'
+  || (document.querySelector('[name="source-mode"]:checked')?.value === 'OverlayIds'
+    && document.querySelector('[name="id-processing"]:checked')?.value === 'direct');
+const directRun = run => ['OverlayIds', 'Filters'].includes(run?.sourceMode) && run.targets?.length === 0;
 const badge = value => `<span class="tag ${['Ready', 'Completed', 'Confirmed'].includes(value) ? 'good' : ['Failed', 'Expired'].includes(value) ? 'bad' : ['CompletedWithErrors', 'Uncertain', 'Cancelled'].includes(value) ? 'warn' : ''}">${escape(value)}</span>`;
 const formatTime = value => value ? new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 const field = (id, label, placeholder = '', type = 'text', extra = '') =>
@@ -64,7 +65,7 @@ export async function showAutoRun(id = null) {
   $('configuration').hidden = Boolean(id);
   $('run-detail').hidden = !id;
   if (!id) {
-    document.title = 'Auto-run · Rules Console';
+    document.title = 'Auto Run · Flarules';
     loadHistory();
     return;
   }
@@ -74,12 +75,12 @@ export async function showAutoRun(id = null) {
   state.publicationDirty = false;
   $('run-detail').innerHTML = detailMarkup(id);
   attachDetail();
-  document.title = 'Run details · Rules Console';
+  document.title = 'Run details · Flarules';
   await refreshRun(true);
 }
 
 function configurationMarkup() {
-  return `<div class="page-heading"><div><div class="eyebrow">HISTORICAL PROCESSING</div><h1>Give historical data a new run.</h1><p>Find overlays and review exactly what will be sent to the Unified Gateway.</p></div><div class="heading-mark" aria-hidden="true">↗</div></div>
+  return `<div class="page-heading"><div><h1>Give historical data a new run.</h1><p>Find overlays and review exactly what will be sent to the Unified Gateway.</p></div></div>
   <div class="configure-layout"><form id="preview-form">
     <section class="panel">${panelHeader('01', 'Choose your source', 'Start with saved rules, custom filters, or specific overlays.')}<div class="panel-body">
       <div class="source-modes">
@@ -98,9 +99,9 @@ function configurationMarkup() {
         <div class="field-row">${field('grid-types', 'Grid types', 'Comma-separated values')}${field('sortie-ids', 'Sortie IDs', 'Comma-separated values')}</div>
         <div class="field-row"><label class="field" for="registration-quality"><span>Registration quality</span><select id="registration-quality"><option value="">Any quality</option><option value="Accurate">Accurate</option><option value="Sensor">Sensor</option><option value="Accurate,Sensor">Accurate or Sensor</option></select></label><label class="field" for="is-realtime"><span>Realtime overlay</span><select id="is-realtime"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label></div>
         <div class="field-row">${field('resolution-min', 'Minimum resolution', 'No lower bound', 'number', 'min="0" step="any"')}${field('resolution-max', 'Maximum resolution', 'No upper bound', 'number', 'min="0" step="any"')}</div>
-        <label class="field" for="area-wkt"><span>Search area · WKT</span><textarea id="area-wkt" class="mono" placeholder="POLYGON ((...)) or MULTIPOLYGON (((...)))" spellcheck="false"></textarea><small>Selects intersecting overlays. The rule’s geometry still determines the dispatched ROI.</small></label>
+        <label class="field" for="area-wkt"><span>Search area · WKT</span><textarea id="area-wkt" class="mono" placeholder="POLYGON ((...)) or MULTIPOLYGON (((...)))" spellcheck="false"></textarea><small>Selects intersecting overlays. Gateway rules determine the dispatched ROI.</small></label>
         <div class="filter-subheading">Time ranges</div>
-        <div class="field-row"><label class="field" for="input-timezone"><span>Times entered in</span><select id="input-timezone"><option value="local">${escape(localZone)} · browser timezone</option><option value="utc">UTC</option></select></label><div class="field"><span>Time handling</span><small>Dates are converted to explicit UTC timestamps before submission. Both boundaries are optional.</small></div></div>
+        <p class="filter-note">Times use your browser’s local timezone (${escape(localZone)}) and are sent as UTC. Both boundaries are optional.</p>
         <div class="field-row">${field('created-from', 'Created from', '', 'datetime-local')}${field('created-to', 'Created to', '', 'datetime-local')}</div>
         <div class="field-row">${field('photo-from', 'Photo taken from', '', 'datetime-local')}${field('photo-to', 'Photo taken to', '', 'datetime-local')}</div>
       </div></details>
@@ -183,6 +184,7 @@ async function loadOptions() {
     }
     $('overall-max').max = limits.maxSelectedOverlays;
     $('overall-min').max = limits.maxSelectedOverlays;
+    updateSource();
     $('server-limits').innerHTML = [
       ['Selected overlays', number(limits.maxSelectedOverlays)], ['Records scanned', number(limits.maxScannedRecords)],
       ['Ready preview', `${limits.readyLifetimeMinutes} min`], ['Active operation', '1 at a time']
@@ -308,20 +310,23 @@ function updateSource() {
   $('rule-selection').hidden = direct;
   $('rule-selection').disabled = direct;
   $('limits-section').querySelector('.step-number').textContent = direct ? '02' : '03';
-  $('overall-max').placeholder = direct ? 'Use all supplied overlay IDs' : 'Use the combined rule maximum';
+  const filterMaximum = state.options?.defaults.filterMaxOverlays ?? 100;
+  $('overall-max').placeholder = mode === 'Filters' ? `Default: ${number(filterMaximum)} overlays`
+    : direct ? 'Use all supplied overlay IDs' : 'Use the combined rule maximum';
   $('quota-description').textContent = direct
-    ? 'Each selected overlay counts once. Minimum shortfalls are reported, and available overlays can still run.'
+    ? `Each selected overlay counts once. ${mode === 'Filters' ? `Leave maximum empty to select up to ${number(filterMaximum)} overlays. ` : ''}Minimum shortfalls are reported, and available overlays can still run.`
     : 'Shared overlays count once overall and once for each assigned rule. Minimum shortfalls are reported, and available overlays can still run.';
   $('preview-description').textContent = direct
     ? 'The preview freezes selected overlays. The gateway uses current rules when it receives them.'
     : 'The preview freezes selected overlays and rule definitions.';
   $('process-find-title').textContent = direct ? 'Find overlays' : 'Find & match';
-  $('process-find-description').textContent = direct ? 'Fetch the supplied overlay IDs from Elastic Provider.' : 'Fetch historical overlays and evaluate your selected rules.';
+  $('process-find-description').textContent = mode === 'Filters' ? 'Search Elastic Provider using your filters.'
+    : direct ? 'Fetch the supplied overlay IDs from Elastic Provider.' : 'Fetch historical overlays and evaluate your selected rules.';
   $('process-review-description').textContent = direct ? 'Inspect selected overlays, overall limits, and any shortfalls before starting.' : 'Inspect overlaps, quotas, and any shortfalls before starting.';
   $('filters-description').textContent = mode === 'Filters' ? 'Empty filters search all overlays' : 'Optional for rule-derived searches';
   $('source-description').textContent = {
     Rules: 'Search conditions are derived from the rules you select below. Additional filters can narrow the search.',
-    Filters: 'Find overlays using the filters below, then match them against your selected pipeline rules.',
+    Filters: 'Find overlays using the filters below and send them directly to the Unified Gateway. The gateway applies its current rules, including photo-age limits.',
     OverlayIds: direct ? 'Fetch overlays by ID and send them directly to the Unified Gateway. The gateway decides which pipelines and current rules apply.'
       : 'Fetch these overlays by ID, then match them against your selected pipeline rules.'
   }[mode];
@@ -437,18 +442,15 @@ function optionalNumber(id) {
 function timeValue(id) {
   const value = $(id).value;
   if (!value) return undefined;
-  const utc = $('input-timezone').value === 'utc';
-  const date = new Date(utc ? `${value}Z` : value);
+  const date = new Date(value);
   if (!Number.isFinite(date.getTime())) throw new Error('Enter a valid date and time.');
-  if (!utc) {
-    const sameLocal = candidate => {
-      const pad = n => String(n).padStart(2, '0');
-      return `${candidate.getFullYear()}-${pad(candidate.getMonth() + 1)}-${pad(candidate.getDate())}T${pad(candidate.getHours())}:${pad(candidate.getMinutes())}` === value.slice(0, 16);
-    };
-    if (!sameLocal(date)) throw new Error('This local time does not exist because of a daylight-saving change. Choose another time or enter it in UTC.');
-    if ([-120, -60, -30, 30, 60, 120].some(minutes => sameLocal(new Date(date.getTime() + minutes * 60000))))
-      throw new Error('This local time is ambiguous because of a daylight-saving change. Select UTC and enter the intended instant.');
-  }
+  const sameLocal = candidate => {
+    const pad = n => String(n).padStart(2, '0');
+    return `${candidate.getFullYear()}-${pad(candidate.getMonth() + 1)}-${pad(candidate.getDate())}T${pad(candidate.getHours())}:${pad(candidate.getMinutes())}` === value.slice(0, 16);
+  };
+  if (!sameLocal(date)) throw new Error('This local time does not exist because of a daylight-saving change. Choose another time.');
+  if ([-120, -60, -30, 30, 60, 120].some(minutes => sameLocal(new Date(date.getTime() + minutes * 60000))))
+    throw new Error('This local time is ambiguous because of a daylight-saving change. Choose a time outside the repeated hour.');
   return date.toISOString();
 }
 
@@ -530,7 +532,7 @@ async function loadHistory() {
 
 function detailMarkup(id) {
   return `<a class="back-link" href="/ui/auto-run" data-route>← Back to configuration</a>
-  <div class="page-heading run-heading"><div><div class="eyebrow">RUN WORKSPACE</div><h1>Review. Launch. Follow through.</h1><div class="run-id mono">${escape(id)}</div></div><div class="run-heading-actions"><span id="run-state">${badge('Loading')}</span><button id="refresh-run" type="button" class="button ghost" aria-label="Refresh run">↻</button><button id="cancel-run" type="button" class="button danger" hidden>Cancel</button><button id="start-run" type="button" class="button primary" hidden>Start run ↗</button></div></div>
+  <div class="page-heading run-heading"><div><div class="eyebrow">RUN WORKSPACE</div><h1>Review. Launch. Follow through.</h1><div class="run-id mono">${escape(id)}</div></div><div class="run-heading-actions"><span id="run-state">${badge('Loading')}</span><button id="refresh-run" type="button" class="button ghost" aria-label="Refresh run">↻</button><button id="cancel-run" type="button" class="button danger" hidden>Cancel</button><button id="rerun-run" type="button" class="button" title="Prepare a fresh preview using the original configuration and saved publication settings. Rules are read again; publication requires Start." hidden>Rerun</button><button id="start-run" type="button" class="button primary" hidden>Start run ↗</button></div></div>
   <div id="run-error" class="notice error" role="alert" hidden></div>
   <div id="run-notices" hidden></div>
   <div id="run-content" hidden>
@@ -548,6 +550,7 @@ function attachDetail() {
   $('refresh-run').addEventListener('click', () => refreshRun(true));
   $('start-run').addEventListener('click', () => runAction('start'));
   $('cancel-run').addEventListener('click', () => runAction('cancel'));
+  $('rerun-run').addEventListener('click', rerun);
   $('item-outcome').addEventListener('change', () => { state.itemsOutcome = $('item-outcome').value; state.itemsFrom = 0; loadItems(); });
   $('items-prev').addEventListener('click', () => { state.itemsFrom = Math.max(0, state.itemsFrom - state.itemsSize); loadItems(); });
   $('items-next').addEventListener('click', () => { state.itemsFrom += state.itemsSize; loadItems(); });
@@ -585,6 +588,8 @@ function renderRun(run) {
   const direct = directRun(run);
   $('run-state').innerHTML = badge(run.state);
   $('start-run').hidden = run.state !== 'Ready';
+  $('rerun-run').hidden = ['Preparing', 'Publishing'].includes(run.state);
+  $('rerun-run').disabled = state.rerunPending;
   $('cancel-run').hidden = terminal(run.state);
   for (const key of ['selected', 'confirmed', 'failed', 'uncertain', 'remaining']) $(`count-${key}`).textContent = number(run.counters[key]);
   const complete = run.counters.confirmed + run.counters.failed + run.counters.uncertain;
@@ -637,7 +642,7 @@ function renderRun(run) {
     ? `Pending next batch · active: ${run.activePublication.batchSize} overlays / ${run.activePublication.delayMs} ms`
     : `Active: ${run.activePublication.batchSize} overlays / ${run.activePublication.delayMs} ms`;
   $('provider-queries').textContent = run.queries.length ? JSON.stringify(run.queries, null, 2)
-    : direct ? 'Overlays fetched by ID. No filter query was used.' : 'No provider queries recorded.';
+    : run.sourceMode === 'OverlayIds' ? 'Overlays fetched by ID. No filter query was used.' : 'No provider queries recorded.';
 }
 
 let itemsVersion = 0;
@@ -673,6 +678,28 @@ async function runAction(action) {
     await refreshRun();
   } catch (error) { if (id === state.runId) showError('run-error', error); }
   finally { if (id === state.runId) button.disabled = false; }
+}
+
+async function rerun() {
+  const id = state.runId;
+  if (!id || !state.run || state.rerunPending || ['Preparing', 'Publishing'].includes(state.run.state)) return;
+  state.rerunPending = true;
+  $('rerun-run').disabled = true;
+  $('rerun-run').textContent = 'Preparing…';
+  hideError('run-error');
+  try {
+    const run = await api.rerun(id);
+    if (id !== state.runId) return;
+    navigate(`/ui/auto-run/runs/${encodeURIComponent(run.id)}`);
+    toast('New preview created from the original configuration and saved publication settings. Review it before starting.');
+  } catch (error) { if (id === state.runId) showError('run-error', error); }
+  finally {
+    state.rerunPending = false;
+    if ($('rerun-run')) {
+      $('rerun-run').disabled = false;
+      $('rerun-run').textContent = 'Rerun';
+    }
+  }
 }
 
 async function updatePublication(event) {

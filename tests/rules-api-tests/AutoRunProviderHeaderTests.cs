@@ -31,7 +31,7 @@ public sealed class AutoRunProviderHeaderTests
             Assert.Equal(exactValue, Assert.Single(request.Headers.NonValidated["x-api-key"]));
             calls.Add((request.Method, request.RequestUri!, request.Content is null ? null : await request.Content.ReadAsStringAsync()));
             if (request.Method == HttpMethod.Get) return new(HttpStatusCode.NotFound);
-            Assert.Equal("application/json", request.Content!.Headers.ContentType!.MediaType);
+            Assert.Equal("application/json-patch+json", request.Content!.Headers.ContentType!.MediaType);
             return calls.Count == 2
                 ? Json(new { entities_list = new object[] { new { } }, next_page = "/next?searchAfter=cursor" })
                 : Json(new { entities_list = Array.Empty<object>() });

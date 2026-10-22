@@ -191,13 +191,11 @@ public sealed class AutoRunServiceTests
         Assert.Empty(ready.Targets);
     }
 
-    [Theory]
-    [InlineData(AutoRunSourceMode.Rules)]
-    [InlineData(AutoRunSourceMode.Filters)]
-    public async Task RulesAndFiltersStillRequireTargets(AutoRunSourceMode mode)
+    [Fact]
+    public async Task RulesStillRequireTargets()
     {
         await using var fixture = await Fixture.StartAsync([]);
-        var request = new AutoRunPreviewRequest { Source = new() { Mode = mode } };
+        var request = new AutoRunPreviewRequest { Source = new() { Mode = AutoRunSourceMode.Rules } };
         var error = await Assert.ThrowsAsync<AutoRunRequestException>(() =>
             fixture.Service.PreviewAsync(request, CancellationToken.None));
 
@@ -205,6 +203,154 @@ public sealed class AutoRunServiceTests
         Assert.Equal(0, fixture.Resolver.Calls);
         Assert.Empty(fixture.Provider.GetCalls);
         Assert.Empty(fixture.Provider.SearchCursors);
+    }
+
+    [Theory]
+    [InlineData(100000, null, 100)]
+    [InlineData(2, null, 2)]
+    [InlineData(100000, 1, 1)]
+    public async Task StandaloneFiltersUseBoundedGlobalQuotaWithoutResolvingRules(int serverMaximum, int? requestedMaximum, int expectedMaximum)
+    {
+        var options = EnabledOptions();
+        options.MaxSelectedOverlays = serverMaximum;
+        await using var fixture = await Fixture.StartAsync(
+            [Overlay("old", "2000-01-01T00:00:00Z", ""), Overlay("z"), Overlay("a")], options);
+        fixture.Resolver.Rules.Clear();
+        var ready = await fixture.ReadyAsync(new()
+        {
+            Source = new() { Mode = AutoRunSourceMode.Filters }, MaxOverlays = requestedMaximum
+        });
+
+        Assert.Equal(expectedMaximum, ready.MaxOverlays);
+        Assert.Equal(0, fixture.Resolver.Calls);
+        Assert.Empty(fixture.Provider.GetCalls);
+        Assert.Single(fixture.Provider.SearchCursors);
+        Assert.Single(ready.Queries);
+        Assert.Empty(ready.Targets);
+        Assert.Equal(3, ready.Counters.ObservedMatches);
+        Assert.Equal(Math.Min(3, expectedMaximum), ready.Counters.Selected);
+        Assert.Equal(new[] { "a", "z", "old" }.Take(expectedMaximum),
+            fixture.Service.Items(ready.Id, 0, 10, null).Items.Select(item => item.OverlayId));
+        Assert.True(ready.SourceExhausted);
+        Assert.Empty(fixture.Publisher.Calls);
+
+        fixture.Service.Start(ready.Id);
+        var completed = await fixture.WaitAsync(ready.Id, AutoRunState.Completed);
+        Assert.Equal(ready.Counters.Selected, completed.Counters.Confirmed);
+        Assert.All(fixture.Publisher.Calls, publication => Assert.Empty(publication.Targets));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StandaloneFiltersRecheckCandidatesDeduplicateAndRespectSharedScanLimit(bool limited)
+    {
+        var options = EnabledOptions();
+        if (limited) options.MaxScannedRecords = 3;
+        await using var fixture = await Fixture.StartAsync([], options);
+        fixture.Provider.Search = (_, next, _) => Task.FromResult(next is null
+            ? new ProviderPage([new(Overlay("old", "2000-01-01T00:00:00Z"), null), new(Overlay("one"), null)], "/next")
+            : new ProviderPage([new(Overlay("one"), null), new(Overlay("two"), null)], null));
+        var ready = await fixture.ReadyAsync(new()
+        {
+            Source = new()
+            {
+                Mode = AutoRunSourceMode.Filters,
+                Filters = new()
+                {
+                    SensorNames = ["camera"], Resolution = new() { Min = 0.7, Max = 0.7 },
+                    PhotoTime = new() { From = "2020-01-01T00:00:00Z", To = "2020-01-03T00:00:00Z" }
+                }
+            }
+        });
+
+        Assert.Equal(limited ? 3 : 4, ready.Counters.Scanned);
+        Assert.Equal(1, ready.Counters.Duplicates);
+        Assert.Equal(limited ? 1 : 2, ready.Counters.Selected);
+        Assert.Equal(limited ? "scanLimit" : null, ready.StoppedReason);
+        Assert.Equal(!limited, ready.SourceExhausted);
+        Assert.Equal(0, fixture.Resolver.Calls);
+        Assert.All(fixture.Service.Items(ready.Id, 0, 10, null).Items, item => Assert.NotEqual("old", item.OverlayId));
+    }
+
+    [Fact]
+    public async Task RerunUsesFrozenCriteriaAndLatestSettingsButFetchesFreshPayloadsAndRules()
+    {
+        await using var fixture = await Fixture.StartAsync([Overlay("original")]);
+        var request = Request(["original"], [Target("a", 1, 2)]) with { MinOverlays = 1, MaxOverlays = 2 };
+        var ready = await fixture.ReadyAsync(request);
+        var settings = new AutoRunPublication { BatchSize = 1, DelayMs = 25 };
+        fixture.Service.UpdatePublication(ready.Id, settings);
+        fixture.Service.Start(ready.Id);
+        await fixture.WaitAsync(ready.Id, AutoRunState.Completed);
+        request.Source.OverlayIds![0] = "mutated";
+        request.Targets.Clear();
+        fixture.Resolver.Rules["rule-a"].RuleName = "Updated rule";
+        fixture.Resolver.Rules["rule-a"].RunParams = [RunParams("fresh-tenant")];
+        fixture.Provider.Overlays["original"] = Overlay("original", imageUrl: "https://fresh.invalid/image");
+
+        var admitted = await fixture.Service.RerunAsync(ready.Id, CancellationToken.None);
+        var rerun = await fixture.WaitAsync(admitted.Id, AutoRunState.Ready);
+        Assert.NotEqual(ready.Id, rerun.Id);
+        Assert.Equal(settings, rerun.Publication);
+        Assert.Equal(1, rerun.MinOverlays);
+        Assert.Equal(2, rerun.MaxOverlays);
+        Assert.Equal("Updated rule", Assert.Single(rerun.Targets).RuleName);
+        Assert.Equal(1, rerun.Targets[0].MinOverlays);
+        Assert.Equal(2, rerun.Targets[0].MaxOverlays);
+        Assert.Equal(2, fixture.Resolver.Calls);
+        Assert.Equal(["original", "original"], fixture.Provider.GetCalls);
+        Assert.Single(fixture.Publisher.Calls); // Rerun prepares; it never starts publication.
+        Assert.Equal(AutoRunState.Completed, fixture.Service.Get(ready.Id).State);
+        Assert.Equal("rule-a", fixture.Service.Get(ready.Id).Targets[0].RuleName);
+
+        fixture.Service.Start(rerun.Id);
+        await fixture.WaitAsync(rerun.Id, AutoRunState.Completed);
+        var calls = fixture.Publisher.Calls.ToArray();
+        Assert.Equal(2, calls.Length);
+        Assert.NotEqual(calls[0].RunId, calls[1].RunId);
+        using var payload = JsonDocument.Parse(calls[1].Payload);
+        Assert.Equal("https://fresh.invalid/image", payload.RootElement.GetProperty("imageUrl").GetString());
+        Assert.Equal("fresh-tenant", calls[1].Targets[0].Rule.RunParams![0].GetProperty("tenantId").GetString());
+    }
+
+    [Fact]
+    public async Task RerunOfFiltersPreservesOriginalFiltersWithoutRuleResolution()
+    {
+        await using var fixture = await Fixture.StartAsync([Overlay("old", "2000-01-01T00:00:00Z"), Overlay("one")]);
+        var filters = new AutoRunFilters { SensorNames = ["camera"], PhotoTime = new() { From = "2020-01-01T00:00:00Z" } };
+        var ready = await fixture.ReadyAsync(new() { Source = new() { Mode = AutoRunSourceMode.Filters, Filters = filters } });
+        fixture.Service.Cancel(ready.Id);
+        filters.SensorNames![0] = "changed";
+        fixture.Provider.Overlays["two"] = Overlay("two");
+
+        var created = await fixture.Service.RerunAsync(ready.Id, CancellationToken.None);
+        var rerun = await fixture.WaitAsync(created.Id, AutoRunState.Ready);
+        Assert.Equal(2, rerun.Counters.Selected);
+        Assert.Equal(ready.Queries[0].GetRawText(), rerun.Queries[0].GetRawText());
+        Assert.Equal(0, fixture.Resolver.Calls);
+        Assert.Empty(rerun.Targets);
+        Assert.Empty(fixture.Publisher.Calls);
+    }
+
+    [Fact]
+    public async Task RerunRejectsActiveOrMissingJobsWithoutAdmittingWork()
+    {
+        var blocked = new TaskCompletionSource<ProviderOverlayResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var fixture = await Fixture.StartAsync([Overlay("one")]);
+        var ready = await fixture.ReadyAsync(Request(["one"], []));
+        fixture.Provider.Get = (_, token) => blocked.Task.WaitAsync(token);
+        var preparing = await fixture.Service.PreviewAsync(Request(["one"], []), CancellationToken.None);
+
+        foreach (var id in new[] { ready.Id, preparing.Id })
+            Assert.Equal(409, (await Assert.ThrowsAsync<AutoRunRequestException>(() =>
+                fixture.Service.RerunAsync(id, CancellationToken.None))).StatusCode);
+        Assert.Equal(404, (await Assert.ThrowsAsync<AutoRunRequestException>(() =>
+            fixture.Service.RerunAsync("missing", CancellationToken.None))).StatusCode);
+        Assert.Equal(2, fixture.Service.List().Count);
+        Assert.Empty(fixture.Publisher.Calls);
+        fixture.Service.Cancel(preparing.Id);
+        await fixture.WaitAsync(preparing.Id, AutoRunState.Cancelled);
     }
 
     [Fact]

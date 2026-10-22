@@ -1,5 +1,4 @@
 using ImagingPipeline.Rules.Api.AutoRuns;
-using ImagingPipeline.Rules.Api.AutoRuns.Provider;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -10,8 +9,7 @@ namespace ImagingPipeline.Rules.Api.Controllers;
 [Produces("application/json")]
 public sealed class AutoRunsController(
     AutoRunService service,
-    IOptions<AutoRunOptions> configured,
-    IOptions<ElasticProviderOptions> provider) : ControllerBase
+    IOptions<AutoRunOptions> configured) : ControllerBase
 {
     [HttpGet("options")]
     public IActionResult Options()
@@ -20,7 +18,11 @@ public sealed class AutoRunsController(
         return Ok(new
         {
             options.Enabled,
-            Defaults = new { options.Publication, MinOverlays = 0 },
+            Defaults = new
+            {
+                options.Publication, MinOverlays = 0,
+                FilterMaxOverlays = Math.Min(AutoRunOptions.DefaultFilterMaxOverlays, options.MaxSelectedOverlays)
+            },
             Limits = new
             {
                 BatchSize = new { Min = 1, Max = 100 },
@@ -29,7 +31,6 @@ public sealed class AutoRunsController(
                 options.PayloadBudgetBytes, options.ReadyLifetimeMinutes, options.SummaryLifetimeMinutes,
                 MaxTargets = 100
             },
-            ProviderTimeZone = provider.Value.SourceTimeZoneId,
             SingleInstance = true
         });
     }
@@ -54,6 +55,14 @@ public sealed class AutoRunsController(
 
     [HttpPost("{id}/start")]
     public AutoRunSummary Start(string id) => service.Start(id);
+
+    [HttpPost("{id}/rerun")]
+    [ProducesResponseType(typeof(AutoRunSummary), StatusCodes.Status202Accepted)]
+    public async Task<IActionResult> Rerun(string id, CancellationToken cancellationToken)
+    {
+        var job = await service.RerunAsync(id, cancellationToken);
+        return AcceptedAtAction(nameof(Get), new { id = job.Id }, job);
+    }
 
     [HttpPatch("{id}/publication")]
     public AutoRunSummary Publication(string id, AutoRunPublication settings) => service.UpdatePublication(id, settings);

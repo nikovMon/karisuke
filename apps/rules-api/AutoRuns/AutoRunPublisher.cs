@@ -15,7 +15,8 @@ public interface IAutoRunPublisher
 }
 
 public sealed class AutoRunPublisher(
-    IRabbitMqDestinationPublisher publisher, IOptions<AutoRunOptions> options) : IAutoRunPublisher
+    IRabbitMqDestinationPublisher publisher, IOptions<AutoRunOptions> options,
+    ILogger<AutoRunPublisher> logger) : IAutoRunPublisher
 {
     public async Task<AutoRunPublishResult> PublishAsync(
         string runId, byte[] payload, IReadOnlyList<AutoRunResolvedTarget> targets, CancellationToken cancellationToken)
@@ -55,16 +56,21 @@ public sealed class AutoRunPublisher(
         }
         catch (PublishException ex)
         {
+            logger.LogWarning(ex, "RabbitMQ rejected auto-run {AutoRunId} message {MessageId}.", runId, messageId);
             return new(AutoRunItemOutcome.Failed, ex.IsReturn ? "Broker returned an unroutable message." : "Broker negatively acknowledged the message.");
         }
-        catch (ArgumentException)
+        catch (ArgumentException ex)
         {
+            logger.LogWarning(ex, "Invalid publication for auto-run {AutoRunId} message {MessageId}.", runId, messageId);
             return new(AutoRunItemOutcome.Failed, "Invalid gateway destination or message.");
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            // Connection and topology failures can also reach this catch before sending.
+            // Preserve the original broker reason for diagnosis without exposing it in the UI.
+            logger.LogWarning(ex, "RabbitMQ publication could not be confirmed for auto-run {AutoRunId} message {MessageId}.", runId, messageId);
             return new(AutoRunItemOutcome.Uncertain,
-                ex is OperationCanceledException ? "Publication was interrupted; delivery could not be confirmed." : "Broker confirmation was lost or unavailable; delivery is uncertain.");
+                ex is OperationCanceledException ? "Publication was interrupted; delivery could not be confirmed." : "RabbitMQ publication could not be confirmed; delivery is uncertain. Check Rules API logs for this run's broker error.");
         }
     }
 }

@@ -30,8 +30,8 @@ public static class AutoRunRegistration
             .Validate(options => ElasticProviderHeaders.IsValid(options.Headers) &&
                 ElasticProviderHeaders.HasValidConfigurationShape(configuration.GetSection("AutoRun:Provider:Headers")),
                 ElasticProviderHeaders.ValidationError)
-            .Validate(options => options.TimeoutSeconds > 0 && options.MaxResponseBytes > 0,
-                "Elastic Provider time and response limits must be positive.")
+            .Validate(options => options.TimeoutSeconds > 0,
+                "Elastic Provider timeout must be positive.")
             .Validate(options => !configuration.GetValue<bool>("AutoRun:Enabled") ||
                 Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var uri) &&
                 uri.Scheme is "http" or "https" && string.IsNullOrEmpty(uri.UserInfo),

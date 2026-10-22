@@ -4,34 +4,32 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>Auto-run · Rules Console</title>
+  <title>Auto Run · Flarules</title>
   <link rel="stylesheet" href="/ui/styles.css">
   <script type="module" src="/ui/main.js"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
   <aside class="sidebar">
-    <a class="brand" href="/ui/auto-run" data-route aria-label="Rules Console home">
+    <a class="brand" href="/ui/auto-run" data-route aria-label="Flarules home">
       <svg viewBox="0 0 36 36" aria-hidden="true"><path d="m18 2 14 8v16l-14 8-14-8V10Z"/><path d="m11 14 7-4 7 4v8l-7 4-7-4Z"/><path d="m18 10 0 16m-7-12 14 8m0-8-14 8"/></svg>
-      <span>RULES<span class="brand-sub">OPERATIONS CONSOLE</span></span>
+      <span>Flarules</span>
     </a>
     <div class="nav-label">WORKSPACE</div>
     <nav aria-label="Main navigation">
-      <a href="/ui/auto-run" data-route class="nav-item active" aria-current="page"><span aria-hidden="true">↗</span>Auto-run<span class="nav-pill">01</span></a>
-      <a href="/swagger" class="nav-item"><span aria-hidden="true">⌘</span>API reference<span aria-hidden="true" class="external">↗</span></a>
+      <a href="/ui/auto-run" data-route class="nav-item active" aria-current="page"><span aria-hidden="true">↗</span>Auto Run<span class="nav-pill">01</span></a>
+      <a href="/swagger" class="nav-item"><span aria-hidden="true">⌘</span>API Reference</a>
     </nav>
-    <div class="sidebar-bottom"><span class="status-dot"></span>UNIFIED GATEWAY<div>Historical processing</div></div>
   </aside>
   <div class="workspace">
     <header class="topbar">
-      <div class="breadcrumb">Rules Console <span>/</span> <strong>Auto-run</strong></div>
-      <div class="top-meta"><span class="status-dot"></span><span id="connection-state">Connecting</span><span class="environment-pill">SINGLE INSTANCE</span></div>
+      <div class="breadcrumb">Flarules <span>/</span> <strong>Auto Run</strong></div>
+      <div class="top-meta"><span class="status-dot"></span><span id="connection-state">Connecting</span></div>
     </header>
     <main id="main" tabindex="-1">
       <div id="app"></div>
       <noscript><div class="notice error">Enable JavaScript to configure and monitor auto-runs.</div></noscript>
     </main>
-    <footer>RULES CONSOLE <span>Prepare carefully. Process precisely.</span><span class="footer-end">Historical auto-run</span></footer>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 </body>

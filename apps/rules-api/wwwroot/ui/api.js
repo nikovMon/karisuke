@@ -43,6 +43,7 @@ export const api = {
   run: id => request(`/auto-runs/${encodeURIComponent(id)}`),
   items: (id, from, size, outcome) => request(`/auto-runs/${encodeURIComponent(id)}/items?from=${from}&size=${size}${outcome ? `&outcome=${encodeURIComponent(outcome)}` : ''}`),
   start: id => request(`/auto-runs/${encodeURIComponent(id)}/start`, { method: 'POST' }),
+  rerun: id => request(`/auto-runs/${encodeURIComponent(id)}/rerun`, { method: 'POST' }),
   cancel: id => request(`/auto-runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
   publication: (id, body) => request(`/auto-runs/${encodeURIComponent(id)}/publication`, { method: 'PATCH', body })
 };

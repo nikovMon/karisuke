@@ -6,19 +6,15 @@ public sealed class ElasticProviderOptions
     public const string SectionName = "AutoRun:Provider";
     public string BaseUrl { get; set; } = "";
     public string TableEntitiesPath { get; set; } = "/ErisImages/v2.0/ErisImages/Images/TableEntities";
-    public string SourceTimeZoneId { get; set; } = "Asia/Jerusalem";
     public int TimeoutSeconds { get; set; } = 30;
-    public int MaxResponseBytes { get; set; } = 16 * 1024 * 1024;
     public Dictionary<string, string> Headers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-    public bool StringEncodedNumbers { get; set; }
-    public bool StringEncodedBooleans { get; set; }
     public ProviderRequestFields RequestFields { get; set; } = new();
     public ProviderResponseFields ResponseFields { get; set; } = new();
 }
 
 /// <summary>
-/// These aliases are provisional deployment defaults. The supplied working request confirms
-/// SENSOR and geo, not the case of every other provider field.
+/// SENSOR, geo, date and CREATED are confirmed request aliases. Other aliases remain provisional
+/// deployment defaults; response property names are configured separately.
 /// </summary>
 public sealed class ProviderRequestFields
 {
@@ -30,7 +26,7 @@ public sealed class ProviderRequestFields
     public string SortieId { get; set; } = "SORTIE";
     public string IsRealtime { get; set; } = "ISREALTIME";
     public string CreatedTime { get; set; } = "CREATED";
-    public string PhotoTime { get; set; } = "PHOTOTIME";
+    public string PhotoTime { get; set; } = "date";
     public string Resolution { get; set; } = "RESOLUTION";
     public string Geometry { get; set; } = "geo";
     public string SortDate { get; set; } = "date";

@@ -13,11 +13,11 @@ const playwright = await import(process.env.PLAYWRIGHT_MODULE
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../apps/rules-api/wwwroot/ui');
 const screenshots = await fs.mkdtemp(path.join(os.tmpdir(), 'auto-run-ui-qa-'));
 const options = {
-  enabled: true, defaults: { publication: { batchSize: 10, delayMs: 1000 }, minOverlays: 0 },
+  enabled: true, defaults: { publication: { batchSize: 10, delayMs: 1000 }, minOverlays: 0, filterMaxOverlays: 100 },
   limits: { batchSize: { min: 1, max: 100 }, delayMs: { min: 0, max: 60000 }, maxSelectedOverlays: 100000,
     maxScannedRecords: 1000000, maxCandidates: 200000, payloadBudgetBytes: 536870912,
     readyLifetimeMinutes: 30, summaryLifetimeMinutes: 60, maxTargets: 100 },
-  providerTimeZone: 'Asia/Jerusalem', singleInstance: true
+  singleInstance: true
 };
 const rules = Array.from({ length: 11 }, (_, i) => ({
   _id: `rule-${i + 1}`, ruleName: i === 0 ? 'Urban detail' : i === 1 ? 'Archive coverage' : `Rule ${i + 1}`,
@@ -50,20 +50,24 @@ function holdRulePage(pipeline, offset) {
 }
 const requests = [];
 const runs = new Map();
+const previewRequests = new Map();
+let rerunFailure = false;
+let rerunGate = null;
 const reads = new Map();
 let runSequence = 0;
 let pipelineFailure = false;
 let pipelineGate = null;
 function makeRun(body) {
   const now = new Date();
-  const direct = body.source.mode === 'OverlayIds' && !body.targets?.length;
-  const selected = direct ? Math.min(body.source.overlayIds.length, body.maxOverlays ?? body.source.overlayIds.length) : 25;
+  const directIds = body.source.mode === 'OverlayIds' && !body.targets?.length;
+  const direct = ['OverlayIds', 'Filters'].includes(body.source.mode) && !body.targets?.length;
+  const selected = directIds ? Math.min(body.source.overlayIds.length, body.maxOverlays ?? body.source.overlayIds.length) : 25;
   const run = {
     id: `run-${++runSequence}`, state: 'Preparing', createdAt: now.toISOString(),
     readyAt: null, startedAt: null, finishedAt: null, expiresAt: new Date(+now + 1800000).toISOString(),
-    sourceMode: body.source.mode, minOverlays: body.minOverlays, maxOverlays: body.maxOverlays ?? (direct ? selected : 200),
-    overlayIds: direct ? body.source.overlayIds.slice(0, selected) : null,
-    shortfall: 0, counters: { scanned: direct ? body.source.overlayIds.length : 162, invalid: direct ? 0 : 2,
+    sourceMode: body.source.mode, minOverlays: body.minOverlays, maxOverlays: body.maxOverlays ?? (directIds ? selected : direct ? options.defaults.filterMaxOverlays : 200),
+    overlayIds: directIds ? body.source.overlayIds.slice(0, selected) : null,
+    shortfall: 0, counters: { scanned: directIds ? body.source.overlayIds.length : 162, invalid: direct ? 0 : 2,
       duplicates: direct ? 0 : 4, observedMatches: direct ? 0 : 80, selected,
       confirmed: 0, failed: 0, uncertain: 0, inFlight: 0, remaining: selected },
     targets: (body.targets ?? []).map(t => ({ ...t, ruleName: rules.find(r => r._id === t.ruleId).ruleName,
@@ -73,10 +77,11 @@ function makeRun(body) {
     publication: body.publication, activePublication: body.publication, publicationChangePending: false,
     sourceExhausted: direct, stoppedReason: direct ? null : 'Scan limit',
     warnings: direct ? [] : ['Observed counts cover scanned candidates only.'], errors: [],
-    queries: direct ? [] : [{ filter: { logical_operators: { AND: [{ match: { SENSOR: { type: 'IN', values: ['SENSOR_A'] } } }] } } }],
+    queries: directIds ? [] : [{ filter: { logical_operators: { AND: [{ match: { SENSOR: { type: 'IN', values: ['SENSOR_A'] } } }] } } }],
     confirmedPerSecond: 0
   };
   runs.set(run.id, run);
+  previewRequests.set(run.id, structuredClone(body));
   return run;
 }
 const server = http.createServer(async (req, res) => {
@@ -116,7 +121,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/auto-runs/preview') return json(makeRun(body), 202);
     if (url.pathname === '/auto-runs') return json([...runs.values()]);
-    const match = url.pathname.match(/^\/auto-runs\/([^/]+)(?:\/(items|start|cancel|publication))?$/);
+    const match = url.pathname.match(/^\/auto-runs\/([^/]+)(?:\/(items|start|cancel|publication|rerun))?$/);
     if (match) {
       const run = runs.get(match[1]);
       if (!run) return json({ error: 'Run not found.' }, 404);
@@ -124,6 +129,11 @@ const server = http.createServer(async (req, res) => {
         reads.set(run.id, (reads.get(run.id) ?? 0) + 1);
         if (run.state === 'Preparing') { run.state = 'Ready'; run.readyAt = new Date().toISOString(); }
         return json(run);
+      }
+      if (match[2] === 'rerun') {
+        await rerunGate;
+        if (rerunFailure) return json({ error: 'Another preparation is already active.' }, 409);
+        return json(makeRun({ ...structuredClone(previewRequests.get(run.id)), publication: { ...run.publication } }), 202);
       }
       if (match[2] === 'items') {
         let items = Array.from({ length: run.counters.selected }, (_, i) => ({
@@ -170,6 +180,13 @@ try {
   page.on('pageerror', error => pageErrors.push(error.message));
   await page.goto(`${origin}/ui`);
   await page.locator('#prepare-button:not(:disabled)').waitFor();
+  assert.equal(await page.title(), 'Auto Run · Flarules');
+  await page.getByRole('link', { name: 'Flarules home' }).waitFor();
+  await page.getByRole('link', { name: 'Auto Run 01', exact: true }).waitFor();
+  await page.getByRole('link', { name: 'API Reference', exact: true }).waitFor();
+  assert.equal(await page.locator('#input-timezone').count(), 0, 'timezone is automatic, not selectable');
+  assert.equal(await page.locator('.environment-pill, .heading-mark, .sidebar-bottom, footer').count(), 0);
+  assert.ok(!(await page.locator('body').textContent()).includes('HISTORICAL PROCESSING'));
   for (const [name, batch, delay] of [['Sequential', '1', '1000'], ['Burst', '100', '0'], ['Balanced', '10', '1000']]) {
     const preset = page.locator('#publication-presets').getByRole('button', { name: new RegExp(`^${name}:`) });
     await preset.click();
@@ -193,12 +210,11 @@ try {
   assert.equal(await page.locator('[data-target-field="maxOverlays"]').count(), 2);
   await page.getByLabel('Minimum for Urban detail').fill('25');
   await page.getByLabel('Maximum for Urban detail').fill('30');
-  await page.locator('[name="source-mode"][value="Filters"]').check();
+  await page.locator('#filter-details summary').click();
   await page.locator('#sensor-names').fill('SENSOR_A, SENSOR_A');
   await page.locator('#is-realtime').selectOption('false');
   await page.locator('#resolution-min').fill('0.3');
   await page.locator('#resolution-max').fill('0.3');
-  await page.locator('#input-timezone').selectOption('utc');
   await page.locator('#created-from').fill('2026-10-01T09:30');
   await page.locator('#photo-to').fill('2026-10-20T12:00');
   await page.locator('#area-wkt').fill('POLYGON ((34 31, 35 31, 35 32, 34 31))');
@@ -206,10 +222,11 @@ try {
   await page.waitForURL('**/ui/auto-run/runs/run-1');
   await page.locator('#start-run:not([hidden])').waitFor();
   const preview = requests.find(r => r.path === '/auto-runs/preview').body;
-  assert.equal(preview.source.mode, 'Filters');
+  assert.equal(preview.source.mode, 'Rules');
   assert.equal(preview.source.filters.isRealtime, false);
   assert.deepEqual(preview.source.filters.sensorNames, ['SENSOR_A']);
-  assert.equal(preview.source.filters.createdTime.from, '2026-10-01T09:30:00.000Z');
+  assert.equal(preview.source.filters.createdTime.from, '2026-10-01T06:30:00.000Z');
+  assert.equal(preview.source.filters.photoTime.to, '2026-10-20T09:00:00.000Z');
   assert.deepEqual(preview.source.filters.resolution, { min: 0.3, max: 0.3 });
   assert.equal(preview.targets[0].minOverlays, 25);
   assert.equal(preview.targets[1].ruleId, 'rule-2');
@@ -301,7 +318,6 @@ try {
   assert.deepEqual(requests.filter(r => r.path === '/auto-runs/preview').at(-1).body.source, { mode: 'Rules' });
   await page.getByText('← Back to configuration', { exact: true }).click();
   await page.locator('[name="source-mode"][value="Filters"]').check();
-  await page.locator('#input-timezone').selectOption('local');
   await page.locator('#created-from').fill('2026-10-25T01:30');
   await page.locator('#prepare-button').click();
   await page.locator('#form-error').waitFor({ state: 'visible' });
@@ -506,7 +522,7 @@ try {
   await directPage.goto(`${origin}/ui/auto-run`);
   await directPage.locator('#prepare-button:not(:disabled)').waitFor();
   const directStart = requests.filter(r => r.path === '/auto-runs/preview').length;
-  for (const mode of ['Rules', 'Filters']) {
+  for (const mode of ['Rules']) {
     await directPage.locator(`[name="source-mode"][value="${mode}"]`).check();
     await directPage.locator('#prepare-button').click();
     await directPage.locator('#form-error').filter({ hasText: 'Select at least one pipeline rule' }).waitFor();
@@ -514,7 +530,7 @@ try {
   await directPage.locator('[name="source-mode"][value="OverlayIds"]').check();
   await directPage.locator('#prepare-button').click();
   await directPage.locator('#form-error').filter({ hasText: 'Enter at least one overlay ID' }).waitFor();
-  assert.equal(requests.filter(r => r.path === '/auto-runs/preview').length, directStart, 'rules and filters still need targets; direct mode needs IDs');
+  assert.equal(requests.filter(r => r.path === '/auto-runs/preview').length, directStart, 'rules need targets; direct mode needs IDs');
   await directPage.locator('[name="id-processing"][value="rules"]').check();
   await directPage.locator('#pipeline-select').selectOption('imagery');
   await directPage.locator('[name="rule-choice"]').first().check();
@@ -632,6 +648,127 @@ try {
   await outagePage.close();
   pipelineFailure = false;
 
+  // Filters are an independent source: retained target drafts cannot affect payload or validation.
+  const filtersPage = await context.newPage();
+  filtersPage.on('pageerror', error => pageErrors.push(error.message));
+  await filtersPage.goto(`${origin}/ui/auto-run`);
+  await filtersPage.locator('#prepare-button:not(:disabled)').waitFor();
+  await filtersPage.locator('#pipeline-select').selectOption('imagery');
+  await filtersPage.locator('[name="rule-choice"]').first().check();
+  await filtersPage.locator('#add-rules').click();
+  await filtersPage.getByLabel('Maximum for Urban detail').fill('');
+  await filtersPage.locator('[name="source-mode"][value="Filters"]').check();
+  assert.ok(await filtersPage.locator('#rule-selection').isHidden());
+  assert.ok(await filtersPage.getByLabel('Maximum for Urban detail').isDisabled());
+  assert.equal(await filtersPage.locator('#overall-max').getAttribute('placeholder'), 'Default: 100 overlays');
+  assert.ok(await filtersPage.locator('#preview-form').evaluate(form => form.checkValidity()), 'hidden invalid rule quota cannot block filters');
+  await filtersPage.locator('#sensor-names').fill('ar');
+  await filtersPage.locator('#resolution-min').fill('1');
+  await filtersPage.locator('#resolution-max').fill('20');
+  await filtersPage.locator('#photo-from').fill('2026-10-04T19:40');
+  await filtersPage.locator('#photo-to').fill('2026-10-05T19:40');
+  await filtersPage.locator('#overall-min').fill('2');
+  await filtersPage.locator('#overall-max').fill('25');
+  await filtersPage.locator('#batch-size').fill('6');
+  await filtersPage.locator('#delay-ms').fill('250');
+  await filtersPage.evaluate(() => scrollTo(0, 0));
+  await filtersPage.screenshot({ path: path.join(screenshots, 'flarules-filters-desktop.png'), fullPage: true });
+  await filtersPage.setViewportSize({ width: 390, height: 844 });
+  await filtersPage.evaluate(() => scrollTo(0, 0));
+  await filtersPage.screenshot({ path: path.join(screenshots, 'flarules-filters-mobile.png'), fullPage: true });
+  assert.ok(await filtersPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'filter-only configuration fits mobile');
+  await filtersPage.locator('#prepare-button').click();
+  await filtersPage.locator('#start-run:not([hidden])').waitFor();
+  const filtersRunId = new URL(filtersPage.url()).pathname.split('/').pop();
+  const filtersRequest = requests.filter(r => r.path === '/auto-runs/preview').at(-1).body;
+  assert.deepEqual(filtersRequest, {
+    source: { mode: 'Filters', filters: { sensorNames: ['ar'], resolution: { min: 1, max: 20 },
+      photoTime: { from: '2026-10-04T16:40:00.000Z', to: '2026-10-05T16:40:00.000Z' } } },
+    targets: [], minOverlays: 2, maxOverlays: 25, publication: { batchSize: 6, delayMs: 250 }
+  });
+  assert.ok(await filtersPage.locator('#run-target-table').isHidden());
+  assert.ok(await filtersPage.locator('#direct-run-note').isVisible());
+  assert.match(await filtersPage.locator('#provider-queries').textContent(), /logical_operators/);
+  assert.equal(await filtersPage.locator('#run-items').getByText('Gateway rules', { exact: true }).count(), 20);
+  await filtersPage.locator('#start-run').click();
+  await filtersPage.locator('#run-state').getByText('Publishing', { exact: true }).waitFor();
+  assert.ok(await filtersPage.locator('#rerun-run').isHidden(), 'active jobs cannot be rerun');
+  await filtersPage.locator('#run-batch-size').fill('9');
+  await filtersPage.locator('#run-delay-ms').fill('500');
+  await filtersPage.locator('#update-publication').click();
+  await filtersPage.locator('#publication-status').filter({ hasText: 'Pending next batch' }).waitFor();
+  await filtersPage.locator('#cancel-run').click();
+  await filtersPage.locator('#run-state').getByText('Cancelled', { exact: true }).waitFor();
+  await filtersPage.reload();
+  await filtersPage.locator('#rerun-run:not([hidden])').waitFor();
+  assert.equal(await filtersPage.title(), 'Run details · Flarules');
+  const postsBeforeRerun = requests.filter(r => r.path.endsWith('/start')).length;
+  let releaseRerun;
+  rerunGate = new Promise(resolve => { releaseRerun = resolve; });
+  pendingResponses.add(releaseRerun);
+  await filtersPage.locator('#rerun-run').focus();
+  await filtersPage.keyboard.press('Enter');
+  await filtersPage.locator('#rerun-run:disabled').waitFor();
+  await filtersPage.evaluate(() => document.getElementById('rerun-run').dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  assert.equal(requests.filter(r => r.path === `/auto-runs/${filtersRunId}/rerun`).length, 1, 'repeat clicks cannot create duplicate previews');
+  releaseRerun();
+  pendingResponses.delete(releaseRerun);
+  rerunGate = null;
+  await filtersPage.waitForURL(url => !url.pathname.endsWith(`/${filtersRunId}`));
+  await filtersPage.locator('#start-run:not([hidden])').waitFor();
+  const filtersRerunId = new URL(filtersPage.url()).pathname.split('/').pop();
+  assert.notEqual(filtersRerunId, filtersRunId);
+  assert.deepEqual(previewRequests.get(filtersRerunId), { ...filtersRequest, publication: { batchSize: 9, delayMs: 500 } });
+  assert.equal(requests.filter(r => r.path.endsWith('/start')).length, postsBeforeRerun, 'rerun prepares only; Start remains explicit');
+  assert.equal(await filtersPage.locator('#run-state').textContent(), 'Ready');
+  await filtersPage.evaluate(() => scrollTo(0, 0));
+  await filtersPage.screenshot({ path: path.join(screenshots, 'flarules-rerun-mobile.png'), fullPage: true });
+  assert.ok(await filtersPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'rerun actions fit mobile');
+  rerunFailure = true;
+  await filtersPage.locator('#rerun-run').click();
+  await filtersPage.locator('#run-error').filter({ hasText: 'Another preparation is already active.' }).waitFor();
+  assert.ok(filtersPage.url().endsWith(`/${filtersRerunId}`), 'rerun failures keep the original run visible');
+  assert.ok(await filtersPage.locator('#rerun-run').isEnabled(), 'rerun failure restores the action');
+  rerunFailure = false;
+  await filtersPage.locator('#rerun-run').click();
+  await filtersPage.waitForURL(url => !url.pathname.endsWith(`/${filtersRerunId}`));
+  await filtersPage.locator('#start-run:not([hidden])').waitFor();
+  assert.ok(await filtersPage.locator('#run-error').isHidden());
+  await filtersPage.close();
+
+  // Rerun works from retained rule/ID runs after a full reload, without configuration drafts.
+  const rerunPage = await context.newPage();
+  rerunPage.on('pageerror', error => pageErrors.push(error.message));
+  for (const sourceId of ['run-1', 'run-2']) {
+    await rerunPage.goto(`${origin}/ui/auto-run/runs/${sourceId}`);
+    await rerunPage.locator('#rerun-run:not([hidden])').waitFor();
+    await rerunPage.locator('#rerun-run').click();
+    await rerunPage.waitForURL(url => !url.pathname.endsWith(`/${sourceId}`));
+    await rerunPage.locator('#start-run:not([hidden])').waitFor();
+    const rerunId = new URL(rerunPage.url()).pathname.split('/').pop();
+    assert.deepEqual(previewRequests.get(rerunId), { ...previewRequests.get(sourceId), publication: runs.get(sourceId).publication });
+    assert.equal(await rerunPage.locator('#run-state').textContent(), 'Ready');
+    assert.equal(await rerunPage.locator('#direct-run-note').isVisible(), sourceId === 'run-2');
+  }
+  await rerunPage.close();
+
+  pipelineFailure = true;
+  const filterOutagePage = await context.newPage();
+  filterOutagePage.on('pageerror', error => pageErrors.push(error.message));
+  await filterOutagePage.goto(`${origin}/ui/auto-run`);
+  await filterOutagePage.locator('#connection-state').filter({ hasText: 'API connected' }).waitFor();
+  await filterOutagePage.locator('[name="source-mode"][value="Filters"]').check();
+  assert.ok(await filterOutagePage.locator('#prepare-button').isEnabled(), 'filters need no pipeline discovery');
+  await filterOutagePage.locator('#prepare-button').click();
+  await filterOutagePage.locator('#start-run:not([hidden])').waitFor();
+  const broadFilters = requests.filter(r => r.path === '/auto-runs/preview').at(-1).body;
+  assert.deepEqual(broadFilters.source, { mode: 'Filters' });
+  assert.deepEqual(broadFilters.targets, []);
+  assert.equal(broadFilters.maxOverlays, undefined, 'empty filters can use the bounded server default');
+  assert.match(await filterOutagePage.locator('#direct-run-limits').textContent(), /Maximum: 100 overlays/);
+  await filterOutagePage.close();
+  pipelineFailure = false;
+
   options.enabled = false;
   const disabledPage = await context.newPage();
   disabledPage.on('pageerror', error => pageErrors.push(error.message));
@@ -656,7 +793,12 @@ try {
     'Overlay IDs defaults to direct gateway mode with no hidden targets or filters', 'optional selected-rule matching for IDs',
     'direct mode disables hidden validation and preserves rule/filter drafts', 'direct preview limits and publication controls',
     'direct monitor, history, deep links and mobile layout', 'direct preparation survives pending and failed pipeline discovery',
-    'rule modes still require targets and direct mode still requires enabled options and IDs'], screenshots }, null, 2));
+    'rules mode requires targets and direct mode requires enabled options and IDs',
+    'Flarules branding with reduced shell and automatic local-to-UTC timestamps',
+    'independent filters omit hidden targets, validate times, preserve bounded limits and bypass pipeline discovery',
+    'rerun restores original filters and latest publication settings without auto-publishing',
+    'rerun duplicate-click protection, conflict recovery, keyboard and mobile layout',
+    'rule and overlay-ID reruns work from retained deep links without configuration drafts'], screenshots }, null, 2));
 } finally {
   for (const release of pendingResponses) release();
   if (browser) await browser.close();

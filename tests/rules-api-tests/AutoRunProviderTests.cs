@@ -35,7 +35,7 @@ public sealed class AutoRunProviderTests
         var range = Find(clauses, "range", "RESOLUTION")[0];
         Assert.Equal(0.4, range.GetProperty("gte").GetDouble());
         Assert.Equal(0.7, range.GetProperty("lte").GetDouble());
-        Assert.Equal("2026-10-19T07:00:00.0000000+00:00",
+        Assert.Equal("2026-10-19T07:00:00.000Z",
             Find(clauses, "range", "CREATED")[0].GetProperty("gte").GetString());
         Assert.Equal(Area, Find(clauses, "geo_intersect", "geo")[0].GetString());
         Assert.Equal("desc", query.GetProperty("sort").GetProperty("date").GetString());
@@ -69,32 +69,51 @@ public sealed class AutoRunProviderTests
         Assert.Equal("Sensor", Find(second, "match", "REGISTRATIONQUALITY")[0].GetString());
         Assert.All(queries, query =>
         {
-            Assert.DoesNotContain("PHOTOTIME", query.GetRawText(), StringComparison.Ordinal);
+            Assert.DoesNotContain("\"date\"", query.GetProperty("filter").GetRawText(), StringComparison.Ordinal);
             Assert.DoesNotContain("strip", query.GetRawText(), StringComparison.Ordinal);
             Assert.DoesNotContain("\"OR\"", query.GetRawText(), StringComparison.Ordinal);
         });
     }
 
-    [Fact]
-    public void Configuration_changes_request_aliases_and_leaf_encodings_only()
+    [Theory]
+    [InlineData("date", "CREATED", false)]
+    [InlineData("DATE", "created", true)]
+    [InlineData("date", "updated", false)]
+    public void Request_aliases_preserve_native_numbers_booleans_and_UTC_date_ranges(
+        string photoField, string createdField, bool realtime)
     {
         var options = new ElasticProviderOptions
         {
-            StringEncodedNumbers = true, StringEncodedBooleans = true,
-            RequestFields = new() { Resolution = "Resolution", IsRealtime = "IsRealTime", ModeSar = "ModeSAR" }
+            RequestFields = new()
+            {
+                Resolution = "Resolution", IsRealtime = "IsRealTime", ModeSar = "ModeSAR",
+                PhotoTime = photoField, CreatedTime = createdField
+            }
         };
         var builder = new ProviderQueryBuilder(Options.Create(options));
         var query = Assert.Single(builder.Build(new()
         {
             Mode = AutoRunSourceMode.Rules,
-            Filters = new() { IsRealtime = false, Resolution = new() { Min = 0.5 } }
+            Filters = new()
+            {
+                IsRealtime = realtime, Resolution = new() { Min = 0.5 },
+                PhotoTime = new() { From = "2026-10-04T19:40:00.123+03:00", To = "2026-10-04T16:43:00.999Z" },
+                CreatedTime = new() { From = "2026-10-05T05:40:00Z", To = "2026-10-05T01:40:00.456-04:00" }
+            }
         }, [new() { Match = new() { ModeSar = ["strip"] } }]));
         var clauses = Clauses(query);
-        Assert.Equal("false", Find(clauses, "match", "IsRealTime")[0].GetString());
+        Assert.Equal(realtime ? JsonValueKind.True : JsonValueKind.False, Find(clauses, "match", "IsRealTime")[0].ValueKind);
         var range = Find(clauses, "range", "Resolution")[0];
         Assert.Equal(JsonValueKind.Object, range.ValueKind);
-        Assert.Equal("0.5", range.GetProperty("gte").GetString());
+        Assert.Equal(JsonValueKind.Number, range.GetProperty("gte").ValueKind);
+        Assert.Equal(0.5, range.GetProperty("gte").GetDouble());
         Assert.Equal("strip", Find(clauses, "match", "ModeSAR")[0].GetString());
+        Assert.Equal("2026-10-04T16:40:00.123Z", Find(clauses, "range", photoField)[0].GetProperty("gte").GetString());
+        Assert.Equal("2026-10-04T16:43:00.999Z", Find(clauses, "range", photoField)[0].GetProperty("lte").GetString());
+        Assert.Equal("2026-10-05T05:40:00.000Z", Find(clauses, "range", createdField)[0].GetProperty("gte").GetString());
+        Assert.Equal("2026-10-05T05:40:00.456Z", Find(clauses, "range", createdField)[0].GetProperty("lte").GetString());
+        Assert.Equal("PhotoTime", options.ResponseFields.PhotoTime);
+        Assert.Equal("Created", options.ResponseFields.CreatedTime);
         Assert.Equal("Resolution", options.ResponseFields.Resolution);
     }
 
@@ -221,13 +240,31 @@ public sealed class AutoRunProviderTests
         var provider = Provider(request =>
         {
             Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("application/json-patch+json", request.Content!.Headers.ContentType!.MediaType);
             bodies.Add(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            using var body = JsonDocument.Parse(bodies[^1]);
+            var clauses = Clauses(body.RootElement);
+            Assert.Equal("ar", Find(clauses, "match", "SENSOR")[0].GetString());
+            Assert.Equal(1, Find(clauses, "range", "RESOLUTION")[0].GetProperty("gte").GetDouble());
+            Assert.Equal(20, Find(clauses, "range", "RESOLUTION")[0].GetProperty("lte").GetDouble());
+            var photoRange = Find(clauses, "range", "date")[0];
+            Assert.Equal("2026-10-04T16:40:00.000Z", photoRange.GetProperty("gte").GetString());
+            Assert.Equal("2026-10-05T16:43:00.999Z", photoRange.GetProperty("lte").GetString());
+            Assert.DoesNotContain("PHOTOTIME", bodies[^1], StringComparison.Ordinal);
             calls++;
             return calls == 1
                 ? Json(new { entities_list = new object[] { Entity(), new { properties_list = new { } } }, next_page = "/next?searchAfter=cursor" })
                 : Json(new { entities_list = Array.Empty<object>(), next_page = "/next?searchAfter=cursor" });
         });
-        var query = JsonSerializer.SerializeToElement(new { filter = new { logical_operators = new { AND = Array.Empty<object>() } } });
+        var query = Assert.Single(new ProviderQueryBuilder(Options.Create(new ElasticProviderOptions())).Build(new()
+        {
+            Mode = AutoRunSourceMode.Filters,
+            Filters = new()
+            {
+                SensorNames = ["ar"], Resolution = new() { Min = 1, Max = 20 },
+                PhotoTime = new() { From = "2026-10-04T19:40:00+03:00", To = "2026-10-05T16:43:00.999Z" }
+            }
+        }, []));
         var first = await provider.SearchPageAsync(query, null, CancellationToken.None);
         Assert.Equal(2, first.Items.Count);
         Assert.NotNull(first.Items[0].Overlay);
@@ -279,11 +316,34 @@ public sealed class AutoRunProviderTests
     }
 
     [Fact]
-    public async Task Response_byte_limit_is_enforced()
+    public async Task Declared_response_over_16_MiB_is_rejected_before_reading()
     {
-        var options = Config(); options.MaxResponseBytes = 10;
-        await Assert.ThrowsAsync<ElasticProviderException>(() =>
-            Provider(_ => Json(Entity()), options).GetAsync("1", CancellationToken.None));
+        using var stream = new RepeatingResponseStream(16 * 1024 * 1024 + 1);
+        var content = new StreamContent(stream);
+        content.Headers.ContentLength = 16 * 1024 * 1024 + 1;
+
+        var error = await Assert.ThrowsAsync<ElasticProviderException>(() =>
+            Provider(_ => new(HttpStatusCode.OK) { Content = content }).GetAsync("1", CancellationToken.None));
+
+        Assert.Contains("16 MiB", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, stream.BytesRead);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(1L)]
+    public async Task Streaming_response_over_16_MiB_is_rejected_even_without_a_reliable_length(long? declaredLength)
+    {
+        const int responseLength = 16 * 1024 * 1024 + 1;
+        using var stream = new RepeatingResponseStream(responseLength);
+        var content = new StreamContent(stream);
+        content.Headers.ContentLength = declaredLength;
+
+        var error = await Assert.ThrowsAsync<ElasticProviderException>(() =>
+            Provider(_ => new(HttpStatusCode.OK) { Content = content }).GetAsync("1", CancellationToken.None));
+
+        Assert.Contains("16 MiB", error.Message, StringComparison.Ordinal);
+        Assert.Equal(responseLength, stream.BytesRead);
     }
 
     private static JsonElement[] Clauses(JsonElement query) =>
@@ -314,5 +374,35 @@ public sealed class AutoRunProviderTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             Task.FromResult(response(request));
+    }
+
+    // Produces a large non-seekable response without allocating a second large payload in the test.
+    private sealed class RepeatingResponseStream(int size) : Stream
+    {
+        public int BytesRead { get; private set; }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => BytesRead; set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var read = Math.Min(count, size - BytesRead);
+            buffer.AsSpan(offset, read).Fill((byte)' ');
+            BytesRead += read;
+            return read;
+        }
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var read = Math.Min(buffer.Length, size - BytesRead);
+            buffer.Span[..read].Fill((byte)' ');
+            BytesRead += read;
+            return ValueTask.FromResult(read);
+        }
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }
