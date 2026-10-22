@@ -144,6 +144,8 @@ public static class TelemetryAttributeNames
     public const string RulesMissedPhotoAgeCount = "unified_gateway.rules.missed.photo_age.count";
     public const string RulesMissedSensorIds = "unified_gateway.rules.missed.sensor.ids";
     public const string RulesMissedSensorCount = "unified_gateway.rules.missed.sensor.count";
+    public const string RulesMissedSensorTypeIds = "unified_gateway.rules.missed.sensor_type.ids";
+    public const string RulesMissedSensorTypeCount = "unified_gateway.rules.missed.sensor_type.count";
     public const string RulesMissedResolutionIds = "unified_gateway.rules.missed.resolution.ids";
     public const string RulesMissedResolutionCount = "unified_gateway.rules.missed.resolution.count";
     public const string RulesMissedModeSarIds = "unified_gateway.rules.missed.mode_sar.ids";

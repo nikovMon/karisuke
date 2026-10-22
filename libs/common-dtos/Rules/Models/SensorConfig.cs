@@ -13,6 +13,7 @@ public sealed class SensorConfig
     [JsonPropertyName("gridTypes")]
     public List<string> GridTypes { get; set; } = [];
 
+    /// <summary>A sensor with no qualities and no grid types is valid: it accepts that sensor with any of them.</summary>
     public static IEnumerable<string> ValidateCollection(IReadOnlyList<SensorConfig> sensors)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
@@ -44,13 +45,6 @@ public sealed class SensorConfig
                 sensor.GridTypes.Any(string.IsNullOrWhiteSpace))
             {
                 yield return $"sensors[{i}].gridTypes contains empty or whitespace values";
-            }
-
-            if (sensor is not null &&
-                sensor.RegistrationQualities is { Count: 0 } or null &&
-                sensor.GridTypes is { Count: 0 } or null)
-            {
-                yield return $"sensors[{i}] must have at least one registrationQuality or gridType";
             }
         }
     }

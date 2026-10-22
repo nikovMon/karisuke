@@ -14,6 +14,7 @@ public sealed class RuleMatcher(TimeProvider timeProvider)
     {
         var registrationQualityMask = RegistrationQualityMask.From(input.RegistrationQuality);
         var photoAge = timeProvider.GetUtcNow() - input.PhotoTime;
+        var sensorType = string.IsNullOrWhiteSpace(input.SensorType) ? null : input.SensorType;
         var matches = new List<RuleMatchResult>();
         var misses = new List<RuleMiss>();
 
@@ -26,6 +27,10 @@ public sealed class RuleMatcher(TimeProvider timeProvider)
             else if (!MatchesSensor(input.SensorName, registrationQualityMask, input.GridType, rule))
             {
                 misses.Add(new RuleMiss(rule.Id, RuleMissReason.Sensor));
+            }
+            else if (!IsAllowed(sensorType, rule.SensorTypes))
+            {
+                misses.Add(new RuleMiss(rule.Id, RuleMissReason.SensorType));
             }
             else if (!MatchesResolution(input.BestResolution, rule))
             {
