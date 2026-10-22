@@ -39,7 +39,7 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
                 var common = FilterClauses(source.Filters);
                 var match = rule.Match;
                 if (match?.Resolution is { } resolution)
-                    AddRange(common, _options.RequestFields.Resolution, Number(resolution.Min), Number(resolution.Max));
+                    AddRange(common, _options.RequestFields.Resolution, resolution.Min, resolution.Max);
                 if (match?.LocationWkt is { } area)
                     common.Add(Clause("geo_intersect", _options.RequestFields.Geometry, new object[] { area }));
                 if (match?.ModeSar is { Count: > 0 } modes && !string.IsNullOrWhiteSpace(_options.RequestFields.ModeSar))
@@ -143,12 +143,9 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
         AddList(fields.RegistrationQuality, filters.RegistrationQualities);
         AddList(fields.SortieId, filters.SortieIds);
         if (filters.IsRealtime is { } realtime)
-            clauses.Add(Clause("match", fields.IsRealtime, new[]
-            {
-                _options.StringEncodedBooleans ? (object)(realtime ? "true" : "false") : realtime
-            }));
+            clauses.Add(Clause("match", fields.IsRealtime, new[] { realtime }));
         if (filters.Resolution is { } resolution)
-            AddRange(clauses, fields.Resolution, Number(resolution.Min), Number(resolution.Max));
+            AddRange(clauses, fields.Resolution, resolution.Min, resolution.Max);
         AddTime(fields.CreatedTime, filters.CreatedTime);
         AddTime(fields.PhotoTime, filters.PhotoTime);
         if (filters.Wkt is { } area)
@@ -167,9 +164,6 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
                 AddRange(clauses, field, Timestamp(range.From), Timestamp(range.To));
         }
     }
-
-    private object? Number(double? value) => value is null ? null :
-        _options.StringEncodedNumbers ? value.Value.ToString("R", CultureInfo.InvariantCulture) : value.Value;
 
     private static string? Timestamp(string? value) => value is null ? null :
         ProviderDates.TryExplicitOffset(value, out var time)

@@ -6,18 +6,14 @@ public sealed class ElasticProviderOptions
     public const string SectionName = "AutoRun:Provider";
     public string BaseUrl { get; set; } = "";
     public string TableEntitiesPath { get; set; } = "/ErisImages/v2.0/ErisImages/Images/TableEntities";
-    public string SourceTimeZoneId { get; set; } = "Asia/Jerusalem";
     public int TimeoutSeconds { get; set; } = 30;
-    public int MaxResponseBytes { get; set; } = 16 * 1024 * 1024;
     public Dictionary<string, string> Headers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-    public bool StringEncodedNumbers { get; set; }
-    public bool StringEncodedBooleans { get; set; }
     public ProviderRequestFields RequestFields { get; set; } = new();
     public ProviderResponseFields ResponseFields { get; set; } = new();
 }
 
 /// <summary>
-/// SENSOR, geo and date are confirmed request aliases. Other aliases remain provisional
+/// SENSOR, geo, date and CREATED are confirmed request aliases. Other aliases remain provisional
 /// deployment defaults; response property names are configured separately.
 /// </summary>
 public sealed class ProviderRequestFields

@@ -465,7 +465,7 @@ public sealed class AutoRunApiTests
         Assert.True(options.RootElement.GetProperty("singleInstance").GetBoolean());
         Assert.Equal(3, options.RootElement.GetProperty("defaults").GetProperty("publication").GetProperty("batchSize").GetInt32());
         Assert.Equal(100, options.RootElement.GetProperty("defaults").GetProperty("filterMaxOverlays").GetInt32());
-        Assert.Equal("Asia/Jerusalem", options.RootElement.GetProperty("providerTimeZone").GetString());
+        Assert.False(options.RootElement.TryGetProperty("providerTimeZone", out _));
         using var ui = await fixture.Client.GetAsync("/ui/auto-run");
         await AssertStatus(ui, HttpStatusCode.OK);
         using var response = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", Request(), AutoRunJson.Options);

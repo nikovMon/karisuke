@@ -204,11 +204,10 @@ Selection prioritizes overlays that help the most unmet target minimums, then fi
 | `AutoRun:ReadyLifetimeMinutes` | 30 | Time from readiness until an unstarted preview expires. |
 | `AutoRun:SummaryLifetimeMinutes` | 60 | Retention after a terminal state; payloads are released when the run becomes terminal. |
 | `AutoRun:MaxRetainedJobs` | 100 | Maximum retained previews and summaries on the instance. |
-| `AutoRun:Provider:MaxResponseBytes` | 16,777,216 | Maximum bytes in one provider response, including streamed responses. |
 
 Reaching a scan or candidate limit can produce a ready preview with `sourceExhausted: false`, a `stoppedReason` of `scanLimit` or `candidateLimit`, and a warning. It does not establish the source's total count or guarantee the newest overlays outside the scanned subset. Exceeding the retained payload budget fails preparation instead of creating a runnable partial preview. `sourceExhausted: true` means the adapter exhausted the supplied IDs or returned continuation chain; it is not a transactional snapshot of Elasticsearch.
 
-The payload budget counts serialized bytes, not total heap usage: object overhead and transient provider page buffers use additional memory. Terminal jobs release overlay payloads immediately; their retained requests, rule snapshots, and queries remain charged until summary expiry.
+The payload budget counts serialized bytes, not total heap usage: object overhead and transient provider page buffers use additional memory. Each provider response has a fixed internal limit of 16 MiB (16,777,216 bytes), including streamed responses. Terminal jobs release overlay payloads immediately; their retained requests, rule snapshots, and queries remain charged until summary expiry.
 
 ### Publication and outcomes
 
@@ -300,11 +299,13 @@ Different rule/sensor branches use separate AND queries. The adapter does not in
 | `SortDate` | `date` |
 | `ModeSar` | Unset; SAR mode is checked locally. |
 
-The provider photo-time search field is `date` (or `DATE`), distinct from the response property `PhotoTime`. All generated photo-time and creation-time bounds are converted to UTC and formatted with exactly three fractional digits and a `Z` suffix: `yyyy-MM-ddTHH:mm:ss.fffZ`. For example, `2026-10-04T19:40:00+03:00` becomes `2026-10-04T16:40:00.000Z`.
+The UI's **Photo taken from/to** bounds use the provider search field `date` (or `DATE` through `RequestFields.PhotoTime`), distinct from the response property `PhotoTime`. **Created from/to** bounds use `CREATED` by default; `RequestFields.CreatedTime` can select the provider's `created` or `updated` alias. These settings name the outbound query fields; they do not change the separately configured response fields, whose defaults remain `PhotoTime` and `Created`.
+
+All generated photo-time and creation-time bounds are converted to UTC and formatted with exactly three fractional digits and a `Z` suffix: `yyyy-MM-ddTHH:mm:ss.fffZ`. For example, `2026-10-04T19:40:00+03:00` becomes `2026-10-04T16:40:00.000Z`.
 
 **Deployment migration:** if configuration explicitly sets `AutoRun:Provider:RequestFields:PhotoTime` to `PHOTOTIME`, remove that override to use the corrected `date` default, or change it to `date`/`DATE`. This includes the environment variable `AutoRun__Provider__RequestFields__PhotoTime`. Existing explicit aliases take precedence over code defaults. Leave `ResponseFields:PhotoTime` as `PhotoTime` unless your provider response uses a different property.
 
-**Other request aliases and numeric/boolean encodings remain deployment assumptions.** Confirmed aliases are `SENSOR`, `geo`, and photo-time `date`, together with the logical grammar; not every alias above has been verified. Native JSON numbers and booleans are the defaults. Set `StringEncodedNumbers` or `StringEncodedBooleans` only when the deployed provider requires string values. Public API filters remain native numbers and booleans in either case.
+Other request aliases remain deployment assumptions. Confirmed aliases include `SENSOR`, `geo`, photo-time `date`/`DATE`, and the creation-time aliases above, together with the logical grammar; not every alias in the table has been verified. Requests always use native JSON numbers and booleans, such as `1`, `20`, and `false`.
 
 The response contract is separate from request aliases. Both GET and each batch entity contain `properties_list` and `geo.wkt`. These configured response mappings use the supplied example and confirmed provider property names:
 
@@ -325,9 +326,11 @@ The response contract is separate from request aliases. Both GET and each batch 
 | `properties_list.ImageWidth`, `properties_list.ImageHeight` | `width`, `height` |
 | `geo.wkt` | Polygon/MultiPolygon GeoJSON `roiFootprint` |
 
-Response aliases can be changed under `AutoRun:Provider:ResponseFields` using the option names in [ElasticProviderOptions.cs](AutoRuns/Provider/ElasticProviderOptions.cs). The GET result's mapped `GlobalId` must equal the requested ID. Response resolution must be a JSON number, and `IsRealTime`, when present, must be a JSON boolean; request encoding flags do not change response parsing.
+Response aliases can be changed under `AutoRun:Provider:ResponseFields` using the option names in [ElasticProviderOptions.cs](AutoRuns/Provider/ElasticProviderOptions.cs). The GET result's mapped `GlobalId` must equal the requested ID. Response resolution must be a JSON number, and `IsRealTime`, when present, must be a JSON boolean.
 
-`SourceTimeZoneId` defaults provisionally to `Asia/Jerusalem`. Confirm the provider's timezone before relying on timezone-less `Created` or `PhotoTime`. Dates carrying explicit offsets honor those offsets. Timezone-less provider dates use the configured timezone, and ambiguous or nonexistent daylight-saving times make that record invalid instead of being guessed. Accepted local date shapes are `dd/MM/yyyy HH:mm:ss` and `yyyy-MM-ddTHH:mm:ss`, optionally with fractional seconds.
+Provider dates without offsets are interpreted as Israel local time (`Asia/Jerusalem`) in code. Dates carrying explicit offsets honor those offsets. Ambiguous or nonexistent daylight-saving times make that record invalid instead of being guessed. Accepted local date shapes are `dd/MM/yyyy HH:mm:ss` and `yyyy-MM-ddTHH:mm:ss`, optionally with fractional seconds.
+
+The provider timezone, response byte limit, and string-encoding flags are no longer configuration options. Remove old `SourceTimeZoneId`, `MaxResponseBytes`, `StringEncodedNumbers`, and `StringEncodedBooleans` entries from deployment configuration; they no longer affect behavior.
 
 Optional `ResponseFields.ModeSar`, `AreaOfInterest`, `LegId`, `PrevOverlayId`, and `NextOverlayId` are unset until their real provider property names are configured. Rules with `modeSAR` always enforce that condition locally; configure its response alias before expecting matches, and configure `RequestFields.ModeSar` separately only if provider filtering is verified. Missing SAR metadata does not silently disable the rule condition.
 
@@ -345,11 +348,7 @@ The auto-run destination is the **Unified Gateway input queue**, independently o
     "Provider": {
       "BaseUrl": "https://elastic-provider.example",
       "TableEntitiesPath": "/ErisImages/v2.0/ErisImages/Images/TableEntities",
-      "SourceTimeZoneId": "Asia/Jerusalem",
       "TimeoutSeconds": 30,
-      "MaxResponseBytes": 16777216,
-      "StringEncodedNumbers": false,
-      "StringEncodedBooleans": false,
       "Headers": {}
     },
     "Destination": {

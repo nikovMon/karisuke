@@ -17,7 +17,7 @@ const options = {
   limits: { batchSize: { min: 1, max: 100 }, delayMs: { min: 0, max: 60000 }, maxSelectedOverlays: 100000,
     maxScannedRecords: 1000000, maxCandidates: 200000, payloadBudgetBytes: 536870912,
     readyLifetimeMinutes: 30, summaryLifetimeMinutes: 60, maxTargets: 100 },
-  providerTimeZone: 'Asia/Jerusalem', singleInstance: true
+  singleInstance: true
 };
 const rules = Array.from({ length: 11 }, (_, i) => ({
   _id: `rule-${i + 1}`, ruleName: i === 0 ? 'Urban detail' : i === 1 ? 'Archive coverage' : `Rule ${i + 1}`,

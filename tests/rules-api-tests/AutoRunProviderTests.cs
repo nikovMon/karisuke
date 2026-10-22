@@ -75,16 +75,19 @@ public sealed class AutoRunProviderTests
         });
     }
 
-    [Fact]
-    public void Configuration_changes_request_aliases_and_leaf_encodings_only()
+    [Theory]
+    [InlineData("date", "CREATED", false)]
+    [InlineData("DATE", "created", true)]
+    [InlineData("date", "updated", false)]
+    public void Request_aliases_preserve_native_numbers_booleans_and_UTC_date_ranges(
+        string photoField, string createdField, bool realtime)
     {
         var options = new ElasticProviderOptions
         {
-            StringEncodedNumbers = true, StringEncodedBooleans = true,
             RequestFields = new()
             {
                 Resolution = "Resolution", IsRealtime = "IsRealTime", ModeSar = "ModeSAR",
-                PhotoTime = "DATE", CreatedTime = "Created"
+                PhotoTime = photoField, CreatedTime = createdField
             }
         };
         var builder = new ProviderQueryBuilder(Options.Create(options));
@@ -93,20 +96,24 @@ public sealed class AutoRunProviderTests
             Mode = AutoRunSourceMode.Rules,
             Filters = new()
             {
-                IsRealtime = false, Resolution = new() { Min = 0.5 },
-                PhotoTime = new() { From = "2026-10-04T19:40:00.123+03:00" },
-                CreatedTime = new() { To = "2026-10-05T01:40:00.456-04:00" }
+                IsRealtime = realtime, Resolution = new() { Min = 0.5 },
+                PhotoTime = new() { From = "2026-10-04T19:40:00.123+03:00", To = "2026-10-04T16:43:00.999Z" },
+                CreatedTime = new() { From = "2026-10-05T05:40:00Z", To = "2026-10-05T01:40:00.456-04:00" }
             }
         }, [new() { Match = new() { ModeSar = ["strip"] } }]));
         var clauses = Clauses(query);
-        Assert.Equal("false", Find(clauses, "match", "IsRealTime")[0].GetString());
+        Assert.Equal(realtime ? JsonValueKind.True : JsonValueKind.False, Find(clauses, "match", "IsRealTime")[0].ValueKind);
         var range = Find(clauses, "range", "Resolution")[0];
         Assert.Equal(JsonValueKind.Object, range.ValueKind);
-        Assert.Equal("0.5", range.GetProperty("gte").GetString());
+        Assert.Equal(JsonValueKind.Number, range.GetProperty("gte").ValueKind);
+        Assert.Equal(0.5, range.GetProperty("gte").GetDouble());
         Assert.Equal("strip", Find(clauses, "match", "ModeSAR")[0].GetString());
-        Assert.Equal("2026-10-04T16:40:00.123Z", Find(clauses, "range", "DATE")[0].GetProperty("gte").GetString());
-        Assert.Equal("2026-10-05T05:40:00.456Z", Find(clauses, "range", "Created")[0].GetProperty("lte").GetString());
+        Assert.Equal("2026-10-04T16:40:00.123Z", Find(clauses, "range", photoField)[0].GetProperty("gte").GetString());
+        Assert.Equal("2026-10-04T16:43:00.999Z", Find(clauses, "range", photoField)[0].GetProperty("lte").GetString());
+        Assert.Equal("2026-10-05T05:40:00.000Z", Find(clauses, "range", createdField)[0].GetProperty("gte").GetString());
+        Assert.Equal("2026-10-05T05:40:00.456Z", Find(clauses, "range", createdField)[0].GetProperty("lte").GetString());
         Assert.Equal("PhotoTime", options.ResponseFields.PhotoTime);
+        Assert.Equal("Created", options.ResponseFields.CreatedTime);
         Assert.Equal("Resolution", options.ResponseFields.Resolution);
     }
 
@@ -309,11 +316,34 @@ public sealed class AutoRunProviderTests
     }
 
     [Fact]
-    public async Task Response_byte_limit_is_enforced()
+    public async Task Declared_response_over_16_MiB_is_rejected_before_reading()
     {
-        var options = Config(); options.MaxResponseBytes = 10;
-        await Assert.ThrowsAsync<ElasticProviderException>(() =>
-            Provider(_ => Json(Entity()), options).GetAsync("1", CancellationToken.None));
+        using var stream = new RepeatingResponseStream(16 * 1024 * 1024 + 1);
+        var content = new StreamContent(stream);
+        content.Headers.ContentLength = 16 * 1024 * 1024 + 1;
+
+        var error = await Assert.ThrowsAsync<ElasticProviderException>(() =>
+            Provider(_ => new(HttpStatusCode.OK) { Content = content }).GetAsync("1", CancellationToken.None));
+
+        Assert.Contains("16 MiB", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, stream.BytesRead);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(1L)]
+    public async Task Streaming_response_over_16_MiB_is_rejected_even_without_a_reliable_length(long? declaredLength)
+    {
+        const int responseLength = 16 * 1024 * 1024 + 1;
+        using var stream = new RepeatingResponseStream(responseLength);
+        var content = new StreamContent(stream);
+        content.Headers.ContentLength = declaredLength;
+
+        var error = await Assert.ThrowsAsync<ElasticProviderException>(() =>
+            Provider(_ => new(HttpStatusCode.OK) { Content = content }).GetAsync("1", CancellationToken.None));
+
+        Assert.Contains("16 MiB", error.Message, StringComparison.Ordinal);
+        Assert.Equal(responseLength, stream.BytesRead);
     }
 
     private static JsonElement[] Clauses(JsonElement query) =>
@@ -344,5 +374,35 @@ public sealed class AutoRunProviderTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             Task.FromResult(response(request));
+    }
+
+    // Produces a large non-seekable response without allocating a second large payload in the test.
+    private sealed class RepeatingResponseStream(int size) : Stream
+    {
+        public int BytesRead { get; private set; }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => BytesRead; set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var read = Math.Min(count, size - BytesRead);
+            buffer.AsSpan(offset, read).Fill((byte)' ');
+            BytesRead += read;
+            return read;
+        }
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var read = Math.Min(buffer.Length, size - BytesRead);
+            buffer.Span[..read].Fill((byte)' ');
+            BytesRead += read;
+            return ValueTask.FromResult(read);
+        }
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }

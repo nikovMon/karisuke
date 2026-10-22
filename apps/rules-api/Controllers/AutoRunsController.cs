@@ -1,5 +1,4 @@
 using ImagingPipeline.Rules.Api.AutoRuns;
-using ImagingPipeline.Rules.Api.AutoRuns.Provider;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -10,8 +9,7 @@ namespace ImagingPipeline.Rules.Api.Controllers;
 [Produces("application/json")]
 public sealed class AutoRunsController(
     AutoRunService service,
-    IOptions<AutoRunOptions> configured,
-    IOptions<ElasticProviderOptions> provider) : ControllerBase
+    IOptions<AutoRunOptions> configured) : ControllerBase
 {
     [HttpGet("options")]
     public IActionResult Options()
@@ -33,7 +31,6 @@ public sealed class AutoRunsController(
                 options.PayloadBudgetBytes, options.ReadyLifetimeMinutes, options.SummaryLifetimeMinutes,
                 MaxTargets = 100
             },
-            ProviderTimeZone = provider.Value.SourceTimeZoneId,
             SingleInstance = true
         });
     }

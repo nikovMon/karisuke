@@ -14,6 +14,8 @@ namespace ImagingPipeline.Rules.Api.AutoRuns.Provider;
 public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticProviderOptions> configured)
     : IElasticOverlayProvider
 {
+    private const int ResponseByteLimit = 16 * 1024 * 1024;
+    private const string OffsetlessResponseTimeZone = "Asia/Jerusalem";
     private readonly ElasticProviderOptions _options = configured.Value;
     private readonly IReadOnlyDictionary<string, string> _headers = ElasticProviderHeaders.Snapshot(configured.Value.Headers);
 
@@ -134,8 +136,8 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
         foreach (var (name, value) in _headers)
             if (!request.Headers.TryAddWithoutValidation(name, value))
                 throw new ElasticProviderException(ElasticProviderHeaders.ValidationError);
-        if (_options.TimeoutSeconds <= 0 || _options.MaxResponseBytes <= 0)
-            throw new ElasticProviderException("Provider timeout and response-byte limit must be positive.");
+        if (_options.TimeoutSeconds <= 0)
+            throw new ElasticProviderException("Provider timeout must be positive.");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
         try
@@ -146,8 +148,8 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
                 throw new ElasticProviderException($"Elastic Provider returned HTTP {(int)response.StatusCode}.");
             if (response.RequestMessage?.RequestUri is { } effective && !SameOrigin(effective, TableUri()))
                 throw new ElasticProviderException("Provider response redirected outside the configured origin.");
-            if (response.Content.Headers.ContentLength > _options.MaxResponseBytes)
-                throw new ElasticProviderException("Provider response exceeds the configured response-byte limit.");
+            if (response.Content.Headers.ContentLength > ResponseByteLimit)
+                throw new ElasticProviderException("Provider response exceeds the 16 MiB response limit.");
             await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
             using var buffer = new MemoryStream();
             var chunk = ArrayPool<byte>.Shared.Rent(16 * 1024);
@@ -156,8 +158,8 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
                 int read;
                 while ((read = await stream.ReadAsync(chunk.AsMemory(0, chunk.Length), timeout.Token)) != 0)
                 {
-                    if (buffer.Length + read > _options.MaxResponseBytes)
-                        throw new ElasticProviderException("Provider response exceeds the configured response-byte limit.");
+                    if (buffer.Length + read > ResponseByteLimit)
+                        throw new ElasticProviderException("Provider response exceeds the 16 MiB response limit.");
                     buffer.Write(chunk, 0, read);
                 }
                 return JsonDocument.Parse(buffer.GetBuffer().AsMemory(0, checked((int)buffer.Length)));
@@ -201,11 +203,11 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
         left.Scheme == right.Scheme && left.Port == right.Port &&
         string.Equals(left.Host, right.Host, StringComparison.OrdinalIgnoreCase);
 
-    private TimeZoneInfo SourceZone()
+    private static TimeZoneInfo SourceZone()
     {
-        try { return TimeZoneInfo.FindSystemTimeZoneById(_options.SourceTimeZoneId); }
+        try { return TimeZoneInfo.FindSystemTimeZoneById(OffsetlessResponseTimeZone); }
         catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException)
-        { throw new ElasticProviderException("Configured provider source timezone is invalid.", ex); }
+        { throw new ElasticProviderException("The provider response timezone Asia/Jerusalem is unavailable.", ex); }
     }
 
     private static void RequireObject(JsonElement value, string name)
