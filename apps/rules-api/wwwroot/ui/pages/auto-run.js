@@ -391,6 +391,7 @@ function ruleDescription(rule) {
   const parts = [];
   if (rule.matchAll) parts.push('Matches all overlays');
   if (match.sensors?.length) parts.push(match.sensors.map(s => `${s.name}${s.registrationQualities?.length ? ` · ${s.registrationQualities.join('/')}` : ''}${s.gridTypes?.length ? ` · ${s.gridTypes.join('/')}` : ''}`).join('; '));
+  if (match.sensorTypes?.length) parts.push(`Sensor types: ${match.sensorTypes.join(', ')}`);
   if (match.resolution) parts.push(`Resolution ${match.resolution.min ?? 'any'}–${match.resolution.max ?? 'any'}`);
   if (match.locationWkt) parts.push('Geographic area');
   if (match.modeSAR?.length) parts.push(`SAR: ${match.modeSAR.join(', ')}`);

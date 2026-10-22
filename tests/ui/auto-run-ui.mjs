@@ -22,10 +22,11 @@ const options = {
   memory: { availableBytes: 12884901888, processBytes: 1073741824, managedBytes: 536870912,
     limitBytes: 10307921510, headroomBytes: 9234179686, isUnderPressure: false }
 };
+const sensorTypeLabel = '<img src=x onerror="window.sensorTypeInjected=true">';
 const rules = Array.from({ length: 11 }, (_, i) => ({
   _id: `rule-${i + 1}`, ruleName: i === 0 ? 'Urban detail' : i === 1 ? 'Archive coverage' : `Rule ${i + 1}`,
   isActive: i !== 1, matchAll: false,
-  match: { sensors: [{ name: 'SENSOR_A', registrationQualities: ['Accurate'], gridTypes: ['grid'] }],
+  match: i === 1 ? { sensorTypes: ['EO', sensorTypeLabel] } : { sensors: [{ name: 'SENSOR_A', registrationQualities: ['Accurate'], gridTypes: ['grid'] }],
     resolution: { min: 0.3, max: 1 }, maxPhotoAgeDays: 7 }, runParams: {}
 }));
 const pipelineRules = new Map([
@@ -238,6 +239,10 @@ try {
   await page.locator('#pipeline-select').selectOption('imagery');
   await page.locator('[name="rule-choice"]').first().waitFor();
   assert.equal(await page.locator('[name="rule-choice"]').count(), 10);
+  const sensorTypeRule = page.locator('.rule-choice').filter({ hasText: 'Archive coverage' });
+  assert.equal(await sensorTypeRule.locator('.rule-choice-meta').textContent(), `Sensor types: EO, ${sensorTypeLabel}`,
+    'sensor-type-only rules show their condition instead of claiming no constraints');
+  assert.equal(await sensorTypeRule.locator('img').count(), 0, 'sensor type labels are escaped in the rule browser');
   await page.locator('#rules-next').click();
   await page.getByText('Rule 11', { exact: true }).waitFor();
   assert.equal(await page.locator('[name="rule-choice"]').count(), 1);
@@ -274,6 +279,13 @@ try {
   assert.equal(await page.locator('#count-selected').textContent(), '25');
   assert.equal(await page.locator('#refresh-run').count(), 0, 'redundant circular refresh action removed');
   assert.match(await page.locator('#run-memory').textContent(), /Process memory: 1 GiB/);
+  const frozenSensorTypes = page.locator('.frozen-rule').nth(1);
+  await frozenSensorTypes.locator('summary').click();
+  assert.equal(await frozenSensorTypes.locator('.cell-sub').first().textContent(), `Sensor types: EO, ${sensorTypeLabel}`,
+    'frozen rule details preserve sensor type conditions');
+  assert.equal(await frozenSensorTypes.locator('img').count(), 0, 'sensor type labels are escaped in frozen details');
+  assert.equal(await page.evaluate(() => window.sensorTypeInjected), undefined);
+  await frozenSensorTypes.locator('summary').click();
   await page.locator('#items-next').click();
   await page.getByText('overlay-025', { exact: true }).waitFor();
   await page.locator('#items-prev').click();
@@ -889,7 +901,8 @@ try {
     'configured map modal loads on demand, supports keyboard focus and Escape, and unloads on close',
     'map modal mobile layout and absent-configuration hint',
     'redundant run refresh removed while automatic polling remains',
-    'memory, payload and response limits preserve explicitly startable partial previews with memory readouts'], screenshots }, null, 2));
+    'memory, payload and response limits preserve explicitly startable partial previews with memory readouts',
+    'sensor-type-only rules display escaped conditions in rule browsing and frozen details'], screenshots }, null, 2));
 } finally {
   for (const release of pendingResponses) release();
   if (browser) await browser.close();
