@@ -9,7 +9,7 @@ internal static class RuleSensors
     public static void Add(List<SensorConfig> sensors, RuleSensorUpdateRequest request)
     {
         var sensor = sensors.FirstOrDefault(s =>
-            string.Equals(s.Name, request.SensorName, StringComparison.Ordinal));
+            string.Equals(s.Name, request.SensorName, StringComparison.OrdinalIgnoreCase));
 
         if (sensor is null)
         {
@@ -43,7 +43,7 @@ internal static class RuleSensors
     public static void Remove(List<SensorConfig> sensors, RuleSensorUpdateRequest request)
     {
         var sensor = sensors.FirstOrDefault(s =>
-            string.Equals(s.Name, request.SensorName, StringComparison.Ordinal));
+            string.Equals(s.Name, request.SensorName, StringComparison.OrdinalIgnoreCase));
 
         if (sensor is null)
         {
