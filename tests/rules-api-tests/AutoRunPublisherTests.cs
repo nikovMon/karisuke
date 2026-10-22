@@ -28,7 +28,7 @@ public sealed class AutoRunPublisherTests
         AutoRunResolvedTarget[] targets = [new(
             new() { PipelineId = "pipeline", RuleId = "rule", MaxOverlays = 1 },
             new PipelineRuleDocument { Id = "rule", RuleName = "Saved rule", MatchAll = true, RunParams = [] },
-            new("rule", new Dictionary<string, ImagingPipeline.RuleEngine.Rules.SensorMatchCriteria>(), 0, double.MaxValue, null, null, null, []),
+            new("rule", new Dictionary<string, ImagingPipeline.RuleEngine.Rules.SensorMatchCriteria>(), 0, double.MaxValue, null, null, null, null, []),
             new FindAirPipelineContract())];
 
         var first = await publisher.PublishAsync("run-1", payload, targets, CancellationToken.None);

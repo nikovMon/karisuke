@@ -111,6 +111,22 @@ public sealed class PipelineRuleWriteApiTests
     }
 
     [Fact]
+    public async Task SensorTypesArePatchedOnTheirOwn()
+    {
+        using var factory = new RulesApiFactory(_store);
+        using var client = factory.CreateClient();
+        var id = await CreateAsync(client, "first");
+
+        var response = await client.PatchAsJsonAsync($"/pipelines/FindAir/rules/{id}", new { match = new { sensorTypes = new[] { "SAR" } } });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var rule = await response.Content.ReadFromJsonAsync<PipelineRuleDocument>();
+        Assert.Equal(["SAR"], rule!.Match!.SensorTypes);
+        Assert.Equal(Square, rule.Match.LocationWkt);
+        Assert.Equal("SAR", (string?)_store.Stored(AsdIndex, id)!["match"]!["sensorTypes"]![0]);
+    }
+
+    [Fact]
     public async Task UpdateRemovingTheLocationAlsoRemovesTheDerivedGeoJson()
     {
         using var factory = new RulesApiFactory(_store);

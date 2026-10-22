@@ -138,10 +138,15 @@ public sealed class RuleMatchConditions
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? ModeSar { get; set; }
 
+    /// <summary>Allowed image sensor types, matched exactly. Absent means any type, including images without one.</summary>
+    [JsonPropertyName("sensorTypes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? SensorTypes { get; set; }
+
     [JsonIgnore]
     public bool HasConditions =>
         Sensors is not null || Resolution is not null || LocationWkt is not null || MaxPhotoAgeDays is not null ||
-        ModeSar is not null;
+        ModeSar is not null || SensorTypes is not null;
 
     internal IEnumerable<string> Validate()
     {
@@ -151,7 +156,7 @@ public sealed class RuleMatchConditions
         }
         else if (Sensors is not null)
         {
-            foreach (var error in SensorConfig.ValidateCollection(Sensors))
+            foreach (var error in SensorConfig.ValidateCollection(Sensors, allowAnyCriteria: true))
             {
                 yield return $"match.{error}";
             }
@@ -177,20 +182,33 @@ public sealed class RuleMatchConditions
             yield return "match.maxPhotoAgeDays must be greater than 0";
         }
 
-        if (ModeSar is { Count: 0 })
+        foreach (var error in ValidateAllowedValues(ModeSar, PipelineRuleFields.ModeSar, "mode"))
         {
-            yield return "match.modeSAR cannot be empty; omit it to accept any mode";
+            yield return error;
         }
-        else if (ModeSar is not null)
+
+        foreach (var error in ValidateAllowedValues(SensorTypes, PipelineRuleFields.SensorTypes, "sensor type"))
         {
-            if (ModeSar.Any(string.IsNullOrWhiteSpace))
+            yield return error;
+        }
+    }
+
+    private static IEnumerable<string> ValidateAllowedValues(List<string>? values, string field, string valueName)
+    {
+        if (values is { Count: 0 })
+        {
+            yield return $"match.{field} cannot be empty; omit it to accept any {valueName}";
+        }
+        else if (values is not null)
+        {
+            if (values.Any(string.IsNullOrWhiteSpace))
             {
-                yield return "match.modeSAR contains empty or whitespace values";
+                yield return $"match.{field} contains empty or whitespace values";
             }
 
-            if (ModeSar.Distinct(StringComparer.Ordinal).Count() != ModeSar.Count)
+            if (values.Distinct(StringComparer.Ordinal).Count() != values.Count)
             {
-                yield return "match.modeSAR contains duplicate values";
+                yield return $"match.{field} contains duplicate values";
             }
         }
     }

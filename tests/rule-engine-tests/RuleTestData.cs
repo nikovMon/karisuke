@@ -43,11 +43,12 @@ internal static class RuleTestData
         string gridType = "grid-a",
         DateTimeOffset? photoTime = null,
         string footprintWkt = "POLYGON ((1 1, 3 1, 3 3, 1 3, 1 1))",
-        string? modeSar = null) =>
+        string? modeSar = null,
+        string sensorType = "EO") =>
         new(
             "image-1",
             sensorName,
-            "EO",
+            sensorType,
             quality,
             bestResolution,
             null,

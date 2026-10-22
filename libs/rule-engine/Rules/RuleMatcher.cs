@@ -27,6 +27,10 @@ public sealed class RuleMatcher(TimeProvider timeProvider)
             {
                 misses.Add(new RuleMiss(rule.Id, RuleMissReason.Sensor));
             }
+            else if (!IsAllowed(string.IsNullOrWhiteSpace(input.SensorType) ? null : input.SensorType, rule.SensorTypes))
+            {
+                misses.Add(new RuleMiss(rule.Id, RuleMissReason.SensorType));
+            }
             else if (!MatchesResolution(input.BestResolution, rule))
             {
                 misses.Add(new RuleMiss(rule.Id, RuleMissReason.Resolution));

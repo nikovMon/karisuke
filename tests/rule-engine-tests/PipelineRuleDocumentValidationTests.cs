@@ -114,6 +114,44 @@ public sealed class PipelineRuleDocumentValidationTests
     }
 
     [Fact]
+    public void SensorTypesIsAConditionOnItsOwn()
+    {
+        var rule = Rule();
+        rule.Match = new RuleMatchConditions { SensorTypes = ["SAR", "EO"] };
+
+        Assert.Empty(Errors(rule));
+    }
+
+    [Theory]
+    [InlineData(new string[0], "match.sensorTypes cannot be empty; omit it to accept any sensor type")]
+    [InlineData(new[] { "SAR", "" }, "match.sensorTypes contains empty or whitespace values")]
+    [InlineData(new[] { "SAR", "SAR" }, "match.sensorTypes contains duplicate values")]
+    public void InvalidSensorTypesAreRejected(string[] types, string error)
+    {
+        var rule = Rule();
+        rule.Match!.SensorTypes = [.. types];
+
+        Assert.Contains(error, Errors(rule));
+    }
+
+    [Fact]
+    public void SensorWithoutQualitiesOrGridTypesIsAllowed()
+    {
+        var rule = Rule();
+        rule.Match!.Sensors = [new SensorConfig { Name = "camera" }];
+
+        Assert.Empty(Errors(rule));
+    }
+
+    [Fact]
+    public void V1RulesStillRejectASensorWithoutQualitiesOrGridTypes()
+    {
+        Assert.Contains(
+            "sensors[0] must have at least one registrationQuality or gridType",
+            SensorConfig.ValidateCollection([new SensorConfig { Name = "camera" }]));
+    }
+
+    [Fact]
     public void ModeSarKeepsItsSourceSpellingInJson()
     {
         var rule = Rule();

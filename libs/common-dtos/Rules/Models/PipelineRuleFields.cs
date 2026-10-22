@@ -20,6 +20,7 @@ public static class PipelineRuleFields
     public const string LocationWkt = "locationWkt";
     public const string MaxPhotoAgeDays = "maxPhotoAgeDays";
     public const string ModeSar = "modeSAR";
+    public const string SensorTypes = "sensorTypes";
     public const string Location = "location";
 
     public const string MatchSensors = Match + "." + Sensors;

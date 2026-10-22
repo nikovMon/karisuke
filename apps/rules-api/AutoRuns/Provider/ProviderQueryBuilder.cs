@@ -42,6 +42,8 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
                     AddRange(common, _options.RequestFields.Resolution, resolution.Min, resolution.Max);
                 if (match?.LocationWkt is { } area)
                     common.Add(Clause("geo_intersect", _options.RequestFields.Geometry, new object[] { area }));
+                if (match?.SensorTypes is { Count: > 0 } types)
+                    common.Add(Clause("match", _options.RequestFields.SensorType, types.ToArray()));
                 if (match?.ModeSar is { Count: > 0 } modes && !string.IsNullOrWhiteSpace(_options.RequestFields.ModeSar))
                     common.Add(Clause("match", _options.RequestFields.ModeSar, modes.ToArray()));
                 // MaxPhotoAgeDays is intentionally not pushed down for historical execution.
