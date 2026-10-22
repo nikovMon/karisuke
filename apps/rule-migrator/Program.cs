@@ -10,6 +10,7 @@ const string ApplyFlag = "--apply";
 var switchMappings = new Dictionary<string, string>
 {
     ["--pipeline"] = $"{MigrationOptions.SectionName}:{nameof(MigrationOptions.Pipeline)}",
+    ["--source-schema"] = $"{MigrationOptions.SectionName}:{nameof(MigrationOptions.SourceSchema)}",
     ["--source-index"] = $"{MigrationOptions.SectionName}:{nameof(MigrationOptions.SourceIndex)}",
     ["--max-photo-age-days"] = $"{MigrationOptions.SectionName}:{nameof(MigrationOptions.MaxPhotoAgeDays)}"
 };
@@ -31,7 +32,7 @@ options.Apply = args.Contains(ApplyFlag);
 if (options.Validate() is { } optionsError)
 {
     Console.Error.WriteLine(optionsError);
-    Console.Error.WriteLine("Usage: rule-migrator --pipeline <id> [--source-index rules] [--max-photo-age-days 7] [--apply]");
+    Console.Error.WriteLine("Usage: rule-migrator --pipeline <id> [--source-schema v1|algo] [--source-index <index>] [--max-photo-age-days <days>] [--apply]");
     return 1;
 }
 
@@ -48,7 +49,7 @@ var target = new MigrationTarget(
 try
 {
     var report = await host.Services.GetRequiredService<RuleMigration>().RunAsync(target, options, CancellationToken.None);
-    report.Write(Console.Out, options.SourceIndex, $"{pipeline.PipelineId} ({pipeline.RulesIndex})", options.Apply);
+    report.Write(Console.Out, $"{options.EffectiveSourceIndex} ({options.SourceSchema.ToString().ToLowerInvariant()})", $"{pipeline.PipelineId} ({pipeline.RulesIndex})", options.Apply);
     return 0;
 }
 catch (ElasticsearchClientException exception)
