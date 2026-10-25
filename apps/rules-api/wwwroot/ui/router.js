@@ -6,6 +6,7 @@ export function navigate(path) {
   dispatch();
 }
 function dispatch() {
+  document.dispatchEvent(new Event('ui:route-change'));
   const path = location.pathname.replace(/\/$/, '') || '/ui';
   for (const route of routes) {
     const match = path.match(route.pattern);

@@ -6,8 +6,8 @@ const number = value => Number(value || 0).toLocaleString();
 const bytes = value => {
   const amount = Number(value);
   if (!Number.isFinite(amount) || amount < 0) return '—';
-  const divisor = amount >= 1024 ** 3 ? 1024 ** 3 : 1024 ** 2;
-  return `${(amount / divisor).toLocaleString(undefined, { maximumFractionDigits: 1 })} ${divisor === 1024 ** 3 ? 'GiB' : 'MiB'}`;
+  const unit = amount >= 1024 ** 3 ? 3 : amount >= 1024 ** 2 ? 2 : amount >= 1024 ? 1 : 0;
+  return `${(amount / 1024 ** unit).toLocaleString(undefined, { maximumFractionDigits: 1 })} ${['B', 'KiB', 'MiB', 'GiB'][unit]}`;
 };
 const splitValues = value => [...new Set(value.split(/[\n,]+/).map(v => v.trim()).filter(Boolean))];
 const terminal = state => ['Completed', 'CompletedWithErrors', 'Failed', 'Cancelled', 'Expired'].includes(state);
@@ -16,9 +16,12 @@ const state = {
   initialized: false, options: null, targets: [], rules: [], rulesFrom: 0, rulesSize: 10,
   pipelines: [], runId: null, run: null, timer: null, itemsFrom: 0, itemsSize: 20,
   itemsOutcome: '', publicationDirty: false, refreshVersion: 0, rulesVersion: 0,
-  rulesLoading: false, rulesPipeline: '', selectionOperation: null, setupReady: false, preparing: false, rerunPending: false
+  rulesLoading: false, rulesPipeline: '', rulesSearch: '', rulesStatus: '', rulesTimer: null, rulesController: null, resumeRules: false,
+  selectionOperation: null, setupReady: false, preparing: false, rerunPending: false,
+  history: [], historyVersion: 0, historyTimer: null, historyDeleting: false, historyPendingIds: new Set()
 };
 const $ = id => document.getElementById(id);
+const pendingRunActions = new Map();
 const directSource = () => document.querySelector('[name="source-mode"]:checked')?.value === 'Filters'
   || (document.querySelector('[name="source-mode"]:checked')?.value === 'OverlayIds'
     && document.querySelector('[name="id-processing"]:checked')?.value === 'direct');
@@ -62,11 +65,14 @@ export async function showAutoRun(id = null) {
     state.initialized = true;
     state.options = null;
     state.setupReady = false;
+    state.rulesSearch = '';
+    state.rulesStatus = '';
     $('app').innerHTML = `<div id="global-notice" role="alert" hidden></div><div id="configuration">${configurationMarkup()}</div><div id="run-detail" hidden></div>`;
     attachConfiguration();
     loadSetup();
   }
   clearTimeout(state.timer);
+  clearTimeout(state.historyTimer);
   state.refreshVersion++;
   state.runId = id;
   $('configuration').hidden = Boolean(id);
@@ -74,6 +80,8 @@ export async function showAutoRun(id = null) {
   if (!id) {
     document.title = 'Auto Run · Flarules';
     loadHistory();
+    if (state.resumeRules && $('pipeline-select').value) loadRules();
+    state.resumeRules = false;
     return;
   }
   state.run = null;
@@ -84,6 +92,21 @@ export async function showAutoRun(id = null) {
   attachDetail();
   document.title = 'Run details · Flarules';
   await refreshRun(true);
+}
+
+export function stopAutoRun() {
+  clearTimeout(state.timer);
+  clearTimeout(state.historyTimer);
+  clearTimeout(state.rulesTimer);
+  state.refreshVersion++;
+  state.historyVersion++;
+  state.rulesVersion++;
+  state.rulesController?.abort();
+  state.resumeRules ||= state.rulesLoading;
+  state.rulesLoading = false;
+  state.runId = null;
+  cancelRuleSelection();
+  if ($('area-map-dialog')?.open) $('area-map-dialog').close();
 }
 
 function configurationMarkup() {
@@ -114,9 +137,11 @@ function configurationMarkup() {
     </div></section>
     <fieldset id="rule-selection" class="panel rule-selection" aria-label="Selected pipeline rules">${panelHeader('02', 'Select pipeline rules', 'Each selected rule gets its own overlay quota.')}<div class="panel-body">
       <div class="toolbar"><label class="field" for="pipeline-select"><span>Pipeline</span><select id="pipeline-select"><option value="">Loading pipelines…</option></select></label><button type="button" class="button ghost" id="load-rules">Browse rules <span aria-hidden="true">↓</span></button></div>
+      <div class="rule-search-controls"><label class="field" for="rule-search"><span>Search rules</span><input id="rule-search" type="search" maxlength="200" placeholder="Name, rule ID, sensor or sensor type" aria-describedby="rule-search-help" autocomplete="off"></label><label class="field" for="rule-status"><span>Status</span><select id="rule-status"><option value="">Active and inactive</option><option value="true">Active only</option><option value="false">Inactive only</option></select></label></div>
+      <p id="rule-search-help" class="hint">Search every page in the selected pipeline by name, ID, description, sensor or sensor type. Partial text is supported and capitalization does not matter.</p>
       <div class="rule-selection-actions"><button type="button" class="button compact" id="select-all-rules" aria-describedby="select-all-scope" disabled>Select all rules</button><p id="select-all-scope" class="hint">Choose a pipeline to select all its rules across every page.</p></div>
       <p id="rule-selection-status" class="hint rule-selection-status" role="status" aria-live="polite"></p>
-      <div id="rule-browser" class="rule-browser" hidden><div class="browser-header"><span>AVAILABLE RULES · active and inactive</span><span id="rule-page-label"></span></div><div id="rule-list" class="browser-list"></div><div class="browser-footer"><div class="pagination"><button type="button" class="button compact ghost" id="rules-prev" aria-label="Previous rules page">←</button><button type="button" class="button compact ghost" id="rules-next" aria-label="Next rules page">→</button></div><button type="button" class="button compact" id="add-rules">Add selected rules</button></div></div>
+      <div id="rule-browser" class="rule-browser" hidden><div class="browser-header"><span id="rule-browser-label">AVAILABLE RULES · active and inactive</span><span id="rule-page-label" role="status" aria-live="polite"></span></div><div id="rule-list" class="browser-list"></div><div class="browser-footer"><div class="pagination"><button type="button" class="button compact ghost" id="rules-prev" aria-label="Previous rules page">←</button><button type="button" class="button compact ghost" id="rules-next" aria-label="Next rules page">→</button></div><button type="button" class="button compact" id="add-rules">Add selected rules</button></div></div>
       <details class="paste-rules"><summary>Already have rule IDs?</summary><div class="toolbar"><label class="field" for="pasted-rule-ids"><span>Rule IDs in the selected pipeline</span><textarea id="pasted-rule-ids" rows="2" placeholder="Paste IDs separated by commas or new lines"></textarea></label><button type="button" class="button" id="add-pasted-rules">Add IDs</button></div></details>
       <div id="rule-error" class="inline-error" role="alert" hidden></div>
       <div id="selected-targets"></div>
@@ -136,7 +161,7 @@ function configurationMarkup() {
   <aside class="configuration-aside">
     <section class="aside-card"><div class="eyebrow">HOW IT WORKS</div><ol class="process-steps"><li><span id="process-find-title">Find & match</span><p id="process-find-description">Fetch historical overlays and evaluate your selected rules.</p></li><li>Review the selection<p id="process-review-description">Inspect overlaps, quotas, and any shortfalls before starting.</p></li><li>Send to the gateway<p>Track confirmed submissions and inspect failed or uncertain items.</p></li></ol></section>
     <section class="aside-card"><h3>Workspace limits</h3><div id="server-limits"><p class="hint" style="margin-top:12px">Loading server options…</p></div><p>Previews and jobs live in this instance’s memory. A restart clears them.</p></section>
-    <section class="aside-card history-card"><div class="history-head"><h3>Recent runs</h3><button class="button compact ghost" type="button" id="refresh-history" aria-label="Refresh recent runs">↻</button></div><div id="history-list" class="history-list"><p class="hint">Loading recent runs…</p></div></section>
+    <section class="aside-card history-card"><div class="history-head"><h3>Recent runs</h3><div class="history-actions"><button class="button compact ghost" type="button" id="delete-all-runs" disabled>Delete all</button><button class="button compact ghost" type="button" id="refresh-history" aria-label="Refresh recent runs">↻</button></div></div><p id="history-summary" class="hint"></p><p class="hint history-help">Sizes are retained serialized data, not total RAM. Deleting active runs stops future work; already queued messages remain.</p><p id="history-status" class="hint" role="status" aria-live="polite"></p><div id="history-error" class="inline-error" role="alert" hidden></div><div id="history-list" class="history-list"><p class="hint">Loading recent runs…</p></div></section>
   </aside></div>
   <dialog id="area-map-dialog" class="map-dialog" aria-labelledby="area-map-title" aria-describedby="area-map-instructions">
     <div class="map-dialog-heading"><div><h2 id="area-map-title">Search area map</h2><p id="area-map-instructions">Find your area in the map, then copy its WKT and paste it into Search area after closing this window.</p></div><button id="close-area-map" type="button" class="button ghost" autofocus>Close map</button></div>
@@ -165,6 +190,8 @@ function attachConfiguration() {
   document.querySelectorAll('[name="source-mode"]').forEach(radio => radio.addEventListener('change', updateSource));
   document.querySelectorAll('[name="id-processing"]').forEach(radio => radio.addEventListener('change', updateSource));
   $('pipeline-select').addEventListener('change', () => { cancelRuleSelection(); hideError('rule-error'); state.rulesFrom = 0; loadRules(); });
+  $('rule-search').addEventListener('input', () => changeRuleSearch(true));
+  $('rule-status').addEventListener('change', () => changeRuleSearch(false));
   $('load-rules').addEventListener('click', () => { state.rulesFrom = 0; loadRules(); });
   $('rules-prev').addEventListener('click', () => { state.rulesFrom = Math.max(0, state.rulesFrom - state.rulesSize); loadRules(); });
   $('rules-next').addEventListener('click', () => { state.rulesFrom += state.rulesSize; loadRules(); });
@@ -177,6 +204,11 @@ function attachConfiguration() {
   $('select-all-rules').addEventListener('click', selectAllRules);
   $('add-pasted-rules').addEventListener('click', addPastedRules);
   $('refresh-history').addEventListener('click', loadHistory);
+  $('delete-all-runs').addEventListener('click', () => deleteRuns());
+  $('history-list').addEventListener('click', event => {
+    const button = event.target.closest('[data-delete-run]');
+    if (button && !button.disabled) deleteRuns(button.dataset.deleteRun);
+  });
   $('selected-targets').addEventListener('input', event => {
     const input = event.target.closest('[data-target-field]');
     if (input) state.targets[Number(input.dataset.targetIndex)][input.dataset.targetField] = input.value;
@@ -270,8 +302,10 @@ function syncSelectionControls() {
   const busy = Boolean(state.selectionOperation) || state.preparing;
   $('select-all-rules').disabled = !pipeline || !state.options || busy;
   $('select-all-rules').setAttribute('aria-busy', String(state.selectionOperation?.kind === 'all'));
+  const filtered = Boolean(state.rulesSearch || state.rulesStatus);
+  $('select-all-rules').textContent = filtered ? 'Select all matching rules' : 'Select all rules';
   $('select-all-scope').textContent = pipeline
-    ? `All rules in ${pipeline}, across every page. Includes active and inactive rules.`
+    ? `All ${filtered ? 'matching ' : ''}rules in ${pipeline}, across every page. ${state.rulesStatus === 'true' ? 'Active only.' : state.rulesStatus === 'false' ? 'Inactive only.' : 'Includes active and inactive rules.'}`
     : 'Choose a pipeline to select all its rules across every page.';
   $('add-rules').disabled = busy || state.rulesLoading || state.rulesPipeline !== pipeline || !state.rules.length;
   $('add-pasted-rules').disabled = busy;
@@ -287,10 +321,10 @@ function cancelRuleSelection() {
 
 function beginRuleSelection(kind, pipeline) {
   if (state.selectionOperation || state.preparing) return null;
-  const operation = { kind, pipeline, controller: new AbortController() };
+  const operation = { kind, pipeline, search: state.rulesSearch, status: state.rulesStatus, controller: new AbortController() };
   state.selectionOperation = operation;
   hideError('rule-error');
-  $('rule-selection-status').textContent = kind === 'all' ? `Loading all rules in ${pipeline}…` : '';
+  $('rule-selection-status').textContent = kind === 'all' ? `Loading all ${operation.search || operation.status ? 'matching ' : ''}rules in ${pipeline}…` : '';
   syncSelectionControls();
   return operation;
 }
@@ -325,7 +359,7 @@ async function selectAllRules() {
     // bound repeated/overlapping pages if the catalog changes during retrieval.
     for (let from = 0; ; from += state.rulesSize) {
       if (from >= Math.max(1000, maxTargets * 10)) throw new Error('The rule list kept changing while loading. Try again.');
-      const page = await api.rules(pipeline, from, state.rulesSize, operation.controller.signal);
+      const page = await api.rules(pipeline, from, state.rulesSize, operation.controller.signal, operation.search, operation.status);
       if (!isCurrentSelection(operation)) return;
       if (!Array.isArray(page) || page.some(rule => !rule || typeof rule._id !== 'string' || !rule._id.trim()))
         throw new Error('The API returned an invalid rule list.');
@@ -400,6 +434,10 @@ function ruleDescription(rule) {
 }
 
 async function loadRules() {
+  clearTimeout(state.rulesTimer);
+  state.rulesController?.abort();
+  const controller = new AbortController();
+  state.rulesController = controller;
   const pipeline = $('pipeline-select').value;
   const version = ++state.rulesVersion;
   state.rulesLoading = Boolean(pipeline);
@@ -416,14 +454,14 @@ async function loadRules() {
   $('rules-prev').disabled = true;
   hideError('rule-error');
   try {
-    const rules = await api.rules(pipeline, state.rulesFrom, state.rulesSize);
+    const rules = await api.rules(pipeline, state.rulesFrom, state.rulesSize, controller.signal, state.rulesSearch, state.rulesStatus);
     if (version !== state.rulesVersion) return;
     state.rules = rules;
     state.rulesPipeline = pipeline;
     state.rulesLoading = false;
     renderRuleList();
   } catch (error) {
-    if (version !== state.rulesVersion) return;
+    if (version !== state.rulesVersion || error.name === 'AbortError') return;
     state.rules = [];
     state.rulesLoading = false;
     $('rule-list').innerHTML = '<div class="run-empty">Rules could not be loaded. Try Browse rules again.</div>';
@@ -431,10 +469,31 @@ async function loadRules() {
   } finally { if (version === state.rulesVersion) syncSelectionControls(); }
 }
 
+function changeRuleSearch(debounce) {
+  cancelRuleSelection();
+  clearTimeout(state.rulesTimer);
+  state.rulesController?.abort();
+  state.rulesVersion++;
+  state.rulesFrom = 0;
+  state.rulesSearch = $('rule-search').value.trim();
+  state.rulesStatus = $('rule-status').value;
+  state.rulesLoading = Boolean($('pipeline-select').value);
+  syncSelectionControls();
+  if (state.rulesLoading) {
+    $('rule-browser').hidden = false;
+    $('rule-list').innerHTML = '<div class="loading"><span class="spinner"></span>Searching rules…</div>';
+    $('rules-next').disabled = true;
+    $('rules-prev').disabled = true;
+  }
+  if (debounce) state.rulesTimer = setTimeout(loadRules, 300);
+  else loadRules();
+}
+
 function renderRuleList() {
   const pipeline = $('pipeline-select').value;
   if (state.rulesLoading || state.rulesPipeline !== pipeline) { syncSelectionControls(); return; }
   $('rule-page-label').textContent = state.rules.length ? `${state.rulesFrom + 1}–${state.rulesFrom + state.rules.length}` : 'No rules';
+  $('rule-browser-label').textContent = `${state.rulesSearch ? 'MATCHING' : 'AVAILABLE'} RULES · ${state.rulesStatus === 'true' ? 'active' : state.rulesStatus === 'false' ? 'inactive' : 'active and inactive'}`;
   $('rule-list').innerHTML = state.rules.length ? state.rules.map((rule, i) => {
     const exists = state.targets.some(target => target.pipelineId === pipeline && target.ruleId === rule._id);
     return `<label class="rule-choice"><input type="checkbox" name="rule-choice" value="${i}" ${exists ? 'disabled' : ''}><div><div class="rule-choice-name">${escape(rule.ruleName)}${exists ? ' · added' : ''}</div><div class="rule-choice-meta">${escape(ruleDescription(rule))}</div><div class="cell-sub mono">${escape(rule._id)}</div></div>${badge(rule.isActive ? 'Active' : 'Inactive')}</label>`;
@@ -576,18 +635,75 @@ async function submitPreview(event) {
 }
 
 async function loadHistory() {
+  clearTimeout(state.historyTimer);
+  const version = ++state.historyVersion;
   try {
     const runs = await api.list();
-    $('history-list').innerHTML = runs.length ? [...runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 8).map(run =>
-      `<a href="/ui/auto-run/runs/${encodeURIComponent(run.id)}" data-route class="history-item"><div class="history-top"><span class="history-id">${escape(run.id)}</span>${badge(run.state)}</div>${directRun(run) ? '<div class="history-mode">Direct to gateway</div>' : ''}<div class="history-meta"><span>${number(run.counters.selected)} overlays</span><span>${escape(formatTime(run.createdAt))}</span></div></a>`).join('')
-      : '<p class="hint">No retained runs yet. Your first preview will appear here.</p>';
-  } catch (error) { $('history-list').innerHTML = `<p class="hint">${escape(error.message)}</p>`; }
+    if (version !== state.historyVersion || !$('history-list')) return;
+    const hadPending = state.historyPendingIds.size > 0;
+    state.history = [...runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    state.historyPendingIds = new Set(runs.filter(run => run.deletionRequested || state.historyPendingIds.has(run.id)).map(run => run.id));
+    if (hadPending && !state.historyPendingIds.size) $('history-status').textContent = 'Pending deletions finished. Their retained data has been released.';
+    renderHistory();
+  } catch (error) {
+    if (version !== state.historyVersion || !$('history-list')) return;
+    showError('history-error', error);
+  } finally {
+    if (version === state.historyVersion && state.historyPendingIds.size && $('configuration') && !$('configuration').hidden && !$('app').hidden)
+      state.historyTimer = setTimeout(loadHistory, 2000);
+  }
+}
+
+function renderHistory() {
+  const runs = state.history;
+  const focusedDelete = document.activeElement?.dataset.deleteRun;
+  const focusedLink = document.activeElement?.closest('.history-link')?.getAttribute('href');
+  const scrollTop = $('history-list').scrollTop;
+  $('delete-all-runs').disabled = !runs.length || state.historyDeleting || runs.every(run => state.historyPendingIds.has(run.id));
+  $('refresh-history').disabled = state.historyDeleting;
+  $('history-summary').textContent = `${number(runs.length)} retained run${runs.length === 1 ? '' : 's'} · ${bytes(runs.reduce((total, run) => total + (run.retainedBytes ?? 0), 0))} retained data`;
+  $('history-list').innerHTML = runs.length ? runs.map(run => {
+    const pending = state.historyPendingIds.has(run.id);
+    return `<article class="history-item"><a href="/ui/auto-run/runs/${encodeURIComponent(run.id)}" data-route class="history-link" aria-label="Open run ${escape(run.id)}"><div class="history-top"><span class="history-id">${escape(run.id)}</span>${badge(pending ? 'Deleting' : run.state)}</div>${directRun(run) ? '<div class="history-mode">Direct to gateway</div>' : ''}<div class="history-meta"><span>${number(run.counters.selected)} overlays</span><span>${escape(formatTime(run.createdAt))}</span></div></a><div class="history-storage"><span>${bytes(run.retainedBytes ?? 0)} retained</span><button type="button" class="button compact ghost" data-delete-run="${escape(run.id)}" aria-label="Delete run ${escape(run.id)}" ${state.historyDeleting || pending ? 'disabled' : ''}>${pending ? 'Deleting…' : 'Delete'}</button></div>${pending ? '<p class="hint">Stopping work before releasing retained data…</p>' : ''}</article>`;
+  }).join('') : '<p class="hint">No retained runs yet. Your first preview will appear here.</p>';
+  $('history-list').scrollTop = scrollTop;
+  if (focusedDelete || focusedLink) {
+    const replacement = focusedDelete
+      ? [...$('history-list').querySelectorAll('[data-delete-run]')].find(button => button.dataset.deleteRun === focusedDelete && !button.disabled)
+      : [...$('history-list').querySelectorAll('.history-link')].find(link => link.getAttribute('href') === focusedLink);
+    const fallback = $('history-summary');
+    fallback.tabIndex = -1;
+    (replacement ?? fallback).focus({ preventScroll: true });
+  }
+}
+
+async function deleteRuns(id = null) {
+  if (state.historyDeleting || (id && state.historyPendingIds.has(id))) return;
+  state.historyDeleting = true;
+  clearTimeout(state.historyTimer);
+  state.historyVersion++;
+  hideError('history-error');
+  $('history-status').textContent = id ? 'Deleting run…' : 'Deleting all retained runs…';
+  renderHistory();
+  try {
+    const result = await (id ? api.deleteRun(id) : api.deleteAllRuns());
+    state.history = state.history.filter(run => !result.deletedIds.includes(run.id));
+    for (const deleted of result.deletedIds) state.historyPendingIds.delete(deleted);
+    for (const pending of result.pendingIds) state.historyPendingIds.add(pending);
+    $('history-status').textContent = `${number(result.deletedIds.length)} deleted · ${bytes(result.releasedRetainedBytes)} retained data released.${result.pendingIds.length ? ` ${number(result.pendingIds.length)} awaiting in-flight work to stop.` : ''}`;
+  } catch (error) { showError('history-error', error); }
+  finally {
+    state.historyDeleting = false;
+    renderHistory();
+    await loadHistory();
+  }
 }
 
 function detailMarkup(id) {
   return `<a class="back-link" href="/ui/auto-run" data-route>← Back to configuration</a>
   <div class="page-heading run-heading"><div><div class="eyebrow">RUN WORKSPACE</div><h1>Review. Launch. Follow through.</h1><div class="run-id mono">${escape(id)}</div></div><div class="run-heading-actions"><span id="run-state">${badge('Loading')}</span><button id="cancel-run" type="button" class="button danger" hidden>Cancel</button><button id="rerun-run" type="button" class="button" title="Prepare a fresh preview using the original configuration and saved publication settings. Rules are read again; publication requires Start." hidden>Rerun</button><button id="start-run" type="button" class="button primary" hidden>Start run ↗</button></div></div>
   <div id="run-error" class="notice error" role="alert" hidden></div>
+  <div id="run-start-note" class="notice warning" role="status" hidden></div>
   <div id="run-notices" hidden></div>
   <div id="run-content" hidden>
     <div class="stat-grid">${[['selected', 'Selected', ''], ['confirmed', 'Confirmed', 'good'], ['failed', 'Failed', 'bad'], ['uncertain', 'Uncertain', 'warning'], ['remaining', 'Remaining', '']].map(([key, label, style]) =>
@@ -626,25 +742,51 @@ async function refreshRun(manual = false) {
     $('run-content').hidden = false;
     renderRun(run);
     await loadItems();
-    if (id === state.runId && version === state.refreshVersion && !terminal(run.state)) {
-      state.timer = setTimeout(() => refreshRun(), run.state === 'Ready' ? 5000 : 2000);
+    if (id === state.runId && version === state.refreshVersion && (!terminal(run.state) || run.deletionRequested)) {
+      state.timer = setTimeout(() => refreshRun(), run.state === 'Ready' && !run.deletionRequested ? 5000 : 2000);
     }
   } catch (error) {
     if (id !== state.runId || version !== state.refreshVersion) return;
     $('run-loading').hidden = true;
-    showError('run-error', error.status === 404 ? new Error('This run is no longer available. It may have expired, or the service may have restarted. Return to configuration to prepare a new preview.') : error);
+    if (error.status === 404) {
+      state.run = null;
+      $('run-content').hidden = true;
+      for (const control of ['start-run', 'cancel-run', 'rerun-run', 'run-start-note', 'run-notices']) $(control).hidden = true;
+    }
+    showError('run-error', error.status === 404 ? new Error('This run is no longer available. It may have been deleted, expired, or lost when the service restarted. Return to configuration to prepare a new preview.') : error);
     if (error.status !== 404 && (!state.run || !terminal(state.run.state))) state.timer = setTimeout(() => refreshRun(), 5000);
+  }
+}
+
+function renderRunActions(run) {
+  const pending = pendingRunActions.get(run.id);
+  const emptyReady = run.state === 'Ready' && run.counters.selected === 0;
+  $('start-run').hidden = run.state !== 'Ready';
+  $('start-run').disabled = run.state !== 'Ready' || run.counters.selected === 0 || Boolean(pending) || run.deletionRequested;
+  $('start-run').textContent = pending === 'start' ? 'Starting…' : 'Start run ↗';
+  $('rerun-run').hidden = ['Preparing', 'Publishing'].includes(run.state);
+  $('rerun-run').disabled = state.rerunPending || Boolean(pending) || run.deletionRequested;
+  $('cancel-run').hidden = terminal(run.state);
+  $('cancel-run').disabled = Boolean(pending) || run.deletionRequested;
+  const reason = run.deletionRequested ? 'Deletion requested. Future work is cancelled; retained data will be released after in-flight work finishes.' : emptyReady
+    ? 'Start is unavailable because this preview contains no selected overlays. Review the search notes and invalid-record counts, then adjust the criteria or provider settings and prepare a new preview.'
+    : pending === 'start' ? 'Starting the run. Waiting for Rules API to confirm the request.' : '';
+  $('run-start-note').textContent = reason;
+  $('run-start-note').hidden = !reason;
+  $('run-start-note').classList.toggle('warning', emptyReady);
+  if (reason) {
+    $('start-run').setAttribute('aria-describedby', 'run-start-note');
+    $('start-run').title = reason;
+  } else {
+    $('start-run').removeAttribute('aria-describedby');
+    $('start-run').removeAttribute('title');
   }
 }
 
 function renderRun(run) {
   const direct = directRun(run);
-  $('run-state').innerHTML = badge(run.state);
-  $('start-run').hidden = run.state !== 'Ready';
-  $('start-run').disabled = run.counters.selected === 0;
-  $('rerun-run').hidden = ['Preparing', 'Publishing'].includes(run.state);
-  $('rerun-run').disabled = state.rerunPending;
-  $('cancel-run').hidden = terminal(run.state);
+  $('run-state').innerHTML = badge(run.deletionRequested ? 'Deleting' : run.state);
+  renderRunActions(run);
   for (const key of ['selected', 'confirmed', 'failed', 'uncertain', 'remaining']) $(`count-${key}`).textContent = number(run.counters[key]);
   const complete = run.counters.confirmed + run.counters.failed + run.counters.uncertain;
   const percent = run.counters.selected ? Math.min(100, Math.round(complete / run.counters.selected * 100)) : 0;
@@ -652,7 +794,8 @@ function renderRun(run) {
   $('run-progress').setAttribute('aria-valuenow', String(percent));
   $('progress-value').textContent = run.state === 'Preparing' ? `${number(run.counters.scanned)} scanned` : `${percent}%`;
   $('progress-label').textContent = {
-    Preparing: direct ? 'Fetching overlays…' : 'Fetching and matching overlays…', Ready: 'Preview ready · review the selection, then start',
+    Preparing: direct ? 'Fetching overlays…' : 'Fetching and matching overlays…',
+    Ready: run.counters.selected > 0 ? 'Preview ready · review the selection, then start' : 'Preparation finished · no overlays selected',
     Publishing: `Publishing · ${Number(run.confirmedPerSecond || 0).toFixed(1)} confirmed/s`,
     Completed: 'Publication complete · submissions confirmed by RabbitMQ',
     CompletedWithErrors: 'Publication finished · inspect failed and uncertain items',
@@ -664,7 +807,8 @@ function renderRun(run) {
     ...(!direct ? [`Observed matches ${number(run.counters.observedMatches)}`] : []),
     `Duplicates ${number(run.counters.duplicates)}`, `Invalid ${number(run.counters.invalid)}`,
     `In flight ${number(run.counters.inFlight)}`, `Source ${run.sourceExhausted ? 'exhausted' : 'not exhausted'}`,
-    `Created ${formatTime(run.createdAt)}`, ...(run.expiresAt ? [`Expires ${formatTime(run.expiresAt)}`] : [])
+    `Created ${formatTime(run.createdAt)}`, ...(run.expiresAt ? [`Expires ${formatTime(run.expiresAt)}`] : []),
+    `Retained data ${bytes(run.retainedBytes ?? 0)}`
   ].map(value => `<span>${escape(value)}</span>`).join('');
   $('run-memory').hidden = !run.memory;
   if (run.memory) {
@@ -672,7 +816,7 @@ function renderRun(run) {
     $('run-memory').classList.toggle('under-pressure', Boolean(run.memory.isUnderPressure));
   }
   const warnings = [...run.warnings];
-  if (run.shortfall > 0) warnings.unshift(`Overall minimum shortfall: ${number(run.shortfall)} overlays. The available selection can still run.`);
+  if (run.shortfall > 0) warnings.unshift(`Overall minimum shortfall: ${number(run.shortfall)} overlays. ${run.counters.selected > 0 ? 'The available selection can still run.' : 'No selected overlays are available to run.'}`);
   const limitedSearch = !run.sourceExhausted && ({
     memoryLimit: 'Scanning stopped to protect service memory.',
     payloadBudget: 'Scanning stopped at the retained payload budget.',
@@ -699,7 +843,7 @@ function renderRun(run) {
     $('run-batch-size').value = run.publication.batchSize;
     $('run-delay-ms').value = run.publication.delayMs;
   }
-  const canUpdate = ['Preparing', 'Ready', 'Publishing'].includes(run.state);
+  const canUpdate = !run.deletionRequested && ['Preparing', 'Ready', 'Publishing'].includes(run.state);
   $('update-publication').disabled = !canUpdate;
   $('run-batch-size').disabled = !canUpdate;
   $('run-delay-ms').disabled = !canUpdate;
@@ -732,9 +876,11 @@ async function loadItems() {
 
 async function runAction(action) {
   const id = state.runId;
-  if (!id) return;
-  const button = $(`${action}-run`);
-  button.disabled = true;
+  if (!id || !state.run || state.run.deletionRequested || pendingRunActions.has(id)) return;
+  if (action === 'start' && (state.run.state !== 'Ready' || state.run.counters.selected === 0)) return;
+  if (action === 'cancel' && terminal(state.run.state)) return;
+  pendingRunActions.set(id, action);
+  renderRunActions(state.run);
   hideError('run-error');
   try {
     const run = await api[action](id);
@@ -743,12 +889,15 @@ async function runAction(action) {
     toast(action === 'start' ? 'Publication started.' : 'Cancellation requested. Already queued messages remain queued.');
     await refreshRun();
   } catch (error) { if (id === state.runId) showError('run-error', error); }
-  finally { if (id === state.runId) button.disabled = false; }
+  finally {
+    pendingRunActions.delete(id);
+    if (id === state.runId && state.run) renderRunActions(state.run);
+  }
 }
 
 async function rerun() {
   const id = state.runId;
-  if (!id || !state.run || state.rerunPending || ['Preparing', 'Publishing'].includes(state.run.state)) return;
+  if (!id || !state.run || state.run.deletionRequested || state.rerunPending || pendingRunActions.has(id) || ['Preparing', 'Publishing'].includes(state.run.state)) return;
   state.rerunPending = true;
   $('rerun-run').disabled = true;
   $('rerun-run').textContent = 'Preparing…';

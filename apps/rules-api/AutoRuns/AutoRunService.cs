@@ -60,14 +60,14 @@ public sealed class AutoRunService(
             EnsureAvailable();
             EnsureMemoryAvailable(rulesBytes + 4096);
             if (_jobs.Count >= _options.MaxRetainedJobs)
-                throw new AutoRunRequestException(409, "The retained-job limit is reached. Wait for previews/summaries to expire.");
+                throw new AutoRunRequestException(409, "The retained-job limit is reached. Delete an unused run or wait for previews/summaries to expire.");
             if (rulesBytes > _options.PayloadBudgetBytes - _retainedBytes)
-                throw new AutoRunRequestException(409, "The retained payload budget is full. Cancel an unused preview or wait for expiry.");
+                throw new AutoRunRequestException(409, "The retained payload budget is full. Delete an unused run or wait for expiry.");
             job.RuleBytes = rulesBytes;
             _retainedBytes += rulesBytes;
             _jobs.Add(job.Id, job);
             _active = job.Id;
-            _work.Writer.TryWrite(job);
+            Enqueue(job);
             return Summary(job);
         }
 
@@ -85,6 +85,7 @@ public sealed class AutoRunService(
         {
             Sweep();
             var job = Find(id);
+            EnsureNotDeleting(job);
             if (job.State is AutoRunState.Preparing or AutoRunState.Publishing)
                 throw new AutoRunRequestException(409, "Wait for the active run to finish or cancel it before preparing a rerun.");
             request = job.Request with { Publication = job.Publication with { } };
@@ -125,17 +126,18 @@ public sealed class AutoRunService(
         {
             Sweep();
             var job = Find(id);
+            EnsureNotDeleting(job);
             if (job.StartedAt is not null) return Summary(job);
             if (job.State != AutoRunState.Ready)
                 throw new AutoRunRequestException(409, "Only a ready, unexpired preview can be started.");
             if (job.Items.Count == 0)
-                throw new AutoRunRequestException(409, "This preview has no selected overlays to publish. Narrow the search or adjust its resource limits and prepare again.");
+                throw new AutoRunRequestException(409, "This preview has no selected overlays to publish. Review the search notes and errors, adjust the criteria or provider settings, and prepare again.");
             EnsureAvailable();
             job.State = AutoRunState.Publishing;
             job.StartedAt = time.GetUtcNow();
             job.ActivePublication = job.Publication;
             _active = id;
-            _work.Writer.TryWrite(job);
+            Enqueue(job);
             return Summary(job);
         }
     }
@@ -147,6 +149,7 @@ public sealed class AutoRunService(
         {
             Sweep();
             var job = Find(id);
+            EnsureNotDeleting(job);
             if (job.State is not (AutoRunState.Preparing or AutoRunState.Ready or AutoRunState.Publishing))
                 throw new AutoRunRequestException(409, "Publication settings cannot change for a terminal job.");
             job.Publication = settings with { };
@@ -175,50 +178,118 @@ public sealed class AutoRunService(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) =>
         await Task.WhenAll(ProcessAsync(stoppingToken), SweepAsync(stoppingToken));
 
+    public AutoRunDeletionResult Delete(string id)
+    {
+        lock (_gate)
+        {
+            Sweep();
+            return DeleteJobs([Find(id)]);
+        }
+    }
+
+    public AutoRunDeletionResult DeleteAll()
+    {
+        lock (_gate)
+        {
+            Sweep();
+            return DeleteJobs(_jobs.Values.ToArray());
+        }
+    }
+
+    // Work includes both queued and executing entries. A preview can be started as soon as
+    // it becomes Ready, before its preparation worker finishes unwinding.
+    private void Enqueue(Job job)
+    {
+        job.OutstandingWork++;
+        _work.Writer.TryWrite(job);
+    }
+
+    private AutoRunDeletionResult DeleteJobs(IReadOnlyList<Job> jobs)
+    {
+        var deleted = new List<string>();
+        var pending = new List<string>();
+        long released = 0;
+        foreach (var job in jobs)
+        {
+            job.DeletionRequested = true;
+            if (job.OutstandingWork > 0)
+            {
+                job.Cancellation.Cancel();
+                AddWarning(job, "Deletion requested. Future work is cancelled; already submitted messages cannot be recalled. Retained data will be released after in-flight work ends.");
+                pending.Add(job.Id);
+            }
+            else
+            {
+                released += Remove(job);
+                deleted.Add(job.Id);
+            }
+        }
+        return new(deleted, pending, released);
+    }
+
+    private static void EnsureNotDeleting(Job job)
+    {
+        if (job.DeletionRequested)
+            throw new AutoRunRequestException(409, "This run is being deleted. Wait for its in-flight work to finish.");
+    }
+
     private async Task ProcessAsync(CancellationToken stoppingToken)
     {
         try
         {
             await foreach (var job in _work.Reader.ReadAllAsync(stoppingToken))
             {
-                using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, job.Cancellation.Token);
-                using var scope = logger.BeginScope(new Dictionary<string, object?> { ["auto_run.id"] = job.Id });
-                using var activity = TelemetrySources.RulesApi.StartActivity(
-                    job.State == AutoRunState.Preparing ? "auto_run.prepare" : "auto_run.publish",
-                    ActivityKind.Internal, job.TraceContext);
-                activity?.SetTag("auto_run.id", job.Id);
-                try
-                {
-                    linked.Token.ThrowIfCancellationRequested();
-                    if (job.State == AutoRunState.Preparing) await PrepareAsync(job, linked.Token);
-                    else await PublishAsync(job, linked.Token);
-                }
-                catch (OperationCanceledException) when (linked.IsCancellationRequested)
-                {
-                    lock (_gate) Finish(job, AutoRunState.Cancelled);
-                }
-                catch (Exception ex)
-                {
-                    activity?.SetStatus(ActivityStatusCode.Error, "Auto-run failed.");
-                    logger.LogError(ex, "Auto-run failed.");
-                    lock (_gate)
-                    {
-                        AddError(job, ex is InvalidOperationException or ArgumentException or HttpRequestException or ElasticProviderException
-                            ? ex.Message : "Auto-run failed. Check the service logs using the run ID.");
-                        Finish(job, AutoRunState.Failed);
-                    }
-                }
+                try { await ProcessJobAsync(job, stoppingToken); }
                 finally
                 {
                     lock (_gate)
                     {
-                        logger.LogInformation("Auto-run is {AutoRunState}; selected {Selected}, confirmed {Confirmed}, failed {Failed}, uncertain {Uncertain}.",
-                            job.State, job.Items.Count, job.Confirmed, job.Failed, job.Uncertain);
+                        job.OutstandingWork--;
+                        if (job.DeletionRequested && job.OutstandingWork == 0) Remove(job);
                     }
                 }
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+    }
+
+    private async Task ProcessJobAsync(Job job, CancellationToken stoppingToken)
+    {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, job.Cancellation.Token);
+        using var scope = logger.BeginScope(new Dictionary<string, object?> { ["auto_run.id"] = job.Id });
+        using var activity = TelemetrySources.RulesApi.StartActivity(
+            job.State == AutoRunState.Preparing ? "auto_run.prepare" : "auto_run.publish",
+            ActivityKind.Internal, job.TraceContext);
+        activity?.SetTag("auto_run.id", job.Id);
+        try
+        {
+            linked.Token.ThrowIfCancellationRequested();
+            if (job.State == AutoRunState.Preparing) await PrepareAsync(job, linked.Token);
+            else await PublishAsync(job, linked.Token);
+        }
+        catch (OperationCanceledException) when (linked.IsCancellationRequested)
+        {
+            lock (_gate) Finish(job, AutoRunState.Cancelled);
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, "Auto-run failed.");
+            logger.LogError(ex, "Auto-run failed.");
+            lock (_gate)
+            {
+                AddError(job, ex is InvalidOperationException or ArgumentException or HttpRequestException or ElasticProviderException
+                    ? ex.Message : "Auto-run failed. Check the service logs using the run ID.");
+                Finish(job, AutoRunState.Failed);
+            }
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                logger.LogInformation("Auto-run is {AutoRunState}; selected {Selected}, confirmed {Confirmed}, failed {Failed}, uncertain {Uncertain}.",
+                    job.State, job.Items.Count, job.Confirmed, job.Failed, job.Uncertain);
+            }
+        }
     }
 
     private async Task PrepareAsync(Job job, CancellationToken cancellationToken)
@@ -308,7 +379,8 @@ public sealed class AutoRunService(
             foreach (var item in job.Items)
                 foreach (var index in item.Assignments) job.SelectedByTarget[index]++;
             if (job.Items.Count < job.Request.MinOverlays || job.Targets.Where((t, i) => job.SelectedByTarget[i] < t.Target.MinOverlays).Any())
-                AddWarning(job, "One or more minimums are not met by this selection. Available overlays can still be submitted.");
+                AddWarning(job, "One or more minimums are not met by this selection. " +
+                    (job.Items.Count > 0 ? "Available overlays can still be submitted." : "No selected overlays are available to submit."));
             job.ReadyAt = time.GetUtcNow();
             job.State = AutoRunState.Ready;
             if (_active == job.Id) _active = null;
@@ -379,7 +451,7 @@ public sealed class AutoRunService(
                 };
                 var errors = target.Rule.RunParams!.SelectMany(p => target.Contract.ValidateContext(unitContext, p)).ToArray();
                 if (errors.Length == 0) matches.Add(index);
-                else lock (_gate) AddError(job, $"Overlay '{overlay.Input.ImageId}' cannot enter pipeline '{target.Target.PipelineId}': {string.Join("; ", errors.Select(e => e.Message))}");
+                else lock (_gate) AddError(job, $"Overlay '{overlay.Input.ImageId}' cannot enter pipeline '{target.Target.PipelineId}': {string.Join("; ", errors.Select(e => $"{e.Field}: {e.Message}"))}");
             }
             if (matches.Count == 0)
             {
@@ -417,7 +489,7 @@ public sealed class AutoRunService(
             {
                 if (job.StoppedReason is not null) return;
                 job.StoppedReason = reason;
-                AddWarning(job, message + " Search coverage is incomplete. Already collected overlays will be selected and can be started; narrow the search for a smaller preparation.");
+                AddWarning(job, message + " Search coverage is incomplete. Any eligible overlays already collected will be selected for review; narrow the search for a smaller preparation.");
                 logger.LogWarning("Auto-run preparation stopped at {StoppedReason}; retaining {CandidateCount} candidates.", reason, candidates.Count);
             }
         }
@@ -501,12 +573,29 @@ public sealed class AutoRunService(
             if (job.State == AutoRunState.Ready && now >= job.ReadyAt!.Value.AddMinutes(_options.ReadyLifetimeMinutes))
                 Finish(job, AutoRunState.Expired);
         foreach (var job in _jobs.Values.Where(j => j.FinishedAt is { } finished &&
-                     now >= finished.AddMinutes(_options.SummaryLifetimeMinutes)).ToArray())
-        {
-            _retainedBytes -= job.RuleBytes;
-            job.Cancellation.Dispose();
-            _jobs.Remove(job.Id);
-        }
+                     now >= finished.AddMinutes(_options.SummaryLifetimeMinutes) && j.OutstandingWork == 0).ToArray())
+            Remove(job);
+    }
+
+    // Only remove once every queued/executing entry has released the job and its linked token.
+    private long Remove(Job job)
+    {
+        var released = job.RuleBytes + job.PayloadBytes;
+        _retainedBytes -= released;
+        job.RuleBytes = job.PayloadBytes = 0;
+        _jobs.Remove(job.Id);
+        if (_active == job.Id) _active = null;
+        job.Cancellation.Dispose();
+        // Channel enumerators may retain the last job while idle. Clear its heavy references
+        // so deletion releases the data even before another run reaches the worker.
+        foreach (var item in job.Items) item.Payload = null;
+        job.Items = [];
+        job.Queries = [];
+        job.Targets = [];
+        job.Request = null!;
+        job.Warnings.Clear();
+        job.Errors.Clear();
+        return released;
     }
 
     private void Finish(Job job, AutoRunState state)
@@ -545,7 +634,7 @@ public sealed class AutoRunService(
         job.Publication, job.ActivePublication, job.Publication != job.ActivePublication,
         job.SourceExhausted, job.StoppedReason, job.Warnings.ToArray(), job.Errors.ToArray(), job.Queries,
         job.StartedAt is { } start ? job.Confirmed / Math.Max(1, ((job.FinishedAt ?? time.GetUtcNow()) - start).TotalSeconds) : 0,
-        memory?.Snapshot());
+        memory?.Snapshot(), job.RuleBytes + job.PayloadBytes, job.DeletionRequested);
 
     private void Validate(AutoRunPreviewRequest request)
     {
@@ -612,8 +701,8 @@ public sealed class AutoRunService(
     private sealed class Job(AutoRunPreviewRequest request, IReadOnlyList<AutoRunResolvedTarget> targets, DateTimeOffset createdAt, int maximum)
     {
         public string Id { get; } = Guid.NewGuid().ToString("N");
-        public AutoRunPreviewRequest Request { get; } = request;
-        public IReadOnlyList<AutoRunResolvedTarget> Targets { get; } = targets;
+        public AutoRunPreviewRequest Request { get; set; } = request;
+        public IReadOnlyList<AutoRunResolvedTarget> Targets { get; set; } = targets;
         public bool IsDirect { get; } = request.Targets.Count == 0;
         public int Maximum { get; } = maximum;
         public DateTimeOffset CreatedAt { get; } = createdAt;
@@ -631,6 +720,8 @@ public sealed class AutoRunService(
         public AutoRunPublication ActivePublication { get; set; } = request.Publication!;
         public long RuleBytes { get; set; }
         public long PayloadBytes { get; set; }
+        public int OutstandingWork { get; set; }
+        public bool DeletionRequested { get; set; }
         public int Scanned, Invalid, Duplicates, ObservedMatches, Confirmed, Failed, Uncertain, InFlight;
         public int[] SelectedByTarget { get; } = new int[targets.Count];
         public int[] ConfirmedByTarget { get; } = new int[targets.Count];

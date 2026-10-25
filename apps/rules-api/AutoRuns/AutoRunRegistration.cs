@@ -32,6 +32,8 @@ public static class AutoRunRegistration
                 ElasticProviderHeaders.ValidationError)
             .Validate(options => options.TimeoutSeconds > 0,
                 "Elastic Provider timeout must be positive.")
+            .Validate(options => options.To is >= 0 and <= 10_000,
+                "Elastic Provider To must be between 0 and 10000.")
             .Validate(options => options.MaxResponseBytes is > 0 and <= 536_870_912,
                 "Elastic Provider MaxResponseBytes must be between 1 and 536870912 bytes.")
             .Validate(options => !configuration.GetValue<bool>("AutoRun:Enabled") ||

@@ -35,12 +35,14 @@ public sealed class PipelineRulesController : ControllerBase
     [ProducesResponseType(typeof(IReadOnlyList<string>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> GetAll(
         [FromRoute] string pipelineId,
         [FromQuery] bool getNameOnly = false,
         [FromQuery] bool? isActive = null,
         [FromQuery] int from = 0,
         [FromQuery] int? size = null,
+        [FromQuery] string? search = null,
         CancellationToken cancellationToken = default)
     {
         var searchSize = size ?? _options.DefaultSearchSize;
@@ -49,9 +51,22 @@ public sealed class PipelineRulesController : ControllerBase
             return BadRequest(new { error });
         }
 
-        return getNameOnly
-            ? Ok(await _service.GetRuleNamesAsync(pipelineId, isActive, from, searchSize, cancellationToken))
-            : Ok(await _service.GetRulesAsync(pipelineId, isActive, from, searchSize, cancellationToken));
+        search = search?.Trim();
+        if (search?.Length > 200)
+        {
+            return BadRequest(new { error = "search cannot exceed 200 characters." });
+        }
+
+        try
+        {
+            return getNameOnly
+                ? Ok(await _service.GetRuleNamesAsync(pipelineId, isActive, from, searchSize, cancellationToken, search))
+                : Ok(await _service.GetRulesAsync(pipelineId, isActive, from, searchSize, cancellationToken, search));
+        }
+        catch (RuleSearchLimitException exception)
+        {
+            return UnprocessableEntity(new { error = exception.Message });
+        }
     }
 
     [HttpGet("{id}")]

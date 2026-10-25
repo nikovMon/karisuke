@@ -52,21 +52,42 @@ public sealed class PipelineRuleService
         bool? isActive,
         int from,
         int size,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? search = null)
     {
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            return await Search(pipelineId, isActive, from, size, search, namesOnly: false, cancellationToken);
+        }
+
         var documents = await Index(pipelineId).SearchAsync<PipelineRuleDocument>(isActive, from, size, cancellationToken);
         return documents
             .Select(HydrateId)
             .ToArray();
     }
 
-    public Task<IReadOnlyList<string>> GetRuleNamesAsync(
+    public async Task<IReadOnlyList<string>> GetRuleNamesAsync(
         string pipelineId,
         bool? isActive,
         int from,
         int size,
-        CancellationToken cancellationToken = default) =>
-        Index(pipelineId).SearchNamesAsync(isActive, from, size, cancellationToken);
+        CancellationToken cancellationToken = default,
+        string? search = null)
+    {
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var rules = await Search(pipelineId, isActive, from, size, search, namesOnly: true, cancellationToken);
+            return rules.Select(rule => rule.RuleName).ToArray();
+        }
+
+        return await Index(pipelineId).SearchNamesAsync(isActive, from, size, cancellationToken);
+    }
+
+    private Task<IReadOnlyList<PipelineRuleDocument>> Search(
+        string pipelineId, bool? isActive, int from, int size, string search,
+        bool namesOnly, CancellationToken cancellationToken) =>
+        new PipelineRuleSearch(_client, _logger).SearchAsync(
+            _ruleSources.Resolve(pipelineId).IndexName, isActive, from, size, search.Trim(), namesOnly, cancellationToken);
 
     public async Task<PipelineRuleDocument?> GetByIdAsync(
         string pipelineId,

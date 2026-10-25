@@ -82,7 +82,10 @@ public sealed record AutoRunSummary(
     AutoRunPublication Publication, AutoRunPublication ActivePublication, bool PublicationChangePending,
     bool SourceExhausted, string? StoppedReason, IReadOnlyList<string> Warnings,
     IReadOnlyList<string> Errors, IReadOnlyList<JsonElement> Queries, double ConfirmedPerSecond,
-    AutoRunMemorySnapshot? Memory = null);
+    AutoRunMemorySnapshot? Memory = null, long RetainedBytes = 0, bool DeletionRequested = false);
+
+public sealed record AutoRunDeletionResult(
+    IReadOnlyList<string> DeletedIds, IReadOnlyList<string> PendingIds, long ReleasedRetainedBytes);
 
 public sealed record AutoRunItemTarget(string PipelineId, string RuleId);
 public sealed record AutoRunItem(
