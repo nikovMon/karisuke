@@ -27,6 +27,46 @@ public sealed class AutoRunApiTests
     private const string Area = "POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))";
 
     [Theory]
+    [InlineData(AutoRunSourceMode.Rules, false)]
+    [InlineData(AutoRunSourceMode.OverlayIds, false)]
+    [InlineData(AutoRunSourceMode.Filters, true)]
+    [InlineData(AutoRunSourceMode.OverlayIds, true)]
+    public async Task WholeDecimalProviderDimensionsPrepareAndPublishAsGatewayIntegers(AutoRunSourceMode mode, bool direct)
+    {
+        using var fixture = new Fixture();
+        using var width = JsonDocument.Parse("8836.0");
+        using var height = JsonDocument.Parse("3608.0");
+        fixture.Provider.ImageWidth = width.RootElement;
+        fixture.Provider.ImageHeight = height.RootElement;
+        if (!direct) fixture.Store.Add(RulesIndex, "shared-rule", Rule("Dimension test", "tenant"));
+        var request = Request() with
+        {
+            Source = new() { Mode = mode, OverlayIds = mode == AutoRunSourceMode.OverlayIds ? ["overlay-1"] : null },
+            Targets = direct ? [] : Request().Targets
+        };
+
+        using var accepted = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", request, AutoRunJson.Options);
+        await AssertStatus(accepted, HttpStatusCode.Accepted);
+        var created = await Read<AutoRunSummary>(accepted);
+        var ready = await WaitForState(fixture.Client, created.Id, AutoRunState.Ready);
+        Assert.Equal(1, ready.Counters.Selected);
+        Assert.Equal(0, ready.Counters.Invalid);
+        Assert.Empty(ready.Errors);
+
+        using var started = await fixture.Client.PostAsync($"/auto-runs/{created.Id}/start", null);
+        await AssertStatus(started, HttpStatusCode.OK);
+        var completed = await WaitForState(fixture.Client, created.Id, AutoRunState.Completed);
+        Assert.Equal(1, completed.Counters.Confirmed);
+        using var message = JsonDocument.Parse(Assert.Single(fixture.Broker.Messages).Message.Body);
+        var overlay = direct ? message.RootElement : message.RootElement.GetProperty("overlay");
+        Assert.Equal("8836", overlay.GetProperty("width").GetRawText());
+        Assert.Equal("3608", overlay.GetProperty("height").GetRawText());
+        var gatewayInput = GatewayInputMessageParser.Parse(Encoding.UTF8.GetBytes(overlay.GetRawText()));
+        Assert.Equal(8836, gatewayInput.ImageWidth);
+        Assert.Equal(3608, gatewayInput.ImageHeight);
+    }
+
+    [Theory]
     [InlineData(AutoRunSourceMode.Rules)]
     [InlineData(AutoRunSourceMode.Filters)]
     public async Task PreviewThroughPublicationUsesRealAdaptersAndFrozenScopedHistoricalData(AutoRunSourceMode mode)
@@ -67,7 +107,7 @@ public sealed class AutoRunApiTests
         Assert.Equal(2, providerCalls.Length);
         Assert.All(providerCalls, call => Assert.Equal(HttpMethod.Post, call.Method));
         Assert.Equal(providerCalls[0].Body, providerCalls[1].Body);
-        Assert.Equal("?searchAfter=next", providerCalls[1].Uri.Query);
+        Assert.Equal("?searchAfter=next&to=1000", providerCalls[1].Uri.Query);
         using (var query = JsonDocument.Parse(providerCalls[0].Body!))
         {
             var clauses = query.RootElement.GetProperty("filter").GetProperty("logical_operators").GetProperty("AND")
@@ -241,7 +281,7 @@ public sealed class AutoRunApiTests
         Assert.Equal(2, calls.Length);
         Assert.All(calls, call => Assert.Equal(HttpMethod.Post, call.Method));
         Assert.Equal(calls[0].Body, calls[1].Body);
-        Assert.Equal("?searchAfter=next", calls[1].Uri.Query);
+        Assert.Equal("?searchAfter=next&to=1000", calls[1].Uri.Query);
         using (var query = JsonDocument.Parse(calls[0].Body!))
         {
             var clauses = query.RootElement.GetProperty("filter").GetProperty("logical_operators").GetProperty("AND")
@@ -412,6 +452,7 @@ public sealed class AutoRunApiTests
     [InlineData("POST", "/auto-runs/missing/start", HttpStatusCode.NotFound)]
     [InlineData("POST", "/auto-runs/missing/rerun", HttpStatusCode.NotFound)]
     [InlineData("POST", "/auto-runs/missing/cancel", HttpStatusCode.NotFound)]
+    [InlineData("DELETE", "/auto-runs/missing", HttpStatusCode.NotFound)]
     [InlineData("GET", "/auto-runs/missing/items?from=-1", HttpStatusCode.BadRequest)]
     [InlineData("GET", "/auto-runs/missing/items?size=201", HttpStatusCode.BadRequest)]
     [InlineData("GET", "/auto-runs/missing/items?outcome=wrong", HttpStatusCode.BadRequest)]
@@ -457,6 +498,86 @@ public sealed class AutoRunApiTests
     }
 
     [Fact]
+    public async Task RunSizesAndSingleAndBulkDeletionAreAvailableAsJson()
+    {
+        using var fixture = new Fixture();
+        var request = Request() with { Targets = [] };
+        using var accepted = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", request, AutoRunJson.Options);
+        var created = await Read<AutoRunSummary>(accepted);
+        var ready = await WaitForState(fixture.Client, created.Id, AutoRunState.Ready);
+        Assert.True(ready.RetainedBytes > 0);
+        Assert.False(ready.DeletionRequested);
+        using var history = await fixture.Client.GetAsync("/auto-runs");
+        Assert.Equal(ready.RetainedBytes, Assert.Single(await Read<List<AutoRunSummary>>(history)).RetainedBytes);
+
+        using var response = await fixture.Client.DeleteAsync($"/auto-runs/{ready.Id}");
+        Assert.Contains(response.StatusCode, new[] { HttpStatusCode.OK, HttpStatusCode.Accepted });
+        var deletion = await Read<AutoRunDeletionResult>(response);
+        Assert.Contains(ready.Id, deletion.DeletedIds.Concat(deletion.PendingIds));
+        if (response.StatusCode == HttpStatusCode.OK) Assert.Equal(ready.RetainedBytes, deletion.ReleasedRetainedBytes);
+        await WaitUntilDeleted(fixture.Client, ready.Id);
+        using var items = await fixture.Client.GetAsync($"/auto-runs/{ready.Id}/items");
+        await AssertStatus(items, HttpStatusCode.NotFound);
+
+        using var next = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", request, AutoRunJson.Options);
+        var second = await Read<AutoRunSummary>(next);
+        await WaitForState(fixture.Client, second.Id, AutoRunState.Ready);
+        using var bulk = await fixture.Client.DeleteAsync("/auto-runs");
+        Assert.Contains(bulk.StatusCode, new[] { HttpStatusCode.OK, HttpStatusCode.Accepted });
+        var bulkResult = await Read<AutoRunDeletionResult>(bulk);
+        Assert.Contains(second.Id, bulkResult.DeletedIds.Concat(bulkResult.PendingIds));
+        await WaitUntilDeleted(fixture.Client, second.Id);
+        using var empty = await fixture.Client.DeleteAsync("/auto-runs");
+        await AssertStatus(empty, HttpStatusCode.OK);
+        var noOp = await Read<AutoRunDeletionResult>(empty);
+        Assert.Empty(noOp.DeletedIds);
+        Assert.Empty(noOp.PendingIds);
+        Assert.Equal(0, noOp.ReleasedRetainedBytes);
+        Assert.Empty(fixture.Broker.Messages);
+    }
+
+    [Fact]
+    public async Task DeletingActiveRunReturnsAcceptedUntilProviderWorkFinishes()
+    {
+        using var fixture = new Fixture();
+        var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Provider.BeforeResponse = _ => { requested.TrySetResult(); return release.Task; };
+        try
+        {
+            using var accepted = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", Request() with { Targets = [] }, AutoRunJson.Options);
+            var created = await Read<AutoRunSummary>(accepted);
+            await requested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            using var response = await fixture.Client.DeleteAsync($"/auto-runs/{created.Id}");
+            await AssertStatus(response, HttpStatusCode.Accepted);
+            var result = await Read<AutoRunDeletionResult>(response);
+            Assert.Equal([created.Id], result.PendingIds);
+            Assert.Empty(result.DeletedIds);
+            Assert.Equal(0, result.ReleasedRetainedBytes);
+            using var status = await fixture.Client.GetAsync($"/auto-runs/{created.Id}");
+            Assert.True((await Read<AutoRunSummary>(status)).DeletionRequested);
+            using var start = await fixture.Client.PostAsync($"/auto-runs/{created.Id}/start", null);
+            await AssertStatus(start, HttpStatusCode.Conflict);
+            release.TrySetResult();
+            await WaitUntilDeleted(fixture.Client, created.Id);
+            Assert.Empty(fixture.Broker.Messages);
+        }
+        finally { release.TrySetResult(); }
+    }
+
+    private static async Task WaitUntilDeleted(HttpClient client, string id)
+    {
+        var deadline = Stopwatch.StartNew();
+        while (deadline.Elapsed < TimeSpan.FromSeconds(5))
+        {
+            using var response = await client.GetAsync($"/auto-runs/{id}");
+            if (response.StatusCode == HttpStatusCode.NotFound) return;
+            await Task.Delay(10);
+        }
+        Assert.Fail("Run was not deleted after in-flight work ended.");
+    }
+
+    [Fact]
     public async Task DisabledFeatureStillExposesOptionsAndUiButRejectsPreview()
     {
         using var fixture = new Fixture(enabled: false);
@@ -478,7 +599,7 @@ public sealed class AutoRunApiTests
     }
 
     [Fact]
-    public async Task OptionsExposeConfiguredMapResponseLimitAndMemorySnapshotWithoutProviderSecrets()
+    public async Task OptionsExposeConfiguredMapProviderLimitsAndMemorySnapshotWithoutProviderSecrets()
     {
         const string mapUrl = "https://maps.example/viewer?mode=selection";
         const string secret = "options-provider-secret-canary";
@@ -492,6 +613,8 @@ public sealed class AutoRunApiTests
         {
             ["AutoRun:Ui:MapUrl"] = mapUrl,
             ["AutoRun:Provider:MaxResponseBytes"] = responseLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["AutoRun:Provider:TimeoutSeconds"] = "120",
+            ["AutoRun:Provider:To"] = "2500",
             ["AutoRun:Memory:LimitBytes"] = memoryLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["AutoRun:Memory:MaxUsagePercent"] = "75",
             ["AutoRun:Memory:MinimumFreeBytes"] = "33554432"
@@ -504,6 +627,8 @@ public sealed class AutoRunApiTests
         var options = document.RootElement;
         Assert.Equal(mapUrl, options.GetProperty("ui").GetProperty("mapUrl").GetString());
         Assert.Equal(responseLimit, options.GetProperty("provider").GetProperty("maxResponseBytes").GetInt32());
+        Assert.Equal(120, options.GetProperty("provider").GetProperty("timeoutSeconds").GetInt32());
+        Assert.Equal(2500, options.GetProperty("provider").GetProperty("to").GetInt32());
         var memory = options.GetProperty("memory");
         Assert.InRange(memory.GetProperty("limitBytes").GetInt64(), 0, memoryLimit);
         Assert.True(memory.GetProperty("availableBytes").GetInt64() >= 0);
@@ -527,6 +652,8 @@ public sealed class AutoRunApiTests
         await AssertStatus(response, HttpStatusCode.OK);
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal(64 * 1024 * 1024, document.RootElement.GetProperty("provider").GetProperty("maxResponseBytes").GetInt32());
+        Assert.Equal(30, document.RootElement.GetProperty("provider").GetProperty("timeoutSeconds").GetInt32());
+        Assert.Equal(1000, document.RootElement.GetProperty("provider").GetProperty("to").GetInt32());
         var ui = document.RootElement.GetProperty("ui");
         Assert.True(!ui.TryGetProperty("mapUrl", out var mapUrl) ||
             mapUrl.ValueKind == JsonValueKind.Null || string.IsNullOrWhiteSpace(mapUrl.GetString()));
@@ -757,13 +884,17 @@ public sealed class AutoRunApiTests
     private sealed class ProviderHandler : HttpMessageHandler
     {
         public string ImageUrl { get; set; } = "https://images.invalid/original";
+        public JsonElement ImageWidth { get; set; } = JsonSerializer.SerializeToElement(100);
+        public JsonElement ImageHeight { get; set; } = JsonSerializer.SerializeToElement(50);
         public ConcurrentQueue<ProviderCall> Calls { get; } = new();
+        public Func<CancellationToken, Task>? BeforeResponse { get; set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
             Calls.Enqueue(new(request.Method, request.RequestUri!, body,
                 request.Headers.ToDictionary(header => header.Key, header => header.Value.ToArray(), StringComparer.OrdinalIgnoreCase)));
+            if (BeforeResponse is { } wait) await wait(cancellationToken);
             var entity = new
             {
                 exclusive_id = new { entity_id = "overlay-1" }, geo = new { wkt = Area },
@@ -771,15 +902,15 @@ public sealed class AutoRunApiTests
                 {
                     GlobalId = "overlay-1", Url = ImageUrl, GridPath = "https://grids.invalid/original",
                     Sensor = "camera", ImagingTechnique = "EO", SolutionType = "grid", Sortie = "sortie-1",
-                    RegistrationQuality = "Accurate", Resolution = 0.5, ImageWidth = 100, ImageHeight = 50,
+                    RegistrationQuality = "Accurate", Resolution = 0.5, ImageWidth, ImageHeight,
                     PhotoTime = "2000-01-02T10:00:00Z", Created = "2000-01-02T11:00:00Z", IsRealTime = false
                 }
             };
             object response = request.Method == HttpMethod.Get ? entity :
                 new
                 {
-                    entities_list = request.RequestUri!.Query.Length == 0 ? new[] { entity } : [],
-                    next_page = request.RequestUri.Query.Length == 0
+                    entities_list = !request.RequestUri!.Query.Contains("searchAfter", StringComparison.Ordinal) ? new[] { entity } : [],
+                    next_page = !request.RequestUri.Query.Contains("searchAfter", StringComparison.Ordinal)
                         ? "http://provider.invalid/ErisImages/v2.0/ErisImages/Images/TableEntities?searchAfter=next" : null
                 };
             return new(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(response), Encoding.UTF8, "application/json") };

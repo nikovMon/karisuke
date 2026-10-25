@@ -17,7 +17,9 @@
     </a>
     <div class="nav-label">WORKSPACE</div>
     <nav aria-label="Main navigation">
-      <a href="/ui/auto-run" data-route class="nav-item active" aria-current="page"><span aria-hidden="true">↗</span>Auto Run<span class="nav-pill">01</span></a>
+      <a href="/ui/auto-run" data-route data-page-title="Auto Run" class="nav-item active" aria-current="page"><span aria-hidden="true">↗</span>Auto Run<span class="nav-pill">01</span></a>
+      <a href="/ui/rules" data-route data-page-title="Rules" class="nav-item"><span aria-hidden="true">≡</span>Rules</a>
+      <a href="/ui/rules-simulate" data-route data-page-title="Rules Simulate" class="nav-item"><span aria-hidden="true">▷</span>Rules Simulate</a>
       <a href="/swagger" class="nav-item"><span aria-hidden="true">⌘</span>API Reference</a>
     </nav>
   </aside>
@@ -28,6 +30,7 @@
     </header>
     <main id="main" tabindex="-1">
       <div id="app"></div>
+      <section id="coming-soon-page" class="panel coming-soon" hidden><div class="eyebrow">WORKSPACE</div><h1>Rules</h1><p>Coming Soon</p><a href="/ui/auto-run" data-route class="button">Open Auto Run</a></section>
       <noscript><div class="notice error">Enable JavaScript to configure and monitor auto-runs.</div></noscript>
     </main>
   </div>

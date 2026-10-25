@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Rules.Models;
+using ImagingPipeline.PipelineContracts;
 using ImagingPipeline.Rules.Api.AutoRuns;
 using ImagingPipeline.Rules.Api.AutoRuns.Provider;
 using Microsoft.Extensions.Options;
@@ -63,10 +64,10 @@ public sealed class AutoRunProviderTests
         Assert.Equal(2, queries.Count);
         var first = Clauses(queries[0]); var second = Clauses(queries[1]);
         Assert.Equal("A", Find(first, "match", "SENSOR")[0].GetString());
-        Assert.Equal("grid-A", Find(first, "match", "SOLUTIONTYPE")[0].GetString());
+        Assert.Equal("grid-A", Find(first, "match", "gridType.keyword")[0].GetString());
         Assert.True(Find(first, "match", "hasalgorithmicregistration")[0].GetBoolean());
         Assert.Equal("B", Find(second, "match", "SENSOR")[0].GetString());
-        Assert.Equal("grid-B", Find(second, "match", "SOLUTIONTYPE")[0].GetString());
+        Assert.Equal("grid-B", Find(second, "match", "gridType.keyword")[0].GetString());
         Assert.False(Find(second, "match", "hasalgorithmicregistration")[0].GetBoolean());
         Assert.All([first, second], clauses => Assert.Equal("SAR", Find(clauses, "match", "IMAGINGTECHNIQUE")[0].GetString()));
         Assert.All(queries, query =>
@@ -74,7 +75,41 @@ public sealed class AutoRunProviderTests
             Assert.DoesNotContain("\"date\"", query.GetProperty("filter").GetRawText(), StringComparison.Ordinal);
             Assert.DoesNotContain("strip", query.GetRawText(), StringComparison.Ordinal);
             Assert.DoesNotContain("\"OR\"", query.GetRawText(), StringComparison.Ordinal);
+            Assert.DoesNotContain("SOLUTIONTYPE", query.GetRawText(), StringComparison.OrdinalIgnoreCase);
         });
+    }
+
+    [Fact]
+    public async Task Grid_search_uses_keyword_field_independently_of_response_mapping()
+    {
+        var options = Config();
+        var query = Assert.Single(new ProviderQueryBuilder(Options.Create(options)).Build(new()
+        {
+            Mode = AutoRunSourceMode.Filters,
+            Filters = new() { GridTypes = ["grid"] }
+        }, []));
+        Assert.Equal("grid", Find(Clauses(query), "match", "gridType.keyword")[0].GetString());
+        Assert.DoesNotContain("SolutionType", query.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("SolutionType", options.ResponseFields.GridType);
+
+        var overlay = (await Provider(_ => Json(Entity()), options).GetAsync("overlay-1", CancellationToken.None)).Overlay;
+        Assert.NotNull(overlay);
+        Assert.Equal("grid", overlay.Input.GridType);
+        using var payload = JsonDocument.Parse(overlay.Payload);
+        Assert.Equal("grid", payload.RootElement.GetProperty("gridType").GetString());
+
+        var properties = Properties();
+        properties.Remove("SolutionType");
+        properties["gridType"] = "grid-custom";
+        options.ResponseFields.GridType = "gridType";
+        var remapped = await Provider(_ => Json(Entity(properties)), options).GetAsync("overlay-1", CancellationToken.None);
+        Assert.Null(remapped.Error);
+        Assert.Equal("grid-custom", remapped.Overlay!.Input.GridType);
+
+        properties.Remove("gridType");
+        var missing = await Provider(_ => Json(Entity(properties)), options).GetAsync("overlay-1", CancellationToken.None);
+        Assert.Null(missing.Overlay);
+        Assert.Contains("gridType is required", missing.Error);
     }
 
     [Theory]
@@ -156,6 +191,107 @@ public sealed class AutoRunProviderTests
         Assert.Equal("https://grids.example/1", document.RootElement.GetProperty("gridURI").GetString());
     }
 
+    [Theory]
+    [InlineData("40", "40", 40, 40)]
+    [InlineData("40.0", "40.00", 40, 40)]
+    [InlineData("8836.0", "3608.0", 8836, 3608)]
+    [InlineData("4e1", "400e-1", 40, 40)]
+    [InlineData("2147483647.0", "1.000", int.MaxValue, 1)]
+    public async Task Whole_number_dimensions_normalize_on_lookup_and_search_and_pass_FindAir_validation(
+        string width, string height, int expectedWidth, int expectedHeight)
+    {
+        foreach (var search in new[] { false, true })
+        {
+            var properties = Properties();
+            properties["ImageWidth"] = JsonSerializer.Deserialize<JsonElement>(width);
+            properties["ImageHeight"] = JsonSerializer.Deserialize<JsonElement>(height);
+            var provider = Provider(request =>
+            {
+                Assert.Equal(search ? HttpMethod.Post : HttpMethod.Get, request.Method);
+                return search ? Json(new { entities_list = new[] { Entity(properties) } }) : Json(Entity(properties));
+            });
+            var result = search
+                ? Assert.Single((await provider.SearchPageAsync(JsonSerializer.SerializeToElement(new { }), null, CancellationToken.None)).Items)
+                : await provider.GetAsync("overlay-1", CancellationToken.None);
+
+            Assert.Null(result.Error);
+            var overlay = Assert.IsType<ProviderOverlay>(result.Overlay);
+            Assert.Equal(expectedWidth, overlay.Input.ImageWidth);
+            Assert.Equal(expectedHeight, overlay.Input.ImageHeight);
+            using var payload = JsonDocument.Parse(overlay.Payload);
+            Assert.Equal(expectedWidth, payload.RootElement.GetProperty("width").GetInt32());
+            Assert.Equal(expectedHeight, payload.RootElement.GetProperty("height").GetInt32());
+            var context = OverlayDispatchContextFactory.Create("task", "rule", payload.RootElement);
+            Assert.Empty(new FindAirPipelineContract().ValidateContext(context));
+        }
+    }
+
+    [Fact]
+    public async Task Dimension_normalization_honors_configured_response_aliases()
+    {
+        var properties = Properties();
+        properties.Remove("ImageWidth");
+        properties.Remove("ImageHeight");
+        properties["imageWidth"] = JsonSerializer.Deserialize<JsonElement>("8836.0");
+        properties["imageHeight"] = JsonSerializer.Deserialize<JsonElement>("3608.0");
+        var options = Config();
+        options.ResponseFields.Width = "imageWidth";
+        options.ResponseFields.Height = "imageHeight";
+
+        var result = await Provider(_ => Json(Entity(properties)), options).GetAsync("overlay-1", CancellationToken.None);
+
+        Assert.Null(result.Error);
+        Assert.Equal(8836, result.Overlay!.Input.ImageWidth);
+        Assert.Equal(3608, result.Overlay.Input.ImageHeight);
+    }
+
+    [Theory]
+    [InlineData("40.5")]
+    [InlineData("40.0000000000000000000000000000000000001")]
+    [InlineData("2147483648.0")]
+    [InlineData("2147483647.0000000000000000000000001")]
+    [InlineData("1e1000")]
+    [InlineData("\"40\"")]
+    [InlineData("false")]
+    [InlineData("null")]
+    public async Task Invalid_dimensions_are_preserved_for_pipeline_validation_without_rounding_or_string_coercion(string value)
+    {
+        var properties = Properties();
+        properties["ImageWidth"] = JsonSerializer.Deserialize<JsonElement>(value);
+        properties["ImageHeight"] = JsonSerializer.Deserialize<JsonElement>(value);
+
+        var result = await Provider(_ => Json(Entity(properties))).GetAsync("overlay-1", CancellationToken.None);
+
+        Assert.Null(result.Error);
+        var overlay = Assert.IsType<ProviderOverlay>(result.Overlay);
+        using var payload = JsonDocument.Parse(overlay.Payload);
+        Assert.Equal(value, payload.RootElement.GetProperty("width").GetRawText());
+        Assert.Equal(value, payload.RootElement.GetProperty("height").GetRawText());
+        var context = OverlayDispatchContextFactory.Create("task", "rule", payload.RootElement);
+        var errors = new FindAirPipelineContract().ValidateContext(context);
+        Assert.Contains(errors, error => error.Field == "input.width");
+        Assert.Contains(errors, error => error.Field == "input.height");
+    }
+
+    [Theory]
+    [InlineData("0.0")]
+    [InlineData("-1.0")]
+    public async Task Nonpositive_dimensions_still_fail_FindAir_validation(string value)
+    {
+        var properties = Properties();
+        properties["ImageWidth"] = JsonSerializer.Deserialize<JsonElement>(value);
+        properties["ImageHeight"] = JsonSerializer.Deserialize<JsonElement>(value);
+
+        var result = await Provider(_ => Json(Entity(properties))).GetAsync("overlay-1", CancellationToken.None);
+
+        Assert.Null(result.Error);
+        using var payload = JsonDocument.Parse(result.Overlay!.Payload);
+        var context = OverlayDispatchContextFactory.Create("task", "rule", payload.RootElement);
+        var errors = new FindAirPipelineContract().ValidateContext(context);
+        Assert.Contains(errors, error => error.Field == "input.width" && error.Message == "Must be positive.");
+        Assert.Contains(errors, error => error.Field == "input.height" && error.Message == "Must be positive.");
+    }
+
     [Fact]
     public async Task Explicit_timestamp_offset_wins_over_provider_local_zone()
     {
@@ -179,6 +315,7 @@ public sealed class AutoRunProviderTests
         using var document = JsonDocument.Parse(result.Overlay!.Payload);
         Assert.Equal(JsonValueKind.False, document.RootElement.GetProperty("imageUrl").ValueKind);
         Assert.False(document.RootElement.TryGetProperty("width", out _));
+        Assert.False(document.RootElement.TryGetProperty("height", out _));
         Assert.False(document.RootElement.TryGetProperty("gridURI", out _));
     }
 
@@ -271,7 +408,7 @@ public sealed class AutoRunProviderTests
         Assert.Equal(2, first.Items.Count);
         Assert.NotNull(first.Items[0].Overlay);
         Assert.NotNull(first.Items[1].Error);
-        Assert.Equal("https://provider.example/next?searchAfter=cursor", first.NextPage);
+        Assert.Equal("https://provider.example/next?searchAfter=cursor&to=1000", first.NextPage);
         var last = await provider.SearchPageAsync(query, first.NextPage, CancellationToken.None);
         Assert.Empty(last.Items);
         Assert.Null(last.NextPage);

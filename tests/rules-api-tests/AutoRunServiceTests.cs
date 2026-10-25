@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.PipelineContracts;
@@ -142,6 +143,35 @@ public sealed class AutoRunServiceTests
         Assert.Equal(frozenPayload, publication.Payload);
         Assert.Empty(publication.Targets);
         Assert.Equal(["old"], fixture.Provider.GetCalls);
+    }
+
+    [Theory]
+    [InlineData("\"30200\"")]
+    [InlineData("30200.5")]
+    [InlineData("2147483648")]
+    public async Task RejectedFindAirDimensionsIdentifyFieldsAndCannotProducePublishableSelection(string dimensionJson)
+    {
+        var overlay = Overlay("invalid-dimensions");
+        var body = JsonNode.Parse(overlay.Payload)!;
+        body["width"] = JsonNode.Parse(dimensionJson);
+        body["height"] = JsonNode.Parse(dimensionJson);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(body);
+        overlay = overlay with { Payload = payload, Input = GatewayInputMessageParser.Parse(payload) };
+        await using var fixture = await Fixture.StartAsync([overlay]);
+
+        var ready = await fixture.ReadyAsync(Request(["invalid-dimensions"], [Target("a") with { PipelineId = "FindAir" }]));
+
+        Assert.Equal(1, ready.Counters.Scanned);
+        Assert.Equal(1, ready.Counters.Invalid);
+        Assert.Equal(0, ready.Counters.Selected);
+        var error = Assert.Single(ready.Errors);
+        Assert.Contains("Overlay 'invalid-dimensions' cannot enter pipeline 'FindAir'", error);
+        Assert.Contains("input.width: Must be positive.", error);
+        Assert.Contains("input.height: Must be positive.", error);
+        Assert.Contains("input.width: Must be a 32-bit integer.", error);
+        Assert.Contains("input.height: Must be a 32-bit integer.", error);
+        Assert.Equal(409, Assert.Throws<AutoRunRequestException>(() => fixture.Service.Start(ready.Id)).StatusCode);
+        Assert.Empty(fixture.Publisher.Calls);
     }
 
     [Theory]
@@ -579,10 +609,14 @@ public sealed class AutoRunServiceTests
     {
         await using var fixture = await Fixture.StartAsync([]);
         fixture.Provider.Search = (_, _, _) => throw new ProviderResponseLimitException(1000);
-        var ready = await fixture.ReadyAsync(Request([], []) with { Source = new() { Mode = AutoRunSourceMode.Filters } });
+        var ready = await fixture.ReadyAsync(Request([], []) with { Source = new() { Mode = AutoRunSourceMode.Filters }, MinOverlays = 1 });
         Assert.Equal("responseLimit", ready.StoppedReason);
         Assert.Equal(0, ready.Counters.Selected);
         Assert.False(ready.SourceExhausted);
+        Assert.Equal(1, ready.Shortfall);
+        Assert.Contains(ready.Warnings, warning => warning.Contains("No selected overlays are available to submit.", StringComparison.Ordinal));
+        Assert.DoesNotContain(ready.Warnings, warning => warning.Contains("can still be submitted", StringComparison.Ordinal) ||
+            warning.Contains("can be started", StringComparison.Ordinal));
         Assert.Equal(409, Assert.Throws<AutoRunRequestException>(() => fixture.Service.Start(ready.Id)).StatusCode);
         Assert.Empty(fixture.Publisher.Calls);
     }
@@ -906,6 +940,134 @@ public sealed class AutoRunServiceTests
         Assert.Equal(0, fixture.Resolver.Calls);
     }
 
+    [Fact]
+    public async Task DeletingReadyPreviewReleasesItsAccountedBytesAndJobCapacity()
+    {
+        var options = EnabledOptions();
+        options.MaxRetainedJobs = 1;
+        await using var fixture = await Fixture.StartAsync([Overlay("one")], options);
+        var ready = await fixture.ReadyAsync(Request(["one"], []));
+        Assert.True(ready.RetainedBytes > Overlay("one").Payload.Length);
+        Assert.False(ready.DeletionRequested);
+        options.PayloadBudgetBytes = ready.RetainedBytes;
+        Assert.Equal(409, (await Assert.ThrowsAsync<AutoRunRequestException>(() =>
+            fixture.Service.PreviewAsync(Request(["one"], []), CancellationToken.None))).StatusCode);
+
+        var deleted = fixture.Service.Delete(ready.Id);
+        Assert.Contains(ready.Id, deleted.DeletedIds.Concat(deleted.PendingIds));
+        if (deleted.PendingIds.Count == 0) Assert.Equal(ready.RetainedBytes, deleted.ReleasedRetainedBytes);
+        await UntilAsync(() => fixture.Service.List().Count == 0);
+        Assert.Equal(404, Assert.Throws<AutoRunRequestException>(() => fixture.Service.Get(ready.Id)).StatusCode);
+        Assert.Equal(404, Assert.Throws<AutoRunRequestException>(() => fixture.Service.Delete(ready.Id)).StatusCode);
+        var next = await fixture.ReadyAsync(Request(["one"], []));
+        Assert.Equal(1, next.Counters.Selected);
+        Assert.Equal(ready.RetainedBytes, next.RetainedBytes);
+    }
+
+    [Fact]
+    public async Task TerminalWeightsReleasePayloadsAndBulkDeletionReleasesRemainingData()
+    {
+        var overlay = Overlay("one");
+        await using var fixture = await Fixture.StartAsync([overlay]);
+        var ready = await fixture.ReadyAsync(Request(["one"], []));
+        fixture.Service.Start(ready.Id);
+        var completed = await fixture.WaitAsync(ready.Id, AutoRunState.Completed);
+        Assert.Equal(overlay.Payload.Length, ready.RetainedBytes - completed.RetainedBytes);
+        Assert.True(completed.RetainedBytes > 0);
+        var second = await fixture.ReadyAsync(Request(["one"], []));
+
+        var deleted = fixture.Service.DeleteAll();
+        Assert.Equal(new[] { ready.Id, second.Id }.Order(), deleted.DeletedIds.Concat(deleted.PendingIds).Order());
+        if (deleted.PendingIds.Count == 0)
+            Assert.Equal(completed.RetainedBytes + second.RetainedBytes, deleted.ReleasedRetainedBytes);
+        await UntilAsync(() => fixture.Service.List().Count == 0);
+        Assert.Single(fixture.Publisher.Calls); // Removing retained data never recalls or repeats a submission.
+        var empty = fixture.Service.DeleteAll();
+        Assert.Empty(empty.DeletedIds);
+        Assert.Empty(empty.PendingIds);
+        Assert.Equal(0, empty.ReleasedRetainedBytes);
+    }
+
+    [Fact]
+    public async Task DeletingQueuedPreparationWaitsForWorkerAndRejectsMutations()
+    {
+        await using var fixture = new Fixture([Overlay("one")], EnabledOptions(), null, null, null);
+        var preparing = await fixture.Service.PreviewAsync(Request(["one"], []), CancellationToken.None);
+        var result = fixture.Service.Delete(preparing.Id);
+        Assert.Empty(result.DeletedIds);
+        Assert.Equal([preparing.Id], result.PendingIds);
+        Assert.Equal(0, result.ReleasedRetainedBytes);
+        Assert.True(fixture.Service.Get(preparing.Id).DeletionRequested);
+        Assert.Equal(409, Assert.Throws<AutoRunRequestException>(() => fixture.Service.Start(preparing.Id)).StatusCode);
+        Assert.Equal(409, Assert.Throws<AutoRunRequestException>(() => fixture.Service.UpdatePublication(preparing.Id, new())).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<AutoRunRequestException>(() =>
+            fixture.Service.RerunAsync(preparing.Id, CancellationToken.None))).StatusCode);
+        Assert.Equal([preparing.Id], fixture.Service.Delete(preparing.Id).PendingIds);
+
+        await fixture.Service.StartAsync(CancellationToken.None);
+        await UntilAsync(() => fixture.Service.List().Count == 0);
+        Assert.Empty(fixture.Provider.GetCalls);
+        Assert.Empty(fixture.Publisher.Calls);
+        Assert.Equal(1, (await fixture.ReadyAsync(Request(["one"], []))).Counters.Selected);
+    }
+
+    [Fact]
+    public async Task BulkDeletionCancelsPreparingWorkAndWaitsForProviderBeforeReleasingIt()
+    {
+        await using var fixture = await Fixture.StartAsync([Overlay("one")]);
+        var ready = await fixture.ReadyAsync(Request(["one"], []));
+        var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var response = new TaskCompletionSource<ProviderOverlayResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken providerToken = default;
+        fixture.Provider.Get = (_, token) => { providerToken = token; requested.TrySetResult(); return response.Task; };
+        var preparing = await fixture.Service.PreviewAsync(Request(["one", "two"], []), CancellationToken.None);
+        await requested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var deleted = fixture.Service.DeleteAll();
+        Assert.Equal([ready.Id], deleted.DeletedIds);
+        Assert.Equal(ready.RetainedBytes, deleted.ReleasedRetainedBytes);
+        Assert.Equal([preparing.Id], deleted.PendingIds);
+        Assert.True(providerToken.IsCancellationRequested);
+        var pending = Assert.Single(fixture.Service.List());
+        Assert.True(pending.DeletionRequested);
+        Assert.True(pending.RetainedBytes > 0);
+        response.SetResult(new(Overlay("one"), null));
+        await UntilAsync(() => fixture.Service.List().Count == 0);
+        Assert.Equal(["one", "one"], fixture.Provider.GetCalls);
+        Assert.Empty(fixture.Publisher.Calls);
+    }
+
+    [Fact]
+    public async Task DeletingPublishingRunWaitsForInflightOutcomeAndNeverSendsLaterItems()
+    {
+        var response = new TaskCompletionSource<AutoRunPublishResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken publicationToken = default;
+        var publisher = new RecordingPublisher((_, token) =>
+        {
+            publicationToken = token;
+            requested.TrySetResult();
+            return response.Task;
+        });
+        await using var fixture = await Fixture.StartAsync([Overlay("one"), Overlay("two")], publisher: publisher);
+        var ready = await fixture.ReadyAsync(Request(["one", "two"], []) with { Publication = new() { BatchSize = 1, DelayMs = 0 } });
+        fixture.Service.Start(ready.Id);
+        await requested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var deleted = fixture.Service.Delete(ready.Id);
+        Assert.Equal([ready.Id], deleted.PendingIds);
+        Assert.Empty(deleted.DeletedIds);
+        Assert.True(publicationToken.IsCancellationRequested);
+        var pending = fixture.Service.Get(ready.Id);
+        Assert.True(pending.DeletionRequested);
+        Assert.Equal(1, pending.Counters.InFlight);
+        Assert.Equal(ready.RetainedBytes, pending.RetainedBytes);
+        response.SetResult(new(AutoRunItemOutcome.Confirmed));
+        await UntilAsync(() => fixture.Service.List().Count == 0);
+        Assert.Single(publisher.Calls);
+        Assert.Equal(0, publisher.Active);
+    }
+
     private static AutoRunOptions EnabledOptions() => new()
     {
         Enabled = true, PublisherConcurrency = 4, Publication = new() { BatchSize = 10, DelayMs = 0 }
@@ -1087,7 +1249,7 @@ public sealed class AutoRunServiceTests
 
     private sealed class Fixture : IAsyncDisposable
     {
-        private Fixture(ProviderOverlay[] overlays, AutoRunOptions options, RecordingPublisher? publisher, TimeProvider? time,
+        public Fixture(ProviderOverlay[] overlays, AutoRunOptions options, RecordingPublisher? publisher, TimeProvider? time,
             IAutoRunMemoryGuard? memory)
         {
             Resolver = new();

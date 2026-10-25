@@ -57,10 +57,30 @@ const runs = new Map();
 const previewRequests = new Map();
 let rerunFailure = false;
 let rerunGate = null;
+let startFailure = false;
+let startGate = null;
 const reads = new Map();
 let runSequence = 0;
 let pipelineFailure = false;
 let pipelineGate = null;
+let deletionFailure = false;
+const pendingDeletions = new Map();
+function deleteRetainedRuns(ids) {
+  const result = { deletedIds: [], pendingIds: [], releasedRetainedBytes: 0 };
+  for (const id of ids) {
+    const run = runs.get(id);
+    if (['Preparing', 'Publishing'].includes(run.state)) {
+      run.deletionRequested = true;
+      pendingDeletions.set(id, 1);
+      result.pendingIds.push(id);
+    } else {
+      result.deletedIds.push(id);
+      result.releasedRetainedBytes += run.retainedBytes;
+      runs.delete(id);
+    }
+  }
+  return result;
+}
 function makeRun(body) {
   const now = new Date();
   const directIds = body.source.mode === 'OverlayIds' && !body.targets?.length;
@@ -82,7 +102,7 @@ function makeRun(body) {
     sourceExhausted: direct, stoppedReason: direct ? null : 'Scan limit',
     warnings: direct ? [] : ['Observed counts cover scanned candidates only.'], errors: [],
     queries: directIds ? [] : [{ filter: { logical_operators: { AND: [{ match: { SENSOR: { type: 'IN', values: ['SENSOR_A'] } } }] } } }],
-    confirmedPerSecond: 0, memory: structuredClone(options.memory)
+    confirmedPerSecond: 0, memory: structuredClone(options.memory), retainedBytes: 2048 + selected * 4096, deletionRequested: false
   };
   runs.set(run.id, run);
   previewRequests.set(run.id, structuredClone(body));
@@ -116,10 +136,15 @@ const server = http.createServer(async (req, res) => {
       const from = Number(url.searchParams.get('from')), size = Number(url.searchParams.get('size'));
       const override = rulePageOverrides.get(pipeline);
       if (override) {
-        const result = await override(from, size);
+        const result = await override(from, size, url.searchParams);
         return json(result.data, result.status ?? 200);
       }
-      return json((pipelineRules.get(pipeline) ?? []).slice(from, from + size));
+      const search = (url.searchParams.get('search') ?? '').toLowerCase();
+      const active = url.searchParams.get('isActive');
+      return json((pipelineRules.get(pipeline) ?? []).filter(rule =>
+        (active === null || rule.isActive === (active === 'true')) &&
+        (!search || [rule.ruleName, rule._id, rule.description, ...(rule.match?.sensors ?? []).map(sensor => sensor.name), ...(rule.match?.sensorTypes ?? [])]
+          .some(value => String(value ?? '').toLowerCase().includes(search)))).slice(from, from + size));
     }
     if (url.pathname.startsWith('/pipelines/imagery/rules/')) {
       const id = decodeURIComponent(url.pathname.split('/').pop());
@@ -128,12 +153,28 @@ const server = http.createServer(async (req, res) => {
       return json(rule ?? { error: 'Rule not found.' }, rule ? 200 : 404);
     }
     if (url.pathname === '/auto-runs/preview') return json(makeRun(body), 202);
-    if (url.pathname === '/auto-runs') return json([...runs.values()]);
+    if (url.pathname === '/auto-runs') {
+      if (req.method === 'DELETE') {
+        if (deletionFailure) return json({ error: 'Cleanup unavailable. Try again.' }, 503);
+        const result = deleteRetainedRuns([...runs.keys()]);
+        return json(result, result.pendingIds.length ? 202 : 200);
+      }
+      for (const [id, polls] of pendingDeletions) {
+        if (polls === 0) { runs.delete(id); pendingDeletions.delete(id); }
+        else pendingDeletions.set(id, polls - 1);
+      }
+      return json([...runs.values()]);
+    }
     const match = url.pathname.match(/^\/auto-runs\/([^/]+)(?:\/(items|start|cancel|publication|rerun))?$/);
     if (match) {
       const run = runs.get(match[1]);
       if (!run) return json({ error: 'Run not found.' }, 404);
       if (!match[2]) {
+        if (req.method === 'DELETE') {
+          if (deletionFailure) return json({ error: 'Cleanup unavailable. Try again.' }, 503);
+          const result = deleteRetainedRuns([run.id]);
+          return json(result, result.pendingIds.length ? 202 : 200);
+        }
         reads.set(run.id, (reads.get(run.id) ?? 0) + 1);
         if (run.state === 'Preparing') { run.state = 'Ready'; run.readyAt = new Date().toISOString(); }
         return json(run);
@@ -157,6 +198,8 @@ const server = http.createServer(async (req, res) => {
         return json({ from, size, total: items.length, items: items.slice(from, from + size) });
       }
       if (match[2] === 'start') {
+        await startGate;
+        if (startFailure) return json({ error: 'Another operation is active. Try starting this preview again.' }, 409);
         run.state = 'Publishing'; run.startedAt = new Date().toISOString();
         run.counters.confirmed = run.overlayIds ? 1 : 15; run.counters.failed = run.overlayIds ? 0 : 1;
         run.counters.uncertain = run.overlayIds ? 0 : 1; run.counters.remaining = run.overlayIds ? run.counters.selected - 1 : 8;
@@ -841,7 +884,7 @@ try {
     await partialPage.locator('#partial-selection-note').waitFor();
     assert.match(await partialPage.locator('#partial-selection-note').textContent(), /25 selected overlays were retained/);
     assert.match(await partialPage.locator('#run-notices').textContent(), /not a complete source total/);
-    assert.match(await partialPage.locator('#run-memory').textContent(), /Headroom: 0 MiB/);
+    assert.match(await partialPage.locator('#run-memory').textContent(), /Headroom: 0 B/);
     assert.ok(await partialPage.locator('#start-run').isEnabled(), 'partial selection permits explicit publication');
     assert.equal(requests.filter(request => request.path.endsWith('/start')).length, startsBefore, 'memory limits never start a run automatically');
     if (stoppedReason === 'memoryLimit') {
@@ -854,6 +897,207 @@ try {
     assert.equal(requests.filter(request => request.path === `/auto-runs/${partialRun.id}/start`).length, 1);
   }
   await partialPage.close();
+
+  // Empty Ready is a finished search, not a publishable selection, even after a partial scan.
+  const emptyPreviewPage = await context.newPage();
+  emptyPreviewPage.on('pageerror', error => pageErrors.push(error.message));
+  for (const stoppedReason of [null, 'memoryLimit']) {
+    const emptyRun = makeRun({ source: { mode: 'Filters' }, targets: [], minOverlays: 10,
+      maxOverlays: 50, publication: { batchSize: 10, delayMs: 1000 } });
+    emptyRun.state = 'Ready';
+    emptyRun.sourceExhausted = stoppedReason === null;
+    emptyRun.stoppedReason = stoppedReason;
+    emptyRun.shortfall = 10;
+    emptyRun.counters.selected = 0;
+    emptyRun.counters.remaining = 0;
+    emptyRun.counters.observedMatches = 0;
+    await emptyPreviewPage.goto(`${origin}/ui/auto-run/runs/${emptyRun.id}`);
+    await emptyPreviewPage.locator('#run-start-note').waitFor();
+    assert.equal(await emptyPreviewPage.locator('#run-state').textContent(), 'Ready', 'backend state is preserved');
+    assert.equal(await emptyPreviewPage.locator('#progress-label').textContent(), 'Preparation finished · no overlays selected');
+    assert.ok(await emptyPreviewPage.locator('#start-run').isDisabled());
+    assert.equal(await emptyPreviewPage.locator('#start-run').getAttribute('aria-describedby'), 'run-start-note');
+    assert.match(await emptyPreviewPage.locator('#run-start-note').textContent(), /no selected overlays.*prepare a new preview/);
+    assert.match(await emptyPreviewPage.locator('#run-notices').textContent(), /No selected overlays are available to run/);
+    assert.ok(!(await emptyPreviewPage.locator('#run-notices').textContent()).includes('selection can still run'));
+    assert.equal(await emptyPreviewPage.locator('#partial-selection-note').count(), 0);
+    await emptyPreviewPage.evaluate(() => document.getElementById('start-run').dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    assert.equal(requests.filter(request => request.path === `/auto-runs/${emptyRun.id}/start`).length, 0, 'empty selections never issue start requests');
+  }
+  await emptyPreviewPage.setViewportSize({ width: 390, height: 844 });
+  await emptyPreviewPage.screenshot({ path: path.join(screenshots, 'empty-ready-preview-mobile.png'), fullPage: true });
+  assert.ok(await emptyPreviewPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  await emptyPreviewPage.close();
+
+  // Polling must not re-enable Start while a start request is pending; errors allow a deliberate retry.
+  const startPage = await context.newPage();
+  startPage.on('pageerror', error => pageErrors.push(error.message));
+  const startRun = makeRun({ source: { mode: 'Filters' }, targets: [], minOverlays: 0,
+    maxOverlays: 50, publication: { batchSize: 10, delayMs: 1000 } });
+  startRun.state = 'Ready';
+  await startPage.goto(`${origin}/ui/auto-run/runs/${startRun.id}`);
+  await startPage.locator('#start-run:not([hidden])').waitFor();
+  assert.ok(await startPage.locator('#start-run').isEnabled(), 'a nonempty Ready selection can start');
+  assert.ok(await startPage.locator('#run-start-note').isHidden());
+  let releaseStart;
+  startGate = new Promise(resolve => { releaseStart = resolve; });
+  pendingResponses.add(releaseStart);
+  startFailure = true;
+  const readsBeforeStart = reads.get(startRun.id);
+  await startPage.locator('#start-run').click();
+  await startPage.locator('#run-start-note').filter({ hasText: 'Waiting for Rules API' }).waitFor();
+  assert.equal(await startPage.locator('#start-run').textContent(), 'Starting…');
+  await startPage.waitForTimeout(5300);
+  assert.ok(reads.get(startRun.id) > readsBeforeStart, 'run was polled while the start request was pending');
+  assert.ok(await startPage.locator('#start-run').isDisabled(), 'polling preserves the pending start state');
+  assert.ok(await startPage.locator('#rerun-run').isDisabled(), 'pending start cannot create a conflicting rerun');
+  await startPage.evaluate(() => document.getElementById('start-run').dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  assert.equal(requests.filter(request => request.path === `/auto-runs/${startRun.id}/start`).length, 1);
+  releaseStart();
+  pendingResponses.delete(releaseStart);
+  startGate = null;
+  await startPage.locator('#run-error').filter({ hasText: 'Another operation is active' }).waitFor();
+  await startPage.locator('#start-run:not(:disabled)').waitFor();
+  assert.ok(await startPage.locator('#run-start-note').isHidden());
+  assert.equal(await startPage.locator('#start-run').textContent(), 'Start run ↗');
+  startFailure = false;
+  await startPage.locator('#start-run').focus();
+  await startPage.keyboard.press('Enter');
+  await startPage.locator('#run-state').getByText('Publishing', { exact: true }).waitFor();
+  assert.equal(requests.filter(request => request.path === `/auto-runs/${startRun.id}/start`).length, 2);
+  await startPage.close();
+
+  const searchPage = await context.newPage();
+  searchPage.on('pageerror', error => pageErrors.push(error.message));
+  await searchPage.goto(`${origin}/ui/auto-run`);
+  await searchPage.locator('#prepare-button:not(:disabled)').waitFor();
+  await searchPage.locator('#pipeline-select').selectOption('imagery');
+  await searchPage.locator('[name="rule-choice"]').first().waitFor();
+  await searchPage.locator('#rule-search').fill('uRBAn');
+  await searchPage.waitForFunction(() => document.querySelectorAll('[name="rule-choice"]').length === 1);
+  await searchPage.locator('[name="rule-choice"]').check();
+  await searchPage.locator('#add-rules').click();
+  await searchPage.getByLabel('Maximum for Urban detail').fill('17');
+  await searchPage.locator('#rule-search').fill('rule-11');
+  await searchPage.locator('.rule-choice-name').filter({ hasText: 'Rule 11' }).waitFor();
+  assert.equal(await searchPage.locator('[name="rule-choice"]').count(), 1, 'search includes rules beyond first page');
+  await searchPage.locator('[name="rule-choice"]').check();
+  await searchPage.locator('#add-rules').click();
+  await searchPage.locator('#rule-search').fill('EO');
+  await searchPage.locator('.rule-choice-name').filter({ hasText: 'Archive coverage' }).waitFor();
+  await searchPage.locator('#rule-status').selectOption('true');
+  await searchPage.locator('#rule-page-label').filter({ hasText: 'No rules' }).waitFor();
+  await searchPage.locator('#rule-status').selectOption('false');
+  await searchPage.locator('.rule-choice-name').filter({ hasText: 'Archive coverage' }).waitFor();
+  assert.equal(await searchPage.locator('#select-all-rules').textContent(), 'Select all matching rules');
+  await searchPage.locator('#select-all-rules').click();
+  await searchPage.locator('#rule-selection-status').filter({ hasText: 'Added 1 rule' }).waitFor();
+  assert.equal(await searchPage.locator('.target-table tbody tr').count(), 3);
+  await searchPage.locator('#rule-status').selectOption('');
+  await searchPage.locator('#rule-search').fill('sensor_a');
+  await searchPage.waitForFunction(() => document.querySelectorAll('[name="rule-choice"]').length === 10);
+  await searchPage.locator('#select-all-rules').click();
+  await searchPage.locator('#rule-selection-status').filter({ hasText: 'Added 8 rules' }).waitFor();
+  assert.equal(await searchPage.locator('.target-table tbody tr').count(), 11);
+  assert.equal(await searchPage.getByLabel('Maximum for Urban detail').inputValue(), '17');
+  assert.ok(requests.some(request => request.path === '/pipelines/imagery/rules' && new URLSearchParams(request.search).get('search') === 'sensor_a' && new URLSearchParams(request.search).get('from') === '10'));
+  rules[9].description = 'Coastal sample';
+  await searchPage.locator('#rule-search').fill('coastal');
+  await searchPage.locator('.rule-choice-name').filter({ hasText: 'Rule 10' }).waitFor();
+  assert.equal(await searchPage.locator('[name="rule-choice"]').count(), 1);
+  let releaseStale, enteredStale;
+  const staleEntered = new Promise(resolve => { enteredStale = resolve; });
+  const staleGate = new Promise(resolve => { releaseStale = resolve; });
+  pendingResponses.add(releaseStale);
+  rulePageOverrides.set('imagery', async (from, size, parameters) => {
+    if (parameters.get('search') === 'stale') { enteredStale(); await staleGate; return { data: [rules[10]] }; }
+    return { data: [rules[0]] };
+  });
+  await searchPage.locator('#rule-search').fill('stale');
+  await staleEntered;
+  await searchPage.locator('#rule-search').fill('urban');
+  await searchPage.locator('.rule-choice-name').filter({ hasText: 'Urban detail' }).waitFor();
+  releaseStale(); pendingResponses.delete(releaseStale); rulePageOverrides.delete('imagery');
+  await searchPage.waitForTimeout(100);
+  assert.equal(await searchPage.locator('#rule-list .rule-choice-name').textContent(), 'Urban detail · added', 'cancelled search cannot overwrite a newer result');
+  await searchPage.getByRole('link', { name: 'Rules', exact: true }).click();
+  assert.equal(await searchPage.title(), 'Rules · Flarules');
+  assert.equal(await searchPage.locator('#coming-soon-page p').textContent(), 'Coming Soon');
+  assert.equal(await searchPage.locator('.nav-item[aria-current="page"]').textContent(), '≡Rules');
+  await searchPage.getByRole('link', { name: 'Rules Simulate', exact: true }).click();
+  assert.equal(await searchPage.title(), 'Rules Simulate · Flarules');
+  await searchPage.reload();
+  await searchPage.getByRole('heading', { name: 'Rules Simulate', exact: true }).waitFor();
+  await searchPage.getByRole('link', { name: 'Auto Run 01', exact: true }).click();
+  await searchPage.locator('#prepare-button:not(:disabled)').waitFor();
+  await searchPage.locator('#pipeline-select').selectOption('imagery');
+  await searchPage.locator('#rule-search').fill('urban');
+  await searchPage.locator('.rule-choice-name').filter({ hasText: 'Urban detail' }).waitFor();
+  await searchPage.locator('[name="rule-choice"]').check();
+  await searchPage.locator('#add-rules').click();
+  await searchPage.getByLabel('Maximum for Urban detail').fill('23');
+  await searchPage.getByRole('link', { name: 'Rules', exact: true }).click();
+  await searchPage.getByRole('link', { name: 'Auto Run 01', exact: true }).click();
+  assert.equal(await searchPage.getByLabel('Maximum for Urban detail').inputValue(), '23', 'navigation keeps the Auto Run draft');
+  assert.equal(await searchPage.locator('#rule-search').inputValue(), 'urban');
+  await searchPage.screenshot({ path: path.join(screenshots, 'rule-search-and-history.png'), fullPage: true });
+  await searchPage.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await searchPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+  await searchPage.getByRole('link', { name: 'Rules Simulate', exact: true }).focus();
+  await searchPage.keyboard.press('Enter');
+  assert.equal(await searchPage.locator('#coming-soon-page p').textContent(), 'Coming Soon');
+  assert.ok(await searchPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+  await searchPage.screenshot({ path: path.join(screenshots, 'coming-soon-mobile.png'), fullPage: true });
+  await searchPage.close();
+
+  // Retained history exposes every job, honest sizes, recoverable failures, and asynchronous cleanup.
+  const cleanupPage = await context.newPage();
+  cleanupPage.on('pageerror', error => pageErrors.push(error.message));
+  for (const run of runs.values()) run.state = 'Completed';
+  const cleanupBody = { source: { mode: 'OverlayIds', overlayIds: ['cleanup-overlay'] }, targets: [], minOverlays: 0, publication: { batchSize: 1, delayMs: 0 } };
+  const immediateRun = makeRun(cleanupBody); immediateRun.state = 'Ready'; immediateRun.retainedBytes = 512;
+  const pendingRun = makeRun(cleanupBody); pendingRun.state = 'Publishing'; pendingRun.retainedBytes = 1536;
+  await cleanupPage.goto(`${origin}/ui/auto-run`);
+  await cleanupPage.locator(`[data-delete-run="${immediateRun.id}"]`).waitFor();
+  assert.ok(runs.size > 8);
+  assert.equal(await cleanupPage.locator('.history-item').count(), runs.size, 'history must show all runs targeted by Delete all');
+  assert.match(await cleanupPage.locator('.history-help').textContent(), /not total RAM/);
+  assert.equal(await cleanupPage.locator('.history-item').filter({ has: cleanupPage.locator(`[data-delete-run="${immediateRun.id}"]`) }).locator('.history-storage span').textContent(), '512 B retained');
+  assert.equal(await cleanupPage.locator('.history-item').filter({ has: cleanupPage.locator(`[data-delete-run="${pendingRun.id}"]`) }).locator('.history-storage span').textContent(), '1.5 KiB retained');
+  assert.equal(await cleanupPage.locator('.history-item a button').count(), 0);
+  deletionFailure = true;
+  await cleanupPage.locator(`[data-delete-run="${immediateRun.id}"]`).click();
+  await cleanupPage.locator('#history-error').filter({ hasText: 'Cleanup unavailable' }).waitFor();
+  assert.ok(await cleanupPage.locator(`[data-delete-run="${immediateRun.id}"]`).isEnabled());
+  deletionFailure = false;
+  await cleanupPage.locator(`[data-delete-run="${immediateRun.id}"]`).focus();
+  await cleanupPage.keyboard.press('Enter');
+  await cleanupPage.locator(`[data-delete-run="${immediateRun.id}"]`).waitFor({ state: 'detached' });
+  assert.ok(!runs.has(immediateRun.id));
+  await cleanupPage.locator(`[data-delete-run="${pendingRun.id}"]`).click();
+  await cleanupPage.locator(`[data-delete-run="${pendingRun.id}"]:disabled`).waitFor();
+  await cleanupPage.locator('#history-status').filter({ hasText: 'awaiting in-flight work' }).waitFor();
+  await cleanupPage.locator(`[data-delete-run="${pendingRun.id}"]`).waitFor({ state: 'detached' });
+  assert.match(await cleanupPage.locator('#history-status').textContent(), /Pending deletions finished/);
+  const pendingBulk = makeRun(cleanupBody); pendingBulk.state = 'Publishing';
+  await cleanupPage.locator('#refresh-history').click();
+  await cleanupPage.locator(`[data-delete-run="${pendingBulk.id}"]`).waitFor();
+  await cleanupPage.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await cleanupPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+  await cleanupPage.screenshot({ path: path.join(screenshots, 'run-cleanup-mobile.png'), fullPage: true });
+  await cleanupPage.locator('#delete-all-runs').click();
+  await cleanupPage.locator(`[data-delete-run="${pendingBulk.id}"]:disabled`).waitFor();
+  await cleanupPage.locator('#history-list').filter({ hasText: 'No retained runs yet' }).waitFor();
+  assert.equal(runs.size, 0);
+  assert.match(await cleanupPage.locator('#history-summary').textContent(), /0 retained runs · 0 B/);
+  assert.ok(await cleanupPage.locator('#delete-all-runs').isDisabled());
+  const finalListRequests = requests.filter(request => request.path === '/auto-runs' && request.method === 'GET').length;
+  await cleanupPage.waitForTimeout(2200);
+  assert.equal(requests.filter(request => request.path === '/auto-runs' && request.method === 'GET').length, finalListRequests, 'cleanup polling stops after pending jobs disappear');
+  await cleanupPage.goto(`${origin}/ui/auto-run/runs/${immediateRun.id}`);
+  await cleanupPage.locator('#run-error').filter({ hasText: 'deleted' }).waitFor();
+  assert.ok(await cleanupPage.locator('#start-run').isHidden());
+  await cleanupPage.close();
 
   options.ui.mapUrl = null;
   const noMapPage = await context.newPage();
@@ -902,7 +1146,13 @@ try {
     'map modal mobile layout and absent-configuration hint',
     'redundant run refresh removed while automatic polling remains',
     'memory, payload and response limits preserve explicitly startable partial previews with memory readouts',
-    'sensor-type-only rules display escaped conditions in rule browsing and frozen details'], screenshots }, null, 2));
+    'sensor-type-only rules display escaped conditions in rule browsing and frozen details',
+    'empty Ready previews explain disabled Start and cannot issue publication requests',
+    'pending Start survives polling, rejects repeated clicks and recovers after a failed request',
+    'server rule search by name ID sensor type and description with status, full paging, matching bulk selection and preserved quotas',
+    'cancelled searches cannot overwrite newer results',
+    'Rules and Rules Simulate Coming Soon routes, deep links, mobile keyboard navigation and preserved Auto Run drafts',
+    'all retained runs show data weights with individual and bulk deletion, pending cleanup polling, errors and deleted deep links'], screenshots }, null, 2));
 } finally {
   for (const release of pendingResponses) release();
   if (browser) await browser.close();

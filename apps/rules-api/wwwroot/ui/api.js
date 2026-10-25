@@ -36,10 +36,17 @@ export async function request(path, { method = 'GET', body, signal } = {}) {
 export const api = {
   options: () => request('/auto-runs/options'),
   pipelines: () => request('/pipelines'),
-  rules: (pipeline, from, size, signal) => request(`/pipelines/${encodeURIComponent(pipeline)}/rules?from=${from}&size=${size}`, { signal }),
+  rules: (pipeline, from, size, signal, search = '', isActive = '') => {
+    const query = new URLSearchParams({ from, size });
+    if (search) query.set('search', search);
+    if (isActive !== '') query.set('isActive', isActive);
+    return request(`/pipelines/${encodeURIComponent(pipeline)}/rules?${query}`, { signal });
+  },
   rule: (pipeline, id, signal) => request(`/pipelines/${encodeURIComponent(pipeline)}/rules/${encodeURIComponent(id)}`, { signal }),
   preview: body => request('/auto-runs/preview', { method: 'POST', body }),
   list: () => request('/auto-runs'),
+  deleteRun: id => request(`/auto-runs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  deleteAllRuns: () => request('/auto-runs', { method: 'DELETE' }),
   run: id => request(`/auto-runs/${encodeURIComponent(id)}`),
   items: (id, from, size, outcome) => request(`/auto-runs/${encodeURIComponent(id)}/items?from=${from}&size=${size}${outcome ? `&outcome=${encodeURIComponent(outcome)}` : ''}`),
   start: id => request(`/auto-runs/${encodeURIComponent(id)}/start`, { method: 'POST' }),

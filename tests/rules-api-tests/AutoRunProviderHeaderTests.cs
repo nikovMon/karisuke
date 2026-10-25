@@ -47,8 +47,9 @@ public sealed class AutoRunProviderHeaderTests
         Assert.Equal(HttpMethod.Get, calls[0].Method);
         Assert.EndsWith("/TableEntities/overlay-1", calls[0].Uri.AbsolutePath);
         Assert.Null(calls[0].Body);
-        Assert.Equal("", calls[1].Uri.Query);
-        Assert.Equal("https://provider.example/next?searchAfter=cursor", calls[2].Uri.AbsoluteUri);
+        Assert.Equal("?to=1000", calls[0].Uri.Query);
+        Assert.Equal("?to=1000", calls[1].Uri.Query);
+        Assert.Equal("https://provider.example/next?searchAfter=cursor&to=1000", calls[2].Uri.AbsoluteUri);
         Assert.Equal(calls[1].Body, calls[2].Body);
     }
 

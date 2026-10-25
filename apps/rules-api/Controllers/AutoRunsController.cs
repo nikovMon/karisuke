@@ -36,7 +36,7 @@ public sealed class AutoRunsController(
             SingleInstance = true,
             Ui = options.Ui,
             Memory = memory.Snapshot(),
-            Provider = new { providerOptions.Value.MaxResponseBytes }
+            Provider = new { providerOptions.Value.MaxResponseBytes, providerOptions.Value.TimeoutSeconds, providerOptions.Value.To }
         });
     }
 
@@ -74,4 +74,17 @@ public sealed class AutoRunsController(
 
     [HttpPost("{id}/cancel")]
     public AutoRunSummary Cancel(string id) => service.Cancel(id);
+
+    [HttpDelete("{id}")]
+    [ProducesResponseType(typeof(AutoRunDeletionResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AutoRunDeletionResult), StatusCodes.Status202Accepted)]
+    public IActionResult Delete(string id) => DeletionResponse(service.Delete(id));
+
+    [HttpDelete]
+    [ProducesResponseType(typeof(AutoRunDeletionResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AutoRunDeletionResult), StatusCodes.Status202Accepted)]
+    public IActionResult DeleteAll() => DeletionResponse(service.DeleteAll());
+
+    private IActionResult DeletionResponse(AutoRunDeletionResult result) =>
+        StatusCode(result.PendingIds.Count > 0 ? StatusCodes.Status202Accepted : StatusCodes.Status200OK, result);
 }

@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -22,9 +23,9 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
     public async Task<ProviderOverlayResult> GetAsync(string id, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
-        var uri = new Uri(TableUri().AbsoluteUri.TrimEnd('/') + "/" + Uri.EscapeDataString(id));
+        var uri = WithPageLimit(new Uri(TableUri().AbsoluteUri.TrimEnd('/') + "/" + Uri.EscapeDataString(id)));
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        using var document = await SendAsync(request, allowNotFound: true, cancellationToken);
+        using var document = await SendAsync(request, "overlay lookup", allowNotFound: true, cancellationToken);
         if (document is null) return new(null, "Overlay was not found by Elastic Provider.");
         memory?.ThrowIfUnsafe();
         var result = Map(document.RootElement);
@@ -45,12 +46,13 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
     {
         if (query.ValueKind != JsonValueKind.Object)
             throw new ArgumentException("Provider query must be an object.", nameof(query));
-        var uri = nextPage is null ? TableUri() : ContinuationUri(nextPage);
+        var uri = nextPage is null ? WithPageLimit(TableUri()) : ContinuationUri(nextPage);
         using var request = new HttpRequestMessage(HttpMethod.Post, uri)
         {
             Content = JsonContent.Create(query, mediaType: new MediaTypeHeaderValue("application/json-patch+json"))
         };
-        using var document = await SendAsync(request, allowNotFound: false, cancellationToken)
+        using var document = await SendAsync(request, nextPage is null ? "initial search page" : "continuation page",
+            allowNotFound: false, cancellationToken)
             ?? throw new ElasticProviderException("Provider returned no search response.");
         var root = document.RootElement;
         RequireObject(root, "Batch response");
@@ -121,8 +123,8 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
                 CopyOptional(writer, properties, fields.ImageUrl, "imageUrl");
                 CopyOptional(writer, properties, fields.SensorType, "sensorType");
                 CopyOptional(writer, properties, fields.GridUri, "gridURI");
-                CopyOptional(writer, properties, fields.Width, "width");
-                CopyOptional(writer, properties, fields.Height, "height");
+                CopyDimension(writer, properties, fields.Width, "width");
+                CopyDimension(writer, properties, fields.Height, "height");
                 CopyOptional(writer, properties, fields.ModeSar, "modeSAR");
                 CopyOptional(writer, properties, fields.AreaOfInterest, "areaOfInterest");
                 CopyOptional(writer, properties, fields.LegId, "legId");
@@ -144,7 +146,8 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
         }
     }
 
-    private async Task<JsonDocument?> SendAsync(HttpRequestMessage request, bool allowNotFound, CancellationToken cancellationToken)
+    private async Task<JsonDocument?> SendAsync(HttpRequestMessage request, string operation,
+        bool allowNotFound, CancellationToken cancellationToken)
     {
         memory?.ThrowIfUnsafe();
         foreach (var (name, value) in _headers)
@@ -156,9 +159,12 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
             throw new ElasticProviderException("Provider MaxResponseBytes must be between 1 and 536870912 bytes.");
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
+        var phase = "waiting for response headers";
+        long bytesRead = 0;
         try
         {
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            phase = "reading the response body";
             if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound) return null;
             if (!response.IsSuccessStatusCode)
                 throw new ElasticProviderException($"Elastic Provider returned HTTP {(int)response.StatusCode}.");
@@ -176,6 +182,7 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
                 int read;
                 while ((read = await stream.ReadAsync(chunk.AsMemory(0, chunk.Length), timeout.Token)) != 0)
                 {
+                    bytesRead += read;
                     var required = buffer.Length + read;
                     if (required > _options.MaxResponseBytes)
                         throw new ProviderResponseLimitException(_options.MaxResponseBytes);
@@ -197,7 +204,10 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new ElasticProviderException("Elastic Provider request timed out.", ex);
+            throw new ElasticProviderException(
+                $"Elastic Provider request timed out during {operation} while {phase}. " +
+                $"Configured per-request timeout: {_options.TimeoutSeconds} seconds (AutoRun.Provider.TimeoutSeconds); " +
+                $"response bytes read: {bytesRead}. Narrow the search or increase that timeout and prepare again.", ex);
         }
         catch (HttpRequestException ex)
         {
@@ -225,7 +235,21 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
         if (!Uri.TryCreate(initial, value, out var next) || !SameOrigin(initial, next) ||
             next.UserInfo.Length != 0 || next.Fragment.Length != 0)
             throw new ElasticProviderException("Provider next_page must remain on the configured origin.");
-        return next;
+        return WithPageLimit(next);
+    }
+
+    private Uri WithPageLimit(Uri uri)
+    {
+        if (_options.To is < 0 or > 10_000)
+            throw new ElasticProviderException("Provider To must be between 0 and 10000.");
+
+        // Keep provider cursor/query values in their original encoded form. Only replace
+        // the page-size parameter, including duplicate or differently cased copies.
+        var parts = uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Where(part => !string.Equals(Uri.UnescapeDataString(part.Split('=', 2)[0]),
+                "to", StringComparison.OrdinalIgnoreCase));
+        var query = string.Join("&", parts.Append("to=" + _options.To.ToString(CultureInfo.InvariantCulture)));
+        return new UriBuilder(uri) { Query = query }.Uri;
     }
 
     private static bool SameOrigin(Uri left, Uri right) =>
@@ -264,6 +288,21 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
         if (value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
             throw new FormatException($"Overlay {name} must be a boolean.");
         return value.GetBoolean();
+    }
+
+    private static void CopyDimension(Utf8JsonWriter writer, JsonElement source, string? from, string to)
+    {
+        if (string.IsNullOrWhiteSpace(from) || !source.TryGetProperty(from, out var value)) return;
+        writer.WritePropertyName(to);
+        // Provider dimensions may be 40 or 40.0. Parse the exact numeric token without
+        // floating-point rounding, then emit the integer required by the gateway contract.
+        if (value.ValueKind == JsonValueKind.Number &&
+            (value.TryGetInt32(out var dimension) ||
+             int.TryParse(value.GetRawText(), NumberStyles.Float, CultureInfo.InvariantCulture, out dimension)))
+            writer.WriteNumberValue(dimension);
+        else
+            // Preserve malformed/optional dimensions for the selected pipeline to validate.
+            value.WriteTo(writer);
     }
 
     private static void CopyOptional(Utf8JsonWriter writer, JsonElement source, string? from, string to)

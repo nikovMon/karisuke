@@ -2,7 +2,7 @@
 
 `rules-api` manages rule configuration documents for the imaging pipeline. It exposes REST routes under `/rules` and `/pipelines`, stores documents in Elasticsearch, and returns JSON. Historical auto-run routes under `/auto-runs` prepare overlays from Elastic Provider and publish selected work to the Unified Gateway.
 
-Swagger is available at `/swagger` when the app is running. Health is available at `/health`. The Flarules UI is available at `/ui/auto-run`; `/ui` redirects there.
+Swagger is available at `/swagger` when the app is running. Health is available at `/health`. The Flarules UI is available at `/ui/auto-run`; `/ui` redirects there. Its shared navigation also includes **Rules** (`/ui/rules`) and **Rules Simulate** (`/ui/rules-simulate`), which currently display **Coming Soon**, and API Reference.
 
 ## Runtime
 
@@ -51,7 +51,11 @@ The feature is disabled by default. Jobs and previews are held in memory on **on
 
 Flarules uses the same API routes, supports all three source modes, browses saved rules, shows per-rule quotas and preview shortfalls, and polls run progress. Run links use `/ui/auto-run/runs/{id}`. Date inputs use the browser's local timezone automatically, without a timezone selector, and submit explicit UTC timestamps. The UI and API use the deployment's existing access boundary; this feature adds no login, roles, or per-user job isolation.
 
-In the rule browser, **Select all rules** adds every rule in the selected pipeline across all pages, including inactive rules. Rules already selected retain their edited quotas, and targets from other pipelines remain selected. The operation adds nothing if fetching a page fails or the combined selection would exceed the 100-target limit; select fewer rules individually in that case. Selecting rules prepares the configuration only; it does not start a preview or publish messages.
+The rule browser searches within the selected pipeline across pages and supports an active/inactive status filter. **Select all matching rules** adds the rules matching those search/status filters across all pages; without filters it includes every rule, including inactive ones. Rules already selected retain their edited quotas, and targets from other pipelines remain selected. The operation adds nothing if fetching a page fails or the combined selection would exceed the 100-target limit; select fewer rules individually in that case. Selecting rules prepares the configuration only; it does not start a preview or publish messages.
+
+`GET /pipelines/{pipelineId}/rules?search=thermal&isActive=true&from=0&size=10` supports literal, case-insensitive substring matching across `ruleName`, rule ID, description, sensor names, and sensor types. `search` is trimmed and limited to 200 characters; an omitted or blank search retains the existing list behavior. `from` skips matching rules, and `getNameOnly=true` supports the same search. Search symbols such as `*` are treated literally.
+
+Existing rules indexes can disable indexing of match conditions, so text search scans projected source fields through an Elasticsearch point-in-time snapshot, keeping at most 500 projected records per scan page plus the requested result page. Only the selected result page's full rule documents are fetched, from that same snapshot. A request that scans 100,000 rules without finding the requested page or exhausting the source returns an explicit `422` scan-limit error. Each list request opens its own snapshot; edits between UI pages can affect subsequent results. Cancellation and completion close the snapshot. This search concerns saved rule metadata, independently of the Elastic Provider overlay searches.
 
 In **Overlay IDs** mode, direct submission is the default: enter IDs, prepare a preview, then start. No pipeline, rules, or search filters are required. The optional selected-rule mode retains historical matching and per-rule quotas. Switching modes preserves the rule draft, but direct requests do not send hidden targets or filters. Direct previews remain available if the pipeline list cannot be loaded.
 
@@ -65,21 +69,31 @@ The optional filter forms in both modes omit grid types and sortie IDs. Existing
 
 | Method and route | Behavior |
 | --- | --- |
-| `GET /auto-runs/options` | Feature status, publication defaults, effective limits, `ui.mapUrl`, `provider.maxResponseBytes`, current `memory` measurements, and `singleInstance: true`. |
+| `GET /auto-runs/options` | Feature status, publication defaults, effective limits, `ui.mapUrl`, provider response limit, timeout and `to`, current `memory` measurements, and `singleInstance: true`. |
 | `POST /auto-runs/preview` | Accepts a preview request and returns `202 Accepted`, a run summary, and its `Location` URL. No messages are published. |
 | `GET /auto-runs` | Lists retained run summaries, newest first. |
-| `GET /auto-runs/{id}` | Returns state, counters, target quotas, frozen rules, provider queries, warnings, errors, and current process `memory` measurements. |
+| `GET /auto-runs/{id}` | Returns state, counters, target quotas, frozen rules, provider queries, warnings, errors, per-run `retainedBytes`, `deletionRequested`, and current process `memory` measurements. |
 | `GET /auto-runs/{id}/items?from=0&size=50` | Pages through selected overlays and their assigned pipeline/rule pairs. `size` is 1–200; optional `outcome` filters by `Pending`, `InFlight`, `Confirmed`, `Failed`, or `Uncertain`. |
 | `POST /auto-runs/{id}/start` | Starts a ready, unexpired preview. Repeating start for a run that has already started returns its current state without publishing it again. |
 | `POST /auto-runs/{id}/rerun` | Prepares a new run from retained criteria with the latest publication settings. Returns `202 Accepted`, a new run summary, and its `Location` URL. No messages are published. |
 | `PATCH /auto-runs/{id}/publication` | Changes batch size and delay during preparation, while ready, or during publication. |
 | `POST /auto-runs/{id}/cancel` | Cancels preparation or publication, or discards a ready preview. Already queued messages are not recalled. |
+| `DELETE /auto-runs/{id}` | Deletes a retained run. If work is still queued or executing, cancels future work and waits for outstanding work before releasing its data. |
+| `DELETE /auto-runs` | Deletes all retained runs and requests cancellation/deletion of any active run. |
 
 Poll the summary until `state` is `Ready`, inspect the selection and warnings, then call start. States are `Preparing`, `Ready`, `Publishing`, `Completed`, `CompletedWithErrors`, `Failed`, `Cancelled`, and `Expired`. Cancellation is cooperative; an active run may remain `Preparing` or `Publishing` until outstanding work settles.
 
 **Rerun** uses the original source, filters, target IDs, and quotas with that run's latest requested batch size and delay. It fetches current overlays and re-resolves current saved rules, producing a fresh preview with a new run ID; it does not reuse the old frozen payloads or rule snapshots. Review the new preview and explicitly click **Start**. The rerun route takes no body, returns `409` if the original run is `Preparing` or `Publishing` or another job is active, and returns `404` if the original run is no longer retained, including after a restart.
 
 Invalid requests return `400`; missing or forgotten runs return `404`; a busy worker, full retained-job budget, or invalid state transition returns `409`; preparing while disabled returns `503`. A provider failure after the preview is accepted changes the job to `Failed`, so inspect the job summary rather than relying only on the initial HTTP response.
+
+### Recent runs and memory cleanup
+
+Recent runs lists every retained job with its retained-data size, a **Delete** button, and a **Delete all** control above the list. `retainedBytes` counts the serialized request, frozen rules, queries, and still-retained overlay payloads charged to the payload budget. It is an estimate of retained data, not the job's full heap size; CLR objects and item metadata add overhead. Terminal jobs have already released their overlay payloads, so their remaining size is usually smaller.
+
+Deletion returns `{ "deletedIds": [], "pendingIds": [], "releasedRetainedBytes": 0 }`, with HTTP `200` when all requested removals are immediate or `202` while any are pending. The released byte count covers removals completed during that request. Pending jobs expose `deletionRequested: true`; the UI polls until they disappear. Their settings, start, and rerun actions are disabled. Once removed, run and item URLs return `404`; saved rules are unaffected. Bulk deletion is safe to repeat when no jobs remain.
+
+Deleting an active job stops future preparation/publication and releases data only after queued or in-flight work finishes. It does not recall confirmed messages or resolve uncertain delivery outcomes. Cleanup releases application references and payload-budget capacity; garbage collection controls when memory is reclaimed and the process working set may remain high. No forced garbage collection is performed. All users on this instance share the same retained-run collection.
 
 ### Preview requests
 
@@ -206,6 +220,8 @@ Selection prioritizes overlays that help the most unmet target minimums, then fi
 | `AutoRun:MaxCandidates` | 200,000 | Maximum eligible candidates retained for selection; configurable downward. |
 | `AutoRun:PayloadBudgetBytes` | 536,870,912 | Process-wide retained serialized request, rule, query, and overlay byte budget; configurable downward. |
 | `AutoRun:Provider:MaxResponseBytes` | 67,108,864 (64 MiB) | Maximum raw bytes per provider response, including responses without Content-Length; positive and at most 536,870,912 bytes. |
+| `AutoRun:Provider:TimeoutSeconds` | 30 | Deadline for each provider HTTP request, including sending the request and downloading its response body; positive. Independent of publication timeout. |
+| `AutoRun:Provider:To` | 1,000 | Value of the provider `to` query parameter on every request, including continuation pages; integer 0 through 10,000. |
 | `AutoRun:Memory:LimitBytes` | 0 | Optional additional process-memory ceiling in bytes; zero derives the ceiling from runtime measurements and the following two settings. |
 | `AutoRun:Memory:MaxUsagePercent` | 80 | Percentage of runtime-reported available memory allowed before stopping collection; integer 1–99. |
 | `AutoRun:Memory:MinimumFreeBytes` | 268,435,456 (256 MiB) | Minimum reserve below runtime-reported available memory; nonnegative. |
@@ -269,7 +285,13 @@ The adapter uses:
 - `GET /ErisImages/v2.0/ErisImages/Images/TableEntities/{id}` for one overlay.
 - `POST /ErisImages/v2.0/ErisImages/Images/TableEntities` with `Content-Type: application/json-patch+json` for filtered batches, including continuation requests.
 
-The first request supplies no provider query flags. Batch responses must contain `entities_list`; the optional `next_page` URL is followed with the **same POST body**, including any continuation query string supplied by the provider. Continuations must remain on the configured scheme, host, and port. Redirects are disabled, repeated continuation URLs fail preparation, and an empty `entities_list` terminates paging. Provider request timeout defaults to 30 seconds.
+Every provider request includes `to=<AutoRun:Provider:To>`, defaulting to `to=1000`. Set this integer to any value from 0 through 10,000 in configuration, or use `AutoRun__Provider__To`, then restart Rules API. Zero is sent as `to=0`; it does not omit the parameter or mean unlimited locally. The provider determines the result of that value. This page-size control is separate from the overall selected-overlay quota and the byte limit on each response.
+
+Batch responses must contain `entities_list`; the optional `next_page` URL is followed with the **same POST body**. The configured `to` replaces any existing `to` parameter on continuation URLs; all other query components, including encoded cursor values, are preserved. Continuations must remain on the configured scheme, host, and port. Redirects are disabled, repeated continuation URLs fail preparation, and an empty `entities_list` terminates paging. Provider request timeout defaults to 30 seconds.
+
+For slow provider searches or large pages, set `AutoRun:Provider:TimeoutSeconds` to a larger value, such as `120`, and restart Rules API. The deadline resets for each lookup or page request and covers waiting for response headers plus downloading the body; it is not a deadline for the entire preparation. Increasing `MaxResponseBytes` does not increase this timeout. `AutoRun:PublishTimeoutSeconds` only controls RabbitMQ publication.
+
+`GET /auto-runs/options` exposes the effective `provider.to`, `provider.timeoutSeconds`, and `provider.maxResponseBytes`. Timeout errors identify an overlay lookup, initial search page, or continuation page, whether the request was waiting for headers or reading the body, and how many body bytes were read. They do not include request URLs, cursor values, or headers. A transport timeout fails preparation and is not automatically retried. Provider HTTP 408/504 responses are reported as HTTP errors; a larger client timeout cannot override a proxy or provider's own deadline. Narrowing the time range or search area can reduce search work; selected-overlay quotas do not control provider page size.
 
 Optional `AutoRun:Provider:Headers` configures string header names and values for every provider GET, search POST, and continuation request. The default is `{}`. For example:
 
@@ -312,7 +334,7 @@ Different rule/sensor branches use separate AND queries, and each query's entire
 | `Id` | `GlobalId` |
 | `SensorName` | `SENSOR` |
 | `SensorType` | `IMAGINGTECHNIQUE` |
-| `GridType` | `SOLUTIONTYPE` |
+| `GridType` | `gridType.keyword` |
 | `RegistrationQuality` | `hasalgorithmicregistration` |
 | `SortieId` | `SORTIE` |
 | `IsRealtime` | `ISREALTIME` |
@@ -339,6 +361,8 @@ All generated photo-time and creation-time bounds are converted to UTC and forma
 
 Also remove or update any explicit `RequestFields:RegistrationQuality` value of `REGISTRATIONQUALITY`, including `AutoRun__Provider__RequestFields__RegistrationQuality`, so queries use `hasalgorithmicregistration`. Explicit aliases still override the default; changing the alias does not revert the boolean encoding. Keep `ResponseFields:RegistrationQuality` unchanged unless the response property itself differs.
 
+Grid-type searches use `RequestFields:GridType = "gridType.keyword"` for both saved-rule conditions and explicit API filters. Remove an old `SOLUTIONTYPE`/`solutionType` override or set `AutoRun__Provider__RequestFields__GridType=gridType.keyword`. The response mapping remains independent: `ResponseFields:GridType` still defaults to `SolutionType`. If the provider returns `properties_list.gridType` instead, set `ResponseFields:GridType` to `gridType`; `.keyword` is the query field suffix, not an assumed response property.
+
 Other request aliases remain deployment assumptions. Confirmed aliases include `SENSOR`, `geo`, `hasalgorithmicregistration`, photo-time `date`/`DATE`, and the creation-time aliases above, together with the logical grammar; not every alias in the table has been verified. Requests always use native JSON numbers and booleans, such as `1`, `20`, and `false`.
 
 The response contract is separate from request aliases. Both GET and each batch entity contain `properties_list` and `geo.wkt`. These configured response mappings use the supplied example and confirmed provider property names:
@@ -361,6 +385,10 @@ The response contract is separate from request aliases. Both GET and each batch 
 | `geo.wkt` | Polygon/MultiPolygon GeoJSON `roiFootprint` |
 
 Response aliases can be changed under `AutoRun:Provider:ResponseFields` using the option names in [ElasticProviderOptions.cs](AutoRuns/Provider/ElasticProviderOptions.cs). The GET result's mapped `GlobalId` must equal the requested ID. Response resolution must be a JSON number, and `IsRealTime`, when present, must be a JSON boolean.
+
+Every normalized overlay requires a nonempty `gridType`, including direct Filters and Overlay IDs submissions. Saved sensor conditions can restrict grid types, local matching verifies those restrictions, and FindAir includes grid type in its downstream payload. Changing the outbound query alias does not remove this input requirement. A provider response missing its configured grid-type property is counted as invalid.
+
+For FindAir, mapped `ImageWidth` and `ImageHeight` must be positive whole-number JSON values within the 32-bit range (1 through 2,147,483,647). The adapter accepts both integer and decimal representations, such as `40` and `40.0`, and emits integer `width` and `height` in the normalized gateway payload. For example, `8836.0` by `3608.0` becomes `8836` by `3608`. Fractional values such as `40.5` are never rounded; quoted numbers, nonpositive dimensions, and out-of-range values still fail FindAir validation. Check `ResponseFields:Width` and `ResponseFields:Height` if the provider uses other property names. Preview errors identify the normalized fields (`input.width` and `input.height`); rejected candidates cannot be assigned to FindAir, and a preview with no selected overlays cannot start.
 
 Provider dates without offsets are interpreted as Israel local time (`Asia/Jerusalem`) in code. Dates carrying explicit offsets honor those offsets. Ambiguous or nonexistent daylight-saving times make that record invalid instead of being guessed. Accepted local date shapes are `dd/MM/yyyy HH:mm:ss` and `yyyy-MM-ddTHH:mm:ss`, optionally with fractional seconds.
 
@@ -389,6 +417,7 @@ The auto-run destination is the **Unified Gateway input queue**, independently o
     "Provider": {
       "BaseUrl": "https://elastic-provider.example",
       "TableEntitiesPath": "/ErisImages/v2.0/ErisImages/Images/TableEntities",
+      "To": 1000,
       "TimeoutSeconds": 30,
       "MaxResponseBytes": 67108864,
       "Headers": {}
