@@ -69,7 +69,7 @@ public sealed class AutoRunProviderTests
         Assert.Equal("B", Find(second, "match", "SENSOR")[0].GetString());
         Assert.Equal("grid-B", Find(second, "match", "gridType.keyword")[0].GetString());
         Assert.False(Find(second, "match", "hasalgorithmicregistration")[0].GetBoolean());
-        Assert.All([first, second], clauses => Assert.Equal("SAR", Find(clauses, "match", "IMAGINGTECHNIQUE")[0].GetString()));
+        Assert.All([first, second], clauses => Assert.Equal("SAR", Find(clauses, "match", "sensorType.keyword")[0].GetString()));
         Assert.All(queries, query =>
         {
             Assert.DoesNotContain("\"date\"", query.GetProperty("filter").GetRawText(), StringComparison.Ordinal);
@@ -442,7 +442,7 @@ public sealed class AutoRunProviderTests
     {
         var result = await Provider(_ => new(HttpStatusCode.NotFound)).GetAsync("1", CancellationToken.None);
         Assert.Null(result.Overlay); Assert.NotNull(result.Error);
-        await Assert.ThrowsAsync<ElasticProviderException>(() =>
+        await Assert.ThrowsAsync<ProviderUnavailableException>(() =>
             Provider(_ => new(HttpStatusCode.ServiceUnavailable)).GetAsync("1", CancellationToken.None));
     }
 
@@ -537,7 +537,7 @@ public sealed class AutoRunProviderTests
         {
             accepted.Add(item.Overlay!);
             memory.Blocked = true;
-            return true;
+            return ValueTask.FromResult(true);
         }, CancellationToken.None);
 
         var first = Assert.Single(accepted);
@@ -561,7 +561,7 @@ public sealed class AutoRunProviderTests
         {
             Assert.NotNull(item.Overlay);
             visited++;
-            return false;
+            return ValueTask.FromResult(false);
         }, CancellationToken.None);
         Assert.Equal(1, visited);
         Assert.Empty(page.Items);
@@ -585,7 +585,10 @@ public sealed class AutoRunProviderTests
     {
         exclusive_id = new { entity_id = "overlay-1" }, geo = new { wkt = Area }, properties_list = properties ?? Properties()
     };
-    private static ElasticProviderOptions Config() => new() { BaseUrl = "https://provider.example" };
+    private static ElasticProviderOptions Config() => new()
+    {
+        BaseUrl = "https://provider.example", RequestDelayMs = 0, MaxRetries = 0
+    };
     private static ElasticOverlayProvider Provider(Func<HttpRequestMessage, HttpResponseMessage> response, ElasticProviderOptions? options = null) =>
         new(new HttpClient(new Handler(response)), Options.Create(options ?? Config()));
     private static HttpResponseMessage Json(object value) => new(HttpStatusCode.OK)

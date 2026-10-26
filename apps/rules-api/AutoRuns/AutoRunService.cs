@@ -46,6 +46,10 @@ public sealed class AutoRunService(
         lock (_gate) EnsureAvailable();
         IReadOnlyList<AutoRunResolvedTarget> targets = request.Targets.Count == 0
             ? [] : await resolver.ResolveAsync(request.Targets, cancellationToken);
+        var typeErrors = targets.SelectMany(t => queryBuilder.ValidateSensorTypes(null, [t.Rule])
+            .Select(error => $"Pipeline '{t.Target.PipelineId}': {error}")).ToArray();
+        if (typeErrors.Length > 0)
+            throw new AutoRunRequestException(400, string.Join("; ", typeErrors)) { Code = "unknown_sensor_type" };
         EnsureMemoryAvailable();
         var requestBytes = JsonSerializer.SerializeToUtf8Bytes(request, AutoRunJson.Options);
         EnsureMemoryAvailable(requestBytes.LongLength * 3);
@@ -68,6 +72,8 @@ public sealed class AutoRunService(
             _jobs.Add(job.Id, job);
             _active = job.Id;
             Enqueue(job);
+            logger.LogInformation("Auto-run {AutoRunId} preparation accepted: source {SourceMode}, {TargetCount} targets, maximum {Maximum} overlays.",
+                job.Id, job.Request.Source.Mode, job.Targets.Count, job.Maximum);
             return Summary(job);
         }
 
@@ -116,7 +122,7 @@ public sealed class AutoRunService(
             return new(from, size, items.Length, items.Skip(from).Take(size).Select(item => new AutoRunItem(
                 item.Id, item.SensorName, item.PhotoTime,
                 item.Assignments.Select(i => new AutoRunItemTarget(job.Targets[i].Target.PipelineId, job.Targets[i].Target.RuleId)).ToArray(),
-                item.Outcome, item.Error)).ToArray());
+                item.Outcome, item.Error) { SensorType = item.SensorType }).ToArray());
         }
     }
 
@@ -138,6 +144,8 @@ public sealed class AutoRunService(
             job.ActivePublication = job.Publication;
             _active = id;
             Enqueue(job);
+            logger.LogInformation("Auto-run {AutoRunId} publication started: {SelectedCount} overlays, batch size {BatchSize}, delay {DelayMs} ms.",
+                job.Id, job.Items.Count, job.Publication.BatchSize, job.Publication.DelayMs);
             return Summary(job);
         }
     }
@@ -154,6 +162,8 @@ public sealed class AutoRunService(
                 throw new AutoRunRequestException(409, "Publication settings cannot change for a terminal job.");
             job.Publication = settings with { };
             if (job.State != AutoRunState.Publishing) job.ActivePublication = job.Publication;
+            logger.LogInformation("Auto-run {AutoRunId} publication settings changed: batch size {BatchSize}, delay {DelayMs} ms, pending next boundary {Pending}.",
+                job.Id, settings.BatchSize, settings.DelayMs, job.State == AutoRunState.Publishing);
             return Summary(job);
         }
     }
@@ -169,6 +179,7 @@ public sealed class AutoRunService(
                 job.Cancellation.Cancel();
                 // The worker releases ownership after observing all in-flight outcomes.
                 AddWarning(job, "Cancellation requested. Already submitted messages cannot be recalled.");
+                logger.LogInformation("Auto-run {AutoRunId} cancellation requested in {State}; {ConfirmedCount} submissions already confirmed.", job.Id, job.State, job.Confirmed);
             }
             else if (job.State == AutoRunState.Ready) Finish(job, AutoRunState.Cancelled);
             return Summary(job);
@@ -256,7 +267,7 @@ public sealed class AutoRunService(
     private async Task ProcessJobAsync(Job job, CancellationToken stoppingToken)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, job.Cancellation.Token);
-        using var scope = logger.BeginScope(new Dictionary<string, object?> { ["auto_run.id"] = job.Id });
+        using var scope = logger.BeginScope(new Dictionary<string, object?> { ["auto_run.id"] = job.Id, ["trace_id"] = job.TraceId });
         using var activity = TelemetrySources.RulesApi.StartActivity(
             job.State == AutoRunState.Preparing ? "auto_run.prepare" : "auto_run.publish",
             ActivityKind.Internal, job.TraceContext);
@@ -274,11 +285,16 @@ public sealed class AutoRunService(
         catch (Exception ex)
         {
             activity?.SetStatus(ActivityStatusCode.Error, "Auto-run failed.");
-            logger.LogError(ex, "Auto-run failed.");
+            if (ex is ElasticProviderException)
+                logger.LogError("Auto-run provider operation failed: {ProviderError}", ex.Message);
+            else logger.LogError(ex, "Auto-run failed during {Stage}.", job.State);
             lock (_gate)
             {
-                AddError(job, ex is InvalidOperationException or ArgumentException or HttpRequestException or ElasticProviderException
-                    ? ex.Message : "Auto-run failed. Check the service logs using the run ID.");
+                var message = ex is InvalidOperationException or ArgumentException or ElasticProviderException
+                    ? ex.Message : "Auto Run could not finish because of an internal error. Use the run ID and trace ID to find the service log.";
+                AddError(job, message);
+                if (!job.Diagnostics.Any(d => d.Diagnostic.Severity == "error" && d.Diagnostic.Message == Truncate(message)))
+                    AddDiagnostic(job, new(time.GetUtcNow(), "error", "auto_run_failed", job.State == AutoRunState.Preparing ? "preparation" : "publication", message));
                 Finish(job, AutoRunState.Failed);
             }
         }
@@ -298,6 +314,9 @@ public sealed class AutoRunService(
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var matcher = job.IsDirect ? null : new RuleMatcher(time);
         var matchRules = job.Targets.Select(t => t.MatchRule).ToArray();
+        var nonTypeRules = matchRules.Select(r => r with { SensorTypes = null }).ToArray();
+        int? queryIndex = null;
+        int? pageIndex = null;
         IReadOnlyList<JsonElement> queryBodies = [];
         try
         {
@@ -330,25 +349,39 @@ public sealed class AutoRunService(
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (AtLimit()) break;
-                    Accept(await provider.GetAsync(id, cancellationToken));
+                    ProviderOverlayResult result;
+                    try { result = await provider.GetAsync(id, cancellationToken, Report); }
+                    catch (ElasticProviderException ex)
+                    {
+                        var diagnostic = (ex.Diagnostic ?? new AutoRunDiagnostic(time.GetUtcNow(), "error", "provider_error", "provider", ex.Message))
+                            with { OverlayId = id };
+                        if (ex is ProviderUnavailableException) throw new ProviderUnavailableException(ex.Message, diagnostic);
+                        throw new ElasticProviderException(ex.Message, diagnostic: diagnostic);
+                    }
+                    await AcceptAsync(result);
                 }
             }
             else
             {
-                // The provider owns one search context: finish its cursor before starting another query.
+                // Finish one query's stateless searchAfter cursor before starting another query.
                 foreach (var query in queryBodies)
                 {
+                    queryIndex = (queryIndex ?? 0) + 1;
+                    pageIndex = 0;
                     string? nextPage = null;
                     var visited = new HashSet<string>(StringComparer.Ordinal);
                     do
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         if (AtLimit()) break;
-                        var page = await provider.VisitPageAsync(query, nextPage, item =>
+                        pageIndex++;
+                        var page = await provider.VisitPageAsync(query, nextPage, async item =>
                         {
-                            Accept(item);
+                            await AcceptAsync(item);
                             return job.StoppedReason is null;
-                        }, cancellationToken);
+                        }, cancellationToken, Report);
+                        logger.LogInformation("Provider query {QueryIndex}/{QueryCount} page {Page} processed: scanned {ScannedCount}, eligible {CandidateCount}, continuation {HasNextPage}.",
+                            queryIndex, queryBodies.Count, pageIndex, job.Scanned, candidates.Count, !string.IsNullOrEmpty(page.NextPage));
                         if (page.StoppedReason is { } reason)
                             Stop(reason, "Memory is near the preparation limit.");
                         if (job.StoppedReason is not null || string.IsNullOrEmpty(page.NextPage)) break;
@@ -362,6 +395,16 @@ public sealed class AutoRunService(
         }
         catch (AutoRunMemoryLimitException) { Stop("memoryLimit", "Memory is near the preparation limit."); }
         catch (ProviderResponseLimitException ex) { Stop("responseLimit", ex.Message); }
+        catch (ProviderUnavailableException ex)
+        {
+            RecordProviderFailure(ex);
+            Stop("providerUnavailable", ex.Message + " The provider is unavailable; no more requests will be sent for this preview.");
+        }
+        catch (ElasticProviderException ex)
+        {
+            RecordProviderFailure(ex);
+            throw;
+        }
         lock (_gate) job.SourceExhausted = job.StoppedReason is null;
         cancellationToken.ThrowIfCancellationRequested();
         IReadOnlyList<AutoRunSelection> selection = job.IsDirect
@@ -383,8 +426,22 @@ public sealed class AutoRunService(
                     (job.Items.Count > 0 ? "Available overlays can still be submitted." : "No selected overlays are available to submit."));
             job.ReadyAt = time.GetUtcNow();
             job.State = AutoRunState.Ready;
+            job.ProviderProgress = null;
             if (_active == job.Id) _active = null;
             SelectedMetric.Add(job.Items.Count);
+            logger.LogInformation("Auto-run preview ready: scanned {Scanned}, invalid {Invalid}, duplicates {Duplicates}, eligible {Eligible}, selected {Selected}, source complete {SourceComplete}.",
+                job.Scanned, job.Invalid, job.Duplicates, job.ObservedMatches, job.Items.Count, job.SourceExhausted);
+        }
+
+        void Report(ProviderProgress progress)
+        {
+            lock (_gate) job.ProviderProgress = progress with { QueryIndex = queryIndex, QueryCount = queryBodies.Count, Page = pageIndex };
+        }
+
+        void RecordProviderFailure(ElasticProviderException exception)
+        {
+            var diagnostic = exception.Diagnostic ?? new AutoRunDiagnostic(time.GetUtcNow(), "error", "provider_error", "provider", exception.Message);
+            lock (_gate) AddDiagnostic(job, diagnostic with { QueryIndex = queryIndex, Page = pageIndex });
         }
 
         bool AtLimit()
@@ -404,13 +461,13 @@ public sealed class AutoRunService(
             }
         }
 
-        void Accept(ProviderOverlayResult result)
+        async ValueTask AcceptAsync(ProviderOverlayResult result)
         {
             if (AtLimit()) return;
             lock (_gate) job.Scanned++;
             if (result.Overlay is not { } overlay)
             {
-                lock (_gate) { job.Invalid++; AddError(job, result.Error ?? "Invalid provider overlay."); }
+                Invalid(result.Error ?? "Provider returned an overlay that could not be read.");
                 return;
             }
             if (!seen.Add(overlay.Input.ImageId))
@@ -418,7 +475,26 @@ public sealed class AutoRunService(
                 lock (_gate) job.Duplicates++;
                 return;
             }
-            if (job.Request.Source.Filters is { } filters && !ProviderQueryBuilder.Matches(overlay, filters)) return;
+            var filters = job.Request.Source.Filters;
+            if (filters is not null && !ProviderQueryBuilder.MatchesWithoutSensorType(overlay, filters)) return;
+            if (!job.IsDirect && matcher!.Match(overlay.Input, nonTypeRules).Matches.Count == 0) return;
+            // The ADP projection collapses VIS/PAN/etc. to EO. Only the raw per-ID GET
+            // can resolve the actual type; never infer it from a query branch or rule.
+            ProviderOverlayResult resolved;
+            try { resolved = await provider.ResolveSensorTypeAsync(overlay, cancellationToken, Report); }
+            catch (ElasticProviderException ex) when (ex.Diagnostic is { } diagnostic)
+            {
+                var contextual = diagnostic with { OverlayId = overlay.Input.ImageId };
+                if (ex is ProviderUnavailableException) throw new ProviderUnavailableException(ex.Message, contextual);
+                throw new ElasticProviderException(ex.Message, diagnostic: contextual);
+            }
+            if (resolved.Overlay is not { } actual)
+            {
+                Invalid(resolved.Error ?? "Provider did not return a valid raw sensor type for this overlay.", overlay.Input.ImageId);
+                return;
+            }
+            overlay = actual;
+            if (filters is not null && !ProviderQueryBuilder.Matches(overlay, filters)) return;
             if (job.IsDirect)
             {
                 Retain(overlay, []);
@@ -434,7 +510,7 @@ public sealed class AutoRunService(
             }
             catch (ArgumentException ex)
             {
-                lock (_gate) { job.Invalid++; AddError(job, $"Overlay '{overlay.Input.ImageId}' has invalid dispatch metadata: {ex.Message}"); }
+                Invalid($"Overlay '{overlay.Input.ImageId}' has invalid dispatch metadata: {ex.Message}", overlay.Input.ImageId);
                 return;
             }
             var matches = new List<int>();
@@ -451,7 +527,16 @@ public sealed class AutoRunService(
                 };
                 var errors = target.Rule.RunParams!.SelectMany(p => target.Contract.ValidateContext(unitContext, p)).ToArray();
                 if (errors.Length == 0) matches.Add(index);
-                else lock (_gate) AddError(job, $"Overlay '{overlay.Input.ImageId}' cannot enter pipeline '{target.Target.PipelineId}': {string.Join("; ", errors.Select(e => $"{e.Field}: {e.Message}"))}");
+                else lock (_gate)
+                {
+                    var message = $"Overlay '{overlay.Input.ImageId}' cannot enter pipeline '{target.Target.PipelineId}': {string.Join("; ", errors.Select(e => $"{e.Field}: {e.Message}"))}";
+                    AddError(job, message);
+                    AddDiagnostic(job, new(time.GetUtcNow(), "warning", "overlay_contract_rejected", "validation", message,
+                        QueryIndex: queryIndex, Page: pageIndex, OverlayId: overlay.Input.ImageId,
+                        PipelineId: target.Target.PipelineId, RuleId: target.Target.RuleId));
+                    logger.LogDebug("Overlay {OverlayId}, pipeline {PipelineId}, rule {RuleId} validation failed: {ValidationError}",
+                        overlay.Input.ImageId, target.Target.PipelineId, target.Target.RuleId, message);
+                }
             }
             if (matches.Count == 0)
             {
@@ -459,6 +544,18 @@ public sealed class AutoRunService(
                 return;
             }
             Retain(overlay, matches.ToArray());
+        }
+
+        void Invalid(string message, string? overlayId = null)
+        {
+            lock (_gate)
+            {
+                job.Invalid++;
+                AddError(job, message);
+                AddDiagnostic(job, new(time.GetUtcNow(), "warning", "invalid_provider_overlay", "normalization", message,
+                    QueryIndex: queryIndex, Page: pageIndex, OverlayId: overlayId));
+            }
+            logger.LogDebug("Skipping invalid provider overlay {OverlayId}: {ValidationError}", overlayId, message);
         }
 
         void Retain(ProviderOverlay overlay, int[] matches)
@@ -489,7 +586,10 @@ public sealed class AutoRunService(
             {
                 if (job.StoppedReason is not null) return;
                 job.StoppedReason = reason;
-                AddWarning(job, message + " Search coverage is incomplete. Any eligible overlays already collected will be selected for review; narrow the search for a smaller preparation.");
+                var warning = message + " Search coverage is incomplete. Any eligible overlays already collected will be selected for review; narrow the search for a smaller preparation.";
+                AddWarning(job, warning);
+                if (reason != "providerUnavailable")
+                    AddDiagnostic(job, new(time.GetUtcNow(), "warning", reason, "preparation", warning, QueryIndex: queryIndex, Page: pageIndex));
                 logger.LogWarning("Auto-run preparation stopped at {StoppedReason}; retaining {CandidateCount} candidates.", reason, candidates.Count);
             }
         }
@@ -545,7 +645,11 @@ public sealed class AutoRunService(
                     }
                     PublicationsMetric.Add(1, new KeyValuePair<string, object?>("outcome", result.Outcome.ToString()));
                     if (result.Outcome != AutoRunItemOutcome.Confirmed)
+                    {
+                        AddDiagnostic(job, new(time.GetUtcNow(), "warning", "publication_" + result.Outcome.ToString().ToLowerInvariant(),
+                            "publication", result.Error ?? "The broker did not confirm this submission.", OverlayId: item.Id));
                         logger.LogWarning("Overlay {OverlayId} publication is {PublicationOutcome}: {PublicationError}", item.Id, result.Outcome, result.Error);
+                    }
                 }
             });
             offset += batch.Length;
@@ -580,9 +684,9 @@ public sealed class AutoRunService(
     // Only remove once every queued/executing entry has released the job and its linked token.
     private long Remove(Job job)
     {
-        var released = job.RuleBytes + job.PayloadBytes;
+        var released = job.RuleBytes + job.PayloadBytes + job.DiagnosticBytes;
         _retainedBytes -= released;
-        job.RuleBytes = job.PayloadBytes = 0;
+        job.RuleBytes = job.PayloadBytes = job.DiagnosticBytes = 0;
         _jobs.Remove(job.Id);
         if (_active == job.Id) _active = null;
         job.Cancellation.Dispose();
@@ -595,12 +699,16 @@ public sealed class AutoRunService(
         job.Request = null!;
         job.Warnings.Clear();
         job.Errors.Clear();
+        job.Diagnostics.Clear();
+        job.ProviderProgress = null;
+        logger.LogInformation("Auto-run {AutoRunId} removed; released {ReleasedBytes} retained bytes.", job.Id, released);
         return released;
     }
 
     private void Finish(Job job, AutoRunState state)
     {
         job.State = state;
+        job.ProviderProgress = null;
         if (_active == job.Id) _active = null;
         job.FinishedAt = time.GetUtcNow();
         foreach (var item in job.Items) item.Payload = null;
@@ -634,7 +742,12 @@ public sealed class AutoRunService(
         job.Publication, job.ActivePublication, job.Publication != job.ActivePublication,
         job.SourceExhausted, job.StoppedReason, job.Warnings.ToArray(), job.Errors.ToArray(), job.Queries,
         job.StartedAt is { } start ? job.Confirmed / Math.Max(1, ((job.FinishedAt ?? time.GetUtcNow()) - start).TotalSeconds) : 0,
-        memory?.Snapshot(), job.RuleBytes + job.PayloadBytes, job.DeletionRequested);
+        memory?.Snapshot(), job.RuleBytes + job.PayloadBytes + job.DiagnosticBytes, job.DeletionRequested)
+    {
+        Diagnostics = job.Diagnostics.Select(d => d.Diagnostic).ToArray(),
+        DiagnosticsOmitted = job.DiagnosticsOmitted,
+        ProviderProgress = job.ProviderProgress
+    };
 
     private void Validate(AutoRunPreviewRequest request)
     {
@@ -655,6 +768,9 @@ public sealed class AutoRunService(
         {
             var errors = ProviderQueryBuilder.Validate(filters).ToArray();
             if (errors.Length > 0) throw new AutoRunRequestException(400, string.Join("; ", errors));
+            var sensorErrors = queryBuilder.ValidateSensorTypes(filters).ToArray();
+            if (sensorErrors.Length > 0)
+                throw new AutoRunRequestException(400, string.Join("; ", sensorErrors)) { Code = "unknown_sensor_type" };
         }
         var keys = new HashSet<(string, string)>();
         foreach (var target in request.Targets)
@@ -686,12 +802,58 @@ public sealed class AutoRunService(
     }
     private static string? Truncate(string? text) => text?.Length > 1000 ? text[..1000] : text;
     private static void AddError(Job job, string text) { if (job.Errors.Count < 100) job.Errors.Add(Truncate(text)!); }
-    private static void AddWarning(Job job, string text) { if (job.Warnings.Count < 100 && !job.Warnings.Contains(text)) job.Warnings.Add(text); }
+    private static void AddWarning(Job job, string text) { if (job.Warnings.Count < 100 && !job.Warnings.Contains(text)) job.Warnings.Add(Truncate(text)!); }
+
+    // Call with _gate held. Retain bounded samples, prioritizing upstream/final failures
+    // over repeated record warnings, and charge their encoded size to the global budget.
+    private void AddDiagnostic(Job job, AutoRunDiagnostic diagnostic)
+    {
+        const int maxEntries = 50;
+        const int maxBytes = 64 * 1024;
+        var important = diagnostic.Severity == "error" || diagnostic.Upstream is not null;
+        if (!important && job.Diagnostics.Count >= maxEntries)
+        {
+            job.DiagnosticsOmitted++;
+            return;
+        }
+        diagnostic = diagnostic with { Message = Truncate(diagnostic.Message)!, TraceId = diagnostic.TraceId ?? job.TraceId };
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(diagnostic, AutoRunJson.Options).Length;
+        if (bytes > 12 * 1024 && diagnostic.Upstream is { } upstream)
+        {
+            diagnostic = diagnostic with { Upstream = upstream with
+            {
+                BodyExcerpt = null, BodyTruncated = true,
+                BodyUnavailableReason = "Response excerpt omitted to fit diagnostic storage limits."
+            } };
+            bytes = JsonSerializer.SerializeToUtf8Bytes(diagnostic, AutoRunJson.Options).Length;
+        }
+        while (important && job.Diagnostics.Count > 0 &&
+               (job.Diagnostics.Count >= maxEntries || job.DiagnosticBytes + bytes > maxBytes || bytes > _options.PayloadBudgetBytes - _retainedBytes))
+        {
+            var index = job.Diagnostics.FindIndex(d => d.Diagnostic.Severity != "error" && d.Diagnostic.Upstream is null);
+            if (index < 0) index = 0;
+            var removed = job.Diagnostics[index];
+            job.Diagnostics.RemoveAt(index);
+            job.DiagnosticBytes -= removed.Bytes;
+            _retainedBytes -= removed.Bytes;
+            job.DiagnosticsOmitted++;
+        }
+        if (bytes > 12 * 1024 || job.Diagnostics.Count >= maxEntries || job.DiagnosticBytes + bytes > maxBytes ||
+            bytes > _options.PayloadBudgetBytes - _retainedBytes || memory?.CanAllocate(bytes + 1024) == false)
+        {
+            job.DiagnosticsOmitted++;
+            return;
+        }
+        job.Diagnostics.Add((diagnostic, bytes));
+        job.DiagnosticBytes += bytes;
+        _retainedBytes += bytes;
+    }
 
     private sealed class Item(ProviderOverlay overlay, int[] assignments)
     {
         public string Id { get; } = overlay.Input.ImageId;
         public string SensorName { get; } = overlay.Input.SensorName;
+        public string SensorType { get; } = overlay.Input.SensorType;
         public DateTimeOffset PhotoTime { get; } = overlay.Input.PhotoTime;
         public byte[]? Payload { get; set; } = overlay.Payload;
         public int[] Assignments { get; } = assignments;
@@ -707,6 +869,7 @@ public sealed class AutoRunService(
         public int Maximum { get; } = maximum;
         public DateTimeOffset CreatedAt { get; } = createdAt;
         public ActivityContext TraceContext { get; } = Activity.Current?.Context ?? default;
+        public string TraceId { get; } = Activity.Current?.TraceId.ToString() ?? ActivityTraceId.CreateRandom().ToString();
         public AutoRunState State { get; set; } = AutoRunState.Preparing;
         public DateTimeOffset? ReadyAt { get; set; }
         public DateTimeOffset? StartedAt { get; set; }
@@ -716,10 +879,14 @@ public sealed class AutoRunService(
         public IReadOnlyList<JsonElement> Queries { get; set; } = [];
         public List<string> Warnings { get; } = [];
         public List<string> Errors { get; } = [];
+        public List<(AutoRunDiagnostic Diagnostic, int Bytes)> Diagnostics { get; } = [];
+        public int DiagnosticsOmitted { get; set; }
+        public ProviderProgress? ProviderProgress { get; set; }
         public AutoRunPublication Publication { get; set; } = request.Publication!;
         public AutoRunPublication ActivePublication { get; set; } = request.Publication!;
         public long RuleBytes { get; set; }
         public long PayloadBytes { get; set; }
+        public long DiagnosticBytes { get; set; }
         public int OutstandingWork { get; set; }
         public bool DeletionRequested { get; set; }
         public int Scanned, Invalid, Duplicates, ObservedMatches, Confirmed, Failed, Uncertain, InFlight;

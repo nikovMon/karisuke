@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Globalization;
-using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -12,20 +11,21 @@ using NetTopologySuite.IO;
 
 namespace ImagingPipeline.Rules.Api.AutoRuns.Provider;
 
-public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticProviderOptions> configured,
-    IAutoRunMemoryGuard? memory = null)
+public sealed partial class ElasticOverlayProvider(HttpClient client, IOptions<ElasticProviderOptions> configured,
+    IAutoRunMemoryGuard? memory = null, TimeProvider? timeProvider = null, ILogger<ElasticOverlayProvider>? logger = null)
     : IElasticOverlayProvider
 {
     private const string OffsetlessResponseTimeZone = "Asia/Jerusalem";
     private readonly ElasticProviderOptions _options = configured.Value;
     private readonly IReadOnlyDictionary<string, string> _headers = ElasticProviderHeaders.Snapshot(configured.Value.Headers);
 
-    public async Task<ProviderOverlayResult> GetAsync(string id, CancellationToken cancellationToken)
+    public async Task<ProviderOverlayResult> GetAsync(string id, CancellationToken cancellationToken,
+        Action<ProviderProgress>? report = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         var uri = WithPageLimit(new Uri(TableUri().AbsoluteUri.TrimEnd('/') + "/" + Uri.EscapeDataString(id)));
         using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        using var document = await SendAsync(request, "overlay lookup", allowNotFound: true, cancellationToken);
+        using var document = await SendAsync(request, "overlay lookup", allowNotFound: true, cancellationToken, report);
         if (document is null) return new(null, "Overlay was not found by Elastic Provider.");
         memory?.ThrowIfUnsafe();
         var result = Map(document.RootElement);
@@ -34,15 +34,16 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
             : result;
     }
 
-    public Task<ProviderPage> SearchPageAsync(JsonElement query, string? nextPage, CancellationToken cancellationToken) =>
-        SearchPageCoreAsync(query, nextPage, null, cancellationToken);
+    public Task<ProviderPage> SearchPageAsync(JsonElement query, string? nextPage, CancellationToken cancellationToken,
+        Action<ProviderProgress>? report = null) => SearchPageCoreAsync(query, nextPage, null, cancellationToken, report);
 
     public Task<ProviderPage> VisitPageAsync(JsonElement query, string? nextPage,
-        Func<ProviderOverlayResult, bool> accept, CancellationToken cancellationToken) =>
-        SearchPageCoreAsync(query, nextPage, accept, cancellationToken);
+        Func<ProviderOverlayResult, ValueTask<bool>> accept, CancellationToken cancellationToken,
+        Action<ProviderProgress>? report = null) => SearchPageCoreAsync(query, nextPage, accept, cancellationToken, report);
 
     private async Task<ProviderPage> SearchPageCoreAsync(JsonElement query, string? nextPage,
-        Func<ProviderOverlayResult, bool>? accept, CancellationToken cancellationToken)
+        Func<ProviderOverlayResult, ValueTask<bool>>? accept, CancellationToken cancellationToken,
+        Action<ProviderProgress>? report)
     {
         if (query.ValueKind != JsonValueKind.Object)
             throw new ArgumentException("Provider query must be an object.", nameof(query));
@@ -52,7 +53,7 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
             Content = JsonContent.Create(query, mediaType: new MediaTypeHeaderValue("application/json-patch+json"))
         };
         using var document = await SendAsync(request, nextPage is null ? "initial search page" : "continuation page",
-            allowNotFound: false, cancellationToken)
+            allowNotFound: false, cancellationToken, report)
             ?? throw new ElasticProviderException("Provider returned no search response.");
         var root = document.RootElement;
         RequireObject(root, "Batch response");
@@ -78,9 +79,54 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
             if (memory?.CanAllocate() == false) return new(items, null, "memoryLimit");
             var item = Map(entity);
             if (accept is null) items.Add(item);
-            else if (!accept(item)) return new([], null);
+            else if (!await accept(item)) return new([], null);
         }
         return new(items, continuation);
+    }
+
+    public async Task<ProviderOverlayResult> ResolveSensorTypeAsync(ProviderOverlay overlay,
+        CancellationToken cancellationToken, Action<ProviderProgress>? report = null)
+    {
+        ArgumentNullException.ThrowIfNull(overlay);
+        var id = overlay.Input.ImageId;
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        var uri = WithPageLimit(new Uri(TableUri().AbsoluteUri.TrimEnd('/') + "/" + Uri.EscapeDataString(id)));
+        uri = new UriBuilder(uri) { Query = uri.Query.TrimStart('?') + "&result_type=4" }.Uri;
+        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        JsonDocument? rawDocument;
+        try { rawDocument = await SendAsync(request, "sensor type lookup", allowNotFound: true, cancellationToken, report); }
+        catch (ElasticProviderException ex) when (ex.Diagnostic?.Code == "providerInvalidJson")
+        { return new(null, "Raw provider overlay response is invalid JSON while resolving sensorType."); }
+        using var document = rawDocument;
+        if (document is null) return new(null, "Raw provider overlay was not found while resolving sensorType.");
+        memory?.ThrowIfUnsafe();
+        try
+        {
+            var root = document.RootElement;
+            RequireObject(root, "Raw provider overlay");
+            if (!string.Equals(RequiredString(root, "id"), id, StringComparison.Ordinal))
+                return new(null, "Raw provider overlay ID differs from the requested ID while resolving sensorType.");
+            var sensorType = RequiredString(root, "sensorType");
+            using var payload = JsonDocument.Parse(overlay.Payload);
+            var buffer = new ArrayBufferWriter<byte>();
+            using (var writer = new Utf8JsonWriter(buffer))
+            {
+                writer.WriteStartObject();
+                foreach (var property in payload.RootElement.EnumerateObject())
+                    if (!property.NameEquals("sensorType")) property.WriteTo(writer);
+                writer.WriteString("sensorType", sensorType);
+                writer.WriteEndObject();
+            }
+            return new(overlay with
+            {
+                Payload = buffer.WrittenSpan.ToArray(),
+                Input = overlay.Input with { SensorType = sensorType }
+            }, null);
+        }
+        catch (Exception ex) when (ex is FormatException or JsonException or ElasticProviderException)
+        {
+            return new(null, $"Invalid raw provider overlay while resolving sensorType: {ex.Message}");
+        }
     }
 
     private ProviderOverlayResult Map(JsonElement entity)
@@ -143,79 +189,6 @@ public sealed class ElasticOverlayProvider(HttpClient client, IOptions<ElasticPr
                                    InvalidInputMessageException or GeometryValidationException or ElasticProviderException or ParseException)
         {
             return new(null, $"Invalid provider overlay: {ex.Message}");
-        }
-    }
-
-    private async Task<JsonDocument?> SendAsync(HttpRequestMessage request, string operation,
-        bool allowNotFound, CancellationToken cancellationToken)
-    {
-        memory?.ThrowIfUnsafe();
-        foreach (var (name, value) in _headers)
-            if (!request.Headers.TryAddWithoutValidation(name, value))
-                throw new ElasticProviderException(ElasticProviderHeaders.ValidationError);
-        if (_options.TimeoutSeconds <= 0)
-            throw new ElasticProviderException("Provider timeout must be positive.");
-        if (_options.MaxResponseBytes is <= 0 or > 536_870_912)
-            throw new ElasticProviderException("Provider MaxResponseBytes must be between 1 and 536870912 bytes.");
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
-        var phase = "waiting for response headers";
-        long bytesRead = 0;
-        try
-        {
-            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
-            phase = "reading the response body";
-            if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound) return null;
-            if (!response.IsSuccessStatusCode)
-                throw new ElasticProviderException($"Elastic Provider returned HTTP {(int)response.StatusCode}.");
-            if (response.RequestMessage?.RequestUri is { } effective && !SameOrigin(effective, TableUri()))
-                throw new ElasticProviderException("Provider response redirected outside the configured origin.");
-            if (response.Content.Headers.ContentLength > _options.MaxResponseBytes)
-                throw new ProviderResponseLimitException(_options.MaxResponseBytes);
-            if (response.Content.Headers.ContentLength is > 0 and var length)
-                memory?.ThrowIfUnsafe(length * 3);
-            await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
-            using var buffer = new MemoryStream();
-            var chunk = ArrayPool<byte>.Shared.Rent(16 * 1024);
-            try
-            {
-                int read;
-                while ((read = await stream.ReadAsync(chunk.AsMemory(0, chunk.Length), timeout.Token)) != 0)
-                {
-                    bytesRead += read;
-                    var required = buffer.Length + read;
-                    if (required > _options.MaxResponseBytes)
-                        throw new ProviderResponseLimitException(_options.MaxResponseBytes);
-                    if (required > buffer.Capacity)
-                    {
-                        var capacity = Math.Min(_options.MaxResponseBytes,
-                            Math.Max(required, Math.Max(256L, 2L * buffer.Capacity)));
-                        // Growth temporarily retains both arrays. Current usage includes the old
-                        // array; reserve the new one and parsing space before allocating it.
-                        memory?.ThrowIfUnsafe(capacity + required * 2);
-                        buffer.Capacity = checked((int)capacity);
-                    }
-                    buffer.Write(chunk, 0, read);
-                }
-                memory?.ThrowIfUnsafe(buffer.Length * 2);
-                return JsonDocument.Parse(buffer.GetBuffer().AsMemory(0, checked((int)buffer.Length)));
-            }
-            finally { ArrayPool<byte>.Shared.Return(chunk); }
-        }
-        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new ElasticProviderException(
-                $"Elastic Provider request timed out during {operation} while {phase}. " +
-                $"Configured per-request timeout: {_options.TimeoutSeconds} seconds (AutoRun.Provider.TimeoutSeconds); " +
-                $"response bytes read: {bytesRead}. Narrow the search or increase that timeout and prepare again.", ex);
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new ElasticProviderException("Elastic Provider request failed.", ex);
-        }
-        catch (JsonException ex)
-        {
-            throw new ElasticProviderException("Elastic Provider returned invalid JSON.", ex);
         }
     }
 

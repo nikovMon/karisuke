@@ -103,8 +103,9 @@ public sealed class AutoRunApiTests
         Assert.Equal(1, target.Rule.Match!.MaxPhotoAgeDays);
         Assert.Empty(fixture.Broker.Messages);
 
-        var providerCalls = fixture.Provider.Calls.ToArray();
+        var providerCalls = fixture.Provider.Calls.Where(call => call.Method == HttpMethod.Post).ToArray();
         Assert.Equal(2, providerCalls.Length);
+        Assert.Contains("result_type=4", Assert.Single(fixture.Provider.Calls, call => call.Method == HttpMethod.Get).Uri.Query);
         Assert.All(providerCalls, call => Assert.Equal(HttpMethod.Post, call.Method));
         Assert.Equal(providerCalls[0].Body, providerCalls[1].Body);
         Assert.Equal("?searchAfter=next&to=1000", providerCalls[1].Uri.Query);
@@ -172,7 +173,7 @@ public sealed class AutoRunApiTests
         Assert.Equal("Polygon", overlay.GetProperty("roiFootprint").GetProperty("type").GetString());
         Assert.False(overlay.GetProperty("isRealtime").GetBoolean());
         Assert.Equal(DateTimeOffset.Parse("2000-01-02T10:00:00Z"), overlay.GetProperty("photoTime").GetDateTimeOffset());
-        Assert.Equal(2, fixture.Provider.Calls.Count);
+        Assert.Equal(3, fixture.Provider.Calls.Count);
 
         using var repeatedStart = await fixture.Client.PostAsync($"/auto-runs/{created.Id}/start", null);
         await AssertStatus(repeatedStart, HttpStatusCode.OK);
@@ -209,7 +210,8 @@ public sealed class AutoRunApiTests
         Assert.Equal(1, ready.Counters.Selected);
         Assert.True(ready.SourceExhausted);
         Assert.NotEmpty(ready.Warnings);
-        Assert.Equal(HttpMethod.Get, Assert.Single(fixture.Provider.Calls).Method);
+        Assert.Equal(2, fixture.Provider.Calls.Count);
+        Assert.All(fixture.Provider.Calls, call => Assert.Equal(HttpMethod.Get, call.Method));
         Assert.Empty(fixture.Broker.Messages);
         using var itemsResponse = await fixture.Client.GetAsync($"/auto-runs/{created.Id}/items");
         var item = Assert.Single((await Read<AutoRunItemsPage>(itemsResponse)).Items);
@@ -277,8 +279,9 @@ public sealed class AutoRunApiTests
         Assert.Equal(0, ready.Counters.Invalid);
         Assert.True(ready.SourceExhausted);
         Assert.Empty(fixture.Broker.Messages);
-        var calls = fixture.Provider.Calls.ToArray();
+        var calls = fixture.Provider.Calls.Where(call => call.Method == HttpMethod.Post).ToArray();
         Assert.Equal(2, calls.Length);
+        Assert.Contains("result_type=4", Assert.Single(fixture.Provider.Calls, call => call.Method == HttpMethod.Get).Uri.Query);
         Assert.All(calls, call => Assert.Equal(HttpMethod.Post, call.Method));
         Assert.Equal(calls[0].Body, calls[1].Body);
         Assert.Equal("?searchAfter=next&to=1000", calls[1].Uri.Query);
@@ -310,7 +313,7 @@ public sealed class AutoRunApiTests
         foreach (var name in new[] { "kind", "version", "runId", "overlay", "targets" })
             Assert.False(body.RootElement.TryGetProperty(name, out _));
         Assert.Contains("gridType", Assert.IsAssignableFrom<IEnumerable<object>>(published.Message.Headers!["x-updated-fields"]));
-        Assert.Equal(2, fixture.Provider.Calls.Count);
+        Assert.Equal(3, fixture.Provider.Calls.Count);
     }
 
     [Fact]
@@ -371,7 +374,7 @@ public sealed class AutoRunApiTests
             .GetProperty("RESOLUTION").GetProperty("values")[0];
         Assert.Equal(0.4, range.GetProperty("gte").GetDouble());
         Assert.Equal(0.6, range.GetProperty("lte").GetDouble());
-        Assert.Equal(4, fixture.Provider.Calls.Count);
+        Assert.Equal(6, fixture.Provider.Calls.Count);
         Assert.Single(fixture.Broker.Messages);
         using var originalResponse = await fixture.Client.GetAsync($"/auto-runs/{original.Id}");
         var retainedOriginal = await Read<AutoRunSummary>(originalResponse);
@@ -404,7 +407,8 @@ public sealed class AutoRunApiTests
         Assert.Equal(new AutoRunPublication { BatchSize = 3, DelayMs = 17 }, created.Publication);
         var ready = await WaitForState(fixture.Client, created.Id, AutoRunState.Ready);
         Assert.Equal(created.Publication, ready.ActivePublication);
-        Assert.Equal(HttpMethod.Get, Assert.Single(fixture.Provider.Calls).Method);
+        Assert.Equal(2, fixture.Provider.Calls.Count);
+        Assert.All(fixture.Provider.Calls, call => Assert.Equal(HttpMethod.Get, call.Method));
 
         using var changed = await fixture.Client.PatchAsJsonAsync($"/auto-runs/{created.Id}/publication",
             new { batchSize = 2, delayMs = 40 });
@@ -780,6 +784,104 @@ public sealed class AutoRunApiTests
         }
     }
 
+    [Theory]
+    [InlineData(AutoRunSourceMode.Rules)]
+    [InlineData(AutoRunSourceMode.Filters)]
+    [InlineData(AutoRunSourceMode.OverlayIds)]
+    public async Task ExactRawSensorTypeReachesPreviewAndExistingHistoricalEnvelope(AutoRunSourceMode mode)
+    {
+        using var fixture = new Fixture();
+        fixture.Provider.RawSensorType = "VIS";
+        var rule = Rule("Visible images", "tenant");
+        rule.Match!.SensorTypes = ["VIS"];
+        fixture.Store.Add(RulesIndex, "shared-rule", rule);
+        var request = Request() with
+        {
+            Source = new()
+            {
+                Mode = mode,
+                OverlayIds = mode == AutoRunSourceMode.OverlayIds ? ["overlay-1"] : null,
+                Filters = mode == AutoRunSourceMode.Filters ? new() { SensorTypes = ["VIS"] } : null
+            }
+        };
+
+        using var accepted = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", request, AutoRunJson.Options);
+        await AssertStatus(accepted, HttpStatusCode.Accepted);
+        var admitted = await Read<AutoRunSummary>(accepted);
+        var ready = await WaitForState(fixture.Client, admitted.Id, AutoRunState.Ready);
+        Assert.Equal(1, ready.Counters.Selected);
+        Assert.Equal(new[] { "VIS" }, Assert.Single(ready.Targets).Rule.Match!.SensorTypes);
+        Assert.Single(fixture.Provider.Calls, call => call.Uri.Query.Contains("result_type=4", StringComparison.Ordinal));
+        if (mode != AutoRunSourceMode.OverlayIds)
+        {
+            var query = Assert.Single(ready.Queries);
+            Assert.Contains("sensorType.keyword", query.GetRawText(), StringComparison.Ordinal);
+            Assert.Contains("VIS", query.GetRawText(), StringComparison.Ordinal);
+            Assert.DoesNotContain("IMAGINGTECHNIQUE", query.GetRawText(), StringComparison.Ordinal);
+        }
+        using var itemsResponse = await fixture.Client.GetAsync($"/auto-runs/{ready.Id}/items");
+        Assert.Equal("VIS", Assert.Single((await Read<AutoRunItemsPage>(itemsResponse)).Items).SensorType);
+
+        using var started = await fixture.Client.PostAsync($"/auto-runs/{ready.Id}/start", null);
+        await AssertStatus(started, HttpStatusCode.OK);
+        await WaitForState(fixture.Client, ready.Id, AutoRunState.Completed);
+        var envelope = JsonSerializer.Deserialize<HistoricalOverlayEnvelope>(Assert.Single(fixture.Broker.Messages).Message.Body, AutoRunJson.Options)!;
+        Assert.Equal(1, envelope.Version);
+        Assert.Equal("VIS", envelope.Overlay.GetProperty("sensorType").GetString());
+        Assert.Equal(new[] { "VIS" }, Assert.Single(envelope.Targets).Rule.Match!.SensorTypes);
+    }
+
+    [Fact]
+    public async Task CoarseEOResponseCannotMakeActualPANMatchVisibleRule()
+    {
+        using var fixture = new Fixture();
+        fixture.Provider.RawSensorType = "PAN";
+        var rule = Rule("Visible images", "tenant");
+        rule.Match!.SensorTypes = ["VIS"];
+        fixture.Store.Add(RulesIndex, "shared-rule", rule);
+
+        using var accepted = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", Request(), AutoRunJson.Options);
+        await AssertStatus(accepted, HttpStatusCode.Accepted);
+        var ready = await WaitForState(fixture.Client, (await Read<AutoRunSummary>(accepted)).Id, AutoRunState.Ready);
+
+        Assert.Equal(0, ready.Counters.Selected);
+        Assert.Equal(1, Assert.Single(ready.Targets).Shortfall);
+        using var started = await fixture.Client.PostAsync($"/auto-runs/{ready.Id}/start", null);
+        await AssertStatus(started, HttpStatusCode.Conflict);
+        Assert.Empty(fixture.Broker.Messages);
+    }
+
+    [Theory]
+    [InlineData(false, "vis")]
+    [InlineData(false, "unsupported")]
+    [InlineData(true, "vis")]
+    [InlineData(true, "unsupported")]
+    public async Task UnknownSensorTypesReturnBadRequestBeforeAJobOrProviderCall(bool ruleType, string type)
+    {
+        using var fixture = new Fixture();
+        var rule = Rule("Typed rule", "tenant");
+        if (ruleType) rule.Match!.SensorTypes = [type];
+        fixture.Store.Add(RulesIndex, "shared-rule", rule);
+        var request = Request() with
+        {
+            Source = new()
+            {
+                Mode = AutoRunSourceMode.Rules,
+                Filters = ruleType ? null : new() { SensorTypes = [type] }
+            }
+        };
+
+        using var rejected = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", request, AutoRunJson.Options);
+
+        await AssertStatus(rejected, HttpStatusCode.BadRequest);
+        var body = await rejected.Content.ReadAsStringAsync();
+        Assert.Contains(type, body, StringComparison.Ordinal);
+        Assert.Contains(ruleType ? "shared-rule" : "source.filters.sensorTypes", body, StringComparison.Ordinal);
+        Assert.Empty(fixture.Provider.Calls);
+        using var jobs = await fixture.Client.GetAsync("/auto-runs");
+        Assert.Empty(await Read<List<AutoRunSummary>>(jobs));
+    }
+
     private static AutoRunPreviewRequest Request() => new()
     {
         Source = new() { Mode = AutoRunSourceMode.OverlayIds, OverlayIds = ["overlay-1"] },
@@ -844,6 +946,7 @@ public sealed class AutoRunApiTests
                     ["AutoRun:Enabled"] = enabled.ToString(),
                     ["AutoRun:MaxSelectedOverlays"] = maxSelectedOverlays.ToString(System.Globalization.CultureInfo.InvariantCulture),
                     ["AutoRun:Provider:BaseUrl"] = enabled ? "http://provider.invalid" : "",
+                    ["AutoRun:Provider:RequestDelayMs"] = "0",
                     ["AutoRun:Publication:BatchSize"] = "3", ["AutoRun:Publication:DelayMs"] = "17",
                     ["AutoRun:Destination:Connection:Name"] = "gateway-test",
                     ["AutoRun:Destination:Connection:Host"] = "broker.invalid",
@@ -886,6 +989,7 @@ public sealed class AutoRunApiTests
         public string ImageUrl { get; set; } = "https://images.invalid/original";
         public JsonElement ImageWidth { get; set; } = JsonSerializer.SerializeToElement(100);
         public JsonElement ImageHeight { get; set; } = JsonSerializer.SerializeToElement(50);
+        public string RawSensorType { get; set; } = "EO";
         public ConcurrentQueue<ProviderCall> Calls { get; } = new();
         public Func<CancellationToken, Task>? BeforeResponse { get; set; }
 
@@ -906,7 +1010,10 @@ public sealed class AutoRunApiTests
                     PhotoTime = "2000-01-02T10:00:00Z", Created = "2000-01-02T11:00:00Z", IsRealTime = false
                 }
             };
-            object response = request.Method == HttpMethod.Get ? entity :
+            object response = request.Method == HttpMethod.Get
+                ? request.RequestUri!.Query.Contains("result_type=4", StringComparison.Ordinal)
+                    ? new { id = "overlay-1", sensorType = RawSensorType } : entity
+                :
                 new
                 {
                     entities_list = !request.RequestUri!.Query.Contains("searchAfter", StringComparison.Ordinal) ? new[] { entity } : [],

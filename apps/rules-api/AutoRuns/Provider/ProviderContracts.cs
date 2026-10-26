@@ -5,18 +5,23 @@ namespace ImagingPipeline.Rules.Api.AutoRuns.Provider;
 
 public interface IElasticOverlayProvider
 {
-    Task<ProviderOverlayResult> GetAsync(string id, CancellationToken cancellationToken);
-    Task<ProviderPage> SearchPageAsync(JsonElement query, string? nextPage, CancellationToken cancellationToken);
+    Task<ProviderOverlayResult> GetAsync(string id, CancellationToken cancellationToken,
+        Action<ProviderProgress>? report = null);
+    Task<ProviderPage> SearchPageAsync(JsonElement query, string? nextPage, CancellationToken cancellationToken,
+        Action<ProviderProgress>? report = null);
+    Task<ProviderOverlayResult> ResolveSensorTypeAsync(ProviderOverlay overlay, CancellationToken cancellationToken,
+        Action<ProviderProgress>? report = null);
     // Consume normalized records as they are mapped, so the coordinator can stop before
     // retaining another candidate. Implementations need not keep a second page-sized list.
     async Task<ProviderPage> VisitPageAsync(JsonElement query, string? nextPage,
-        Func<ProviderOverlayResult, bool> accept, CancellationToken cancellationToken)
+        Func<ProviderOverlayResult, ValueTask<bool>> accept, CancellationToken cancellationToken,
+        Action<ProviderProgress>? report = null)
     {
-        var page = await SearchPageAsync(query, nextPage, cancellationToken);
+        var page = await SearchPageAsync(query, nextPage, cancellationToken, report);
         foreach (var item in page.Items)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!accept(item)) return new([], null, page.StoppedReason);
+            if (!await accept(item)) return new([], null, page.StoppedReason);
         }
         return page with { Items = [], NextPage = page.Items.Count == 0 ? null : page.NextPage };
     }
@@ -39,5 +44,11 @@ public sealed record ProviderPage(IReadOnlyList<ProviderOverlayResult> Items, st
 public sealed class ProviderResponseLimitException(long maximumBytes)
     : Exception($"Provider response exceeds the configured {maximumBytes:N0} byte limit (AutoRun.Provider.MaxResponseBytes).");
 
-public sealed class ElasticProviderException(string message, Exception? innerException = null)
-    : Exception(message, innerException);
+public class ElasticProviderException(string message, Exception? innerException = null,
+    AutoRunDiagnostic? diagnostic = null) : Exception(message, innerException)
+{
+    public AutoRunDiagnostic? Diagnostic { get; } = diagnostic;
+}
+
+public sealed class ProviderUnavailableException(string message, AutoRunDiagnostic diagnostic)
+    : ElasticProviderException(message, diagnostic: diagnostic);

@@ -225,7 +225,7 @@ public sealed class AutoRunProviderHeaderTests
     }
 
     [Fact]
-    public async Task Http_client_trace_logs_redact_configured_and_response_header_values()
+    public async Task Dedicated_client_uses_safe_structured_logs_without_request_urls_or_header_values()
     {
         using var logs = new RecordingLoggerProvider();
         using var configuration = Configuration(new()
@@ -240,15 +240,16 @@ public sealed class AutoRunProviderHeaderTests
             response.Headers.Add("X-Response-Key", "response-" + Secret);
             return Task.FromResult(response);
         }, logs);
-        await services.GetRequiredService<IElasticOverlayProvider>().GetAsync("1", CancellationToken.None);
+        await services.GetRequiredService<IElasticOverlayProvider>().GetAsync("private-overlay-id", CancellationToken.None);
 
-        var entries = logs.Entries.Where(entry => entry.Category.StartsWith("System.Net.Http.HttpClient", StringComparison.Ordinal)).ToArray();
-        Assert.Contains(entries, entry => entry.Message.Contains("Authorization", StringComparison.Ordinal));
-        Assert.Contains(entries, entry => entry.Message.Contains("X-Api-Key", StringComparison.Ordinal));
-        Assert.Contains(entries, entry => entry.Message.Contains("X-Response-Key", StringComparison.Ordinal));
+        Assert.DoesNotContain(logs.Entries, entry => entry.Category.StartsWith("System.Net.Http.HttpClient", StringComparison.Ordinal));
+        var entries = logs.Entries.Where(entry => entry.Category == typeof(ElasticOverlayProvider).FullName).ToArray();
+        Assert.Contains(entries, entry => entry.Properties.ContainsKey("StatusCode") && entry.Properties.ContainsKey("ElapsedMs"));
         Assert.All(entries, entry =>
         {
             Assert.DoesNotContain(Secret, entry.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("private-overlay-id", entry.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("provider.example", entry.Message, StringComparison.Ordinal);
             Assert.DoesNotContain(Secret, entry.Exception?.ToString() ?? "", StringComparison.Ordinal);
             Assert.All(entry.Properties.Values, value => Assert.DoesNotContain(Secret, value?.ToString() ?? "", StringComparison.Ordinal));
         });

@@ -82,7 +82,12 @@ public sealed record AutoRunSummary(
     AutoRunPublication Publication, AutoRunPublication ActivePublication, bool PublicationChangePending,
     bool SourceExhausted, string? StoppedReason, IReadOnlyList<string> Warnings,
     IReadOnlyList<string> Errors, IReadOnlyList<JsonElement> Queries, double ConfirmedPerSecond,
-    AutoRunMemorySnapshot? Memory = null, long RetainedBytes = 0, bool DeletionRequested = false);
+    AutoRunMemorySnapshot? Memory = null, long RetainedBytes = 0, bool DeletionRequested = false)
+{
+    public IReadOnlyList<AutoRunDiagnostic> Diagnostics { get; init; } = [];
+    public int DiagnosticsOmitted { get; init; }
+    public ProviderProgress? ProviderProgress { get; init; }
+}
 
 public sealed record AutoRunDeletionResult(
     IReadOnlyList<string> DeletedIds, IReadOnlyList<string> PendingIds, long ReleasedRetainedBytes);
@@ -90,7 +95,10 @@ public sealed record AutoRunDeletionResult(
 public sealed record AutoRunItemTarget(string PipelineId, string RuleId);
 public sealed record AutoRunItem(
     string OverlayId, string SensorName, DateTimeOffset PhotoTime,
-    IReadOnlyList<AutoRunItemTarget> Targets, AutoRunItemOutcome Outcome, string? Error);
+    IReadOnlyList<AutoRunItemTarget> Targets, AutoRunItemOutcome Outcome, string? Error)
+{
+    public string? SensorType { get; init; }
+}
 public sealed record AutoRunItemsPage(int From, int Size, int Total, IReadOnlyList<AutoRunItem> Items);
 
 public static class AutoRunJson
@@ -108,4 +116,5 @@ public static class AutoRunJson
 public sealed class AutoRunRequestException(int statusCode, string message) : Exception(message)
 {
     public int StatusCode { get; } = statusCode;
+    public string Code { get; init; } = "auto_run_request_rejected";
 }

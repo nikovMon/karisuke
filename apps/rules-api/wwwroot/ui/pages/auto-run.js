@@ -125,7 +125,7 @@ function configurationMarkup() {
         </fieldset>
       </div>
       <details id="filter-details" class="filter-details"><summary>Overlay filters <span id="filters-description" class="muted">Optional for rule-derived searches</span></summary><div>
-        <div class="field-row">${field('sensor-names', 'Sensor names', 'e.g. SENSOR_A, SENSOR_B')}${field('sensor-types', 'Sensor types', 'Comma-separated values')}</div>
+        <div class="field-row">${field('sensor-names', 'Sensor names', 'e.g. SENSOR_A, SENSOR_B')}<fieldset id="sensor-types" class="sensor-type-selector" aria-describedby="sensor-types-help"><legend>Sensor types</legend><div id="sensor-type-options" class="sensor-type-options"></div><p id="sensor-types-help" class="hint">Loading sensor types…</p></fieldset></div>
         <div class="field-row"><label class="field" for="registration-quality"><span>Registration quality</span><select id="registration-quality"><option value="">Any quality</option><option value="Accurate">Accurate</option><option value="Sensor">Sensor</option><option value="Accurate,Sensor">Accurate or Sensor</option></select></label><label class="field" for="is-realtime"><span>Realtime overlay</span><select id="is-realtime"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label></div>
         <div class="field-row">${field('resolution-min', 'Minimum resolution', 'No lower bound', 'number', 'min="0" step="any"')}${field('resolution-max', 'Maximum resolution', 'No upper bound', 'number', 'min="0" step="any"')}</div>
         <div class="field search-area-field"><div class="search-area-heading"><label class="field-label" for="area-wkt">Search area · WKT</label><button id="open-area-map" type="button" class="button compact ghost" aria-haspopup="dialog" aria-controls="area-map-dialog" aria-describedby="area-map-hint" disabled>Open map</button></div><textarea id="area-wkt" class="mono" placeholder="POLYGON ((...)) or MULTIPOLYGON (((...)))" spellcheck="false"></textarea><small>Selects intersecting overlays. Gateway rules determine the dispatched ROI.</small><small id="area-map-hint">Loading map settings…</small></div>
@@ -187,6 +187,7 @@ function attachConfiguration() {
     if (!$('configuration').hidden) $('open-area-map').focus();
   });
   attachPublicationPresets();
+  $('sensor-types').addEventListener('change', updateSensorTypeHint);
   document.querySelectorAll('[name="source-mode"]').forEach(radio => radio.addEventListener('change', updateSource));
   document.querySelectorAll('[name="id-processing"]').forEach(radio => radio.addEventListener('change', updateSource));
   $('pipeline-select').addEventListener('change', () => { cancelRuleSelection(); hideError('rule-error'); state.rulesFrom = 0; loadRules(); });
@@ -233,6 +234,7 @@ async function loadOptions() {
     const options = await api.options();
     state.options = options;
     configureAreaMap();
+    configureSensorTypes();
     const { limits, defaults } = options;
     $('batch-size').value = defaults.publication.batchSize;
     $('delay-ms').value = defaults.publication.delayMs;
@@ -255,6 +257,26 @@ async function loadOptions() {
     $('area-map-hint').textContent = 'Map settings are unavailable. Reload when the API connection is restored.';
     showError('global-notice', error);
   } finally { syncSelectionControls(); }
+}
+
+function configureSensorTypes() {
+  const selected = new Set(selectedSensorTypes());
+  const catalog = state.options?.provider?.sensorTypeMappings;
+  const names = catalog && typeof catalog === 'object' && !Array.isArray(catalog) ? Object.keys(catalog) : [];
+  $('sensor-type-options').innerHTML = names.map(name =>
+    `<label class="sensor-type-option"><input type="checkbox" name="sensor-type" value="${escape(name)}" ${selected.has(name) ? 'checked' : ''}><span>${escape(name)}</span></label>`).join('');
+  updateSensorTypeHint();
+}
+
+function selectedSensorTypes() {
+  return [...document.querySelectorAll('#sensor-types input:checked')].map(input => input.value);
+}
+
+function updateSensorTypeHint() {
+  const count = selectedSensorTypes().length;
+  $('sensor-types-help').textContent = !$('sensor-type-options').children.length
+    ? 'No sensor type choices are configured. Other filters still apply.'
+    : count ? `${count} selected. Matches any selected type.` : 'Any sensor type. Select one or more to narrow the search.';
 }
 
 function configuredMapUrl() {
@@ -380,7 +402,7 @@ async function selectAllRules() {
   } catch (error) {
     if (!isCurrentSelection(operation)) return;
     $('rule-selection-status').textContent = '';
-    showError('rule-error', new Error(`No rules were added. ${error.message}`));
+    showError('rule-error', Object.assign(new Error(), error, { message: `No rules were added. ${error.message}` }));
   } finally { finishRuleSelection(operation); }
 }
 
@@ -526,13 +548,13 @@ async function addPastedRules() {
       if (!isCurrentSelection(operation)) return;
       results.forEach((result, j) => {
         if (result.status === 'fulfilled') addTarget(pipeline, result.value);
-        else errors.push(`${ids[i + j]}: ${result.reason.message}`);
+        else errors.push(Object.assign(new Error(), result.reason, { message: `${ids[i + j]}: ${result.reason.message}` }));
       });
       // Successful lookups remain selected if a later batch is cancelled.
       // Keep those committed targets visible before starting the next batch.
       renderTargets(); renderRuleList();
     }
-    if (errors.length) showError('rule-error', new Error(errors.join(' ')));
+    if (errors.length) showError('rule-error', { message: `${errors.length} rule lookup${errors.length === 1 ? '' : 's'} failed. Successful selections were kept.`, causes: errors });
     else $('pasted-rule-ids').value = '';
   } catch (error) { if (isCurrentSelection(operation)) { renderTargets(); renderRuleList(); showError('rule-error', error); } }
   finally { finishRuleSelection(operation); }
@@ -569,9 +591,10 @@ function timeValue(id) {
 
 function collectFilters() {
   const result = {};
-  for (const [id, key] of [['sensor-names', 'sensorNames'], ['sensor-types', 'sensorTypes']]) {
-    const values = splitValues($(id).value); if (values.length) result[key] = values;
-  }
+  const sensorNames = splitValues($('sensor-names').value);
+  if (sensorNames.length) result.sensorNames = sensorNames;
+  const sensorTypes = selectedSensorTypes();
+  if (sensorTypes.length) result.sensorTypes = sensorTypes;
   if ($('registration-quality').value) result.registrationQualities = $('registration-quality').value.split(',');
   if ($('is-realtime').value !== '') result.isRealtime = $('is-realtime').value === 'true';
   const min = optionalNumber('resolution-min'), max = optionalNumber('resolution-max');
@@ -704,11 +727,12 @@ function detailMarkup(id) {
   <div class="page-heading run-heading"><div><div class="eyebrow">RUN WORKSPACE</div><h1>Review. Launch. Follow through.</h1><div class="run-id mono">${escape(id)}</div></div><div class="run-heading-actions"><span id="run-state">${badge('Loading')}</span><button id="cancel-run" type="button" class="button danger" hidden>Cancel</button><button id="rerun-run" type="button" class="button" title="Prepare a fresh preview using the original configuration and saved publication settings. Rules are read again; publication requires Start." hidden>Rerun</button><button id="start-run" type="button" class="button primary" hidden>Start run ↗</button></div></div>
   <div id="run-error" class="notice error" role="alert" hidden></div>
   <div id="run-start-note" class="notice warning" role="status" hidden></div>
+  <div id="run-outcome-note" class="notice success" role="status" hidden></div>
   <div id="run-notices" hidden></div>
   <div id="run-content" hidden>
     <div class="stat-grid">${[['selected', 'Selected', ''], ['confirmed', 'Confirmed', 'good'], ['failed', 'Failed', 'bad'], ['uncertain', 'Uncertain', 'warning'], ['remaining', 'Remaining', '']].map(([key, label, style]) =>
       `<div class="stat ${style}"><div class="stat-label">${label}</div><div class="stat-value" id="count-${key}">0</div></div>`).join('')}</div>
-    <section class="panel"><div class="progress-block"><div class="progress-text"><span id="progress-label"></span><span id="progress-value" class="mono"></span></div><div id="run-progress" class="progress-track" role="progressbar" aria-label="Publication progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-fill"></div></div><div class="run-meta" id="run-meta"></div><p id="run-memory" class="memory-status hint" hidden></p></div></section>
+    <section class="panel"><div class="progress-block"><div class="progress-text"><span id="progress-label"></span><span id="progress-value" class="mono"></span></div><div id="run-progress" class="progress-track" role="progressbar" aria-label="Publication progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-fill"></div></div><p id="provider-progress" class="provider-progress" role="status" aria-live="polite" hidden></p><div class="run-meta" id="run-meta"></div><p id="run-memory" class="memory-status hint" hidden></p></div></section>
     <div class="run-layout"><section class="panel"><div class="panel-header"><div><h2 id="run-target-heading">Rule assignments</h2><p id="run-target-description">Exact counts for this frozen selection.</p></div></div><div id="direct-run-note" class="panel-body" hidden><p>The gateway chooses pipelines and applies its current rules, including photo-age limits. This preview freezes overlay data only.</p><p id="direct-run-limits" class="hint"></p></div><div id="run-target-table" class="table-wrap"><table><thead><tr><th>Rule / pipeline</th><th>Min / max</th><th>Selected</th><th>Confirmed</th><th>Failed</th><th>Uncertain</th><th>Shortfall</th></tr></thead><tbody id="run-targets"></tbody></table></div></section>
     <section class="panel run-publication"><div class="panel-header"><div><h2>Publication settings</h2><p>Control the pace of this run.</p></div></div><form id="publication-form" class="panel-body">${publicationPresets('run-')}<div class="field-row">${field('run-batch-size', 'Batch size', '', 'number', 'min="1" max="100" required step="1"')}${field('run-delay-ms', 'Delay · ms', '', 'number', 'min="0" max="60000" required step="1"')}</div><button class="button full" id="update-publication" type="submit">Apply settings</button><p id="publication-status" class="publication-status" role="status"></p><p class="hint">Changes apply at a batch boundary. Confirmed means queued to the gateway, not processed downstream.</p></form></section></div>
     <section class="panel"><div class="panel-header items-toolbar"><div><h2>Selected overlays</h2><p id="items-description">Assigned targets and publication outcomes.</p></div><label class="field" for="item-outcome"><span class="visually-hidden">Filter items by outcome</span><select id="item-outcome"><option value="">All outcomes</option>${['Pending', 'InFlight', 'Confirmed', 'Failed', 'Uncertain'].map(v => `<option>${v}</option>`).join('')}</select></label></div><div class="table-wrap"><table class="items-table"><thead><tr><th>Overlay / sensor</th><th>Photo time</th><th id="items-target-heading">Assigned rules</th><th>Outcome</th></tr></thead><tbody id="run-items"></tbody></table></div><div class="browser-footer"><span id="items-count" class="hint"></span><div class="pagination"><button id="items-prev" class="button compact ghost" type="button">← Previous</button><button id="items-next" class="button compact ghost" type="button">Next →</button></div></div></section>
@@ -737,7 +761,7 @@ async function refreshRun(manual = false) {
     const run = await api.run(id);
     if (id !== state.runId || version !== state.refreshVersion) return;
     state.run = run;
-    hideError('run-error');
+    if ($('run-error').dataset.source === 'poll') hideError('run-error');
     $('run-loading').hidden = true;
     $('run-content').hidden = false;
     renderRun(run);
@@ -751,9 +775,9 @@ async function refreshRun(manual = false) {
     if (error.status === 404) {
       state.run = null;
       $('run-content').hidden = true;
-      for (const control of ['start-run', 'cancel-run', 'rerun-run', 'run-start-note', 'run-notices']) $(control).hidden = true;
+      for (const control of ['start-run', 'cancel-run', 'rerun-run', 'run-start-note', 'run-outcome-note', 'run-notices']) $(control).hidden = true;
     }
-    showError('run-error', error.status === 404 ? new Error('This run is no longer available. It may have been deleted, expired, or lost when the service restarted. Return to configuration to prepare a new preview.') : error);
+    showError('run-error', error.status === 404 ? Object.assign(new Error(), error, { message: 'This run is no longer available. It may have been deleted, expired, or lost when the service restarted. Return to configuration to prepare a new preview.' }) : error, 'poll');
     if (error.status !== 404 && (!state.run || !terminal(state.run.state))) state.timer = setTimeout(() => refreshRun(), 5000);
   }
 }
@@ -802,6 +826,18 @@ function renderRun(run) {
     Failed: 'Run failed · inspect the errors below', Cancelled: 'Cancelled · queued messages remain queued',
     Expired: 'Preview expired · prepare a new run'
   }[run.state] || run.state;
+  renderProviderProgress(run);
+  const outcome = run.state === 'Ready' && run.counters.selected > 0 && !run.stoppedReason
+    ? `Preview ready: ${number(run.counters.selected)} overlays selected from ${number(run.counters.scanned)} records scanned. Review the selection, then choose Start run.`
+    : run.state === 'Completed'
+      ? `Publication complete: ${number(run.counters.confirmed)} submissions confirmed by RabbitMQ. Confirmed means queued to the gateway; downstream processing is not tracked here.`
+      : run.state === 'CompletedWithErrors'
+        ? `Publication finished: ${number(run.counters.confirmed)} confirmed, ${number(run.counters.failed)} failed, ${number(run.counters.uncertain)} uncertain. Inspect item outcomes before deciding whether to prepare another run; uncertain messages may already be queued.`
+        : '';
+  $('run-outcome-note').textContent = outcome;
+  $('run-outcome-note').hidden = !outcome;
+  $('run-outcome-note').classList.toggle('warning', run.state === 'CompletedWithErrors');
+  $('run-outcome-note').classList.toggle('success', run.state !== 'CompletedWithErrors');
   $('run-meta').innerHTML = [
     ...(direct ? ['Direct to gateway'] : []), `Scanned ${number(run.counters.scanned)}`,
     ...(!direct ? [`Observed matches ${number(run.counters.observedMatches)}`] : []),
@@ -815,20 +851,27 @@ function renderRun(run) {
     $('run-memory').textContent = `Process memory: ${bytes(run.memory.processBytes)} / ${bytes(run.memory.limitBytes)} safeguard limit · Headroom: ${bytes(run.memory.headroomBytes)}${run.memory.isUnderPressure ? ' · Memory is near the safeguard limit.' : ''}`;
     $('run-memory').classList.toggle('under-pressure', Boolean(run.memory.isUnderPressure));
   }
-  const warnings = [...run.warnings];
+  const diagnostics = Array.isArray(run.diagnostics) ? run.diagnostics : [];
+  const diagnosticMessages = new Set(diagnostics.map(diagnostic => diagnostic.message));
+  const warnings = (run.warnings ?? []).filter(message => !diagnosticMessages.has(message));
+  const errors = (run.errors ?? []).filter(message => !diagnosticMessages.has(message));
   if (run.shortfall > 0) warnings.unshift(`Overall minimum shortfall: ${number(run.shortfall)} overlays. ${run.counters.selected > 0 ? 'The available selection can still run.' : 'No selected overlays are available to run.'}`);
   const limitedSearch = !run.sourceExhausted && ({
     memoryLimit: 'Scanning stopped to protect service memory.',
     payloadBudget: 'Scanning stopped at the retained payload budget.',
-    responseLimit: 'Scanning stopped because a provider page exceeded the response size limit.'
+    responseLimit: 'Scanning stopped because a provider page exceeded the response size limit.',
+    providerUnavailable: 'Provider search stopped after all retry attempts failed.'
   })[run.stoppedReason];
   if (run.stoppedReason && !run.sourceExhausted) warnings.push(`${limitedSearch || `Search stopped: ${run.stoppedReason}.`} Observed counts are not a complete source total.`);
-  const partialReady = limitedSearch && run.state === 'Ready' && run.counters.selected > 0;
-  $('run-notices').hidden = !warnings.length && !run.errors.length;
+  const partialReady = run.stoppedReason && !run.sourceExhausted && run.state === 'Ready' && run.counters.selected > 0;
+  const expandedDiagnostics = new Set([...$('run-notices').querySelectorAll('[data-diagnostic-key][open]')].map(element => element.dataset.diagnosticKey));
+  $('run-notices').hidden = !warnings.length && !errors.length && !diagnostics.length && !run.diagnosticsOmitted && !partialReady;
   $('run-notices').innerHTML = [
     partialReady ? `<div id="partial-selection-note" class="notice warning" role="status"><strong>Partial selection ready</strong>${number(run.counters.selected)} selected overlays were retained. You can start this selection now. Results may be incomplete and minimum quotas may not be met.</div>` : '',
     warnings.length ? `<div class="notice warning"><strong>Selection & run notes</strong><ul class="message-list">${warnings.map(w => `<li>${escape(w)}</li>`).join('')}</ul></div>` : '',
-    run.errors.length ? `<div class="notice error"><strong>Run errors</strong>${run.errors.map(error => `<div>${escape(error)}</div>`).join('')}</div>` : ''
+    errors.length ? `<div class="notice error"><strong>Run errors</strong>${errors.map(error => `<div>${escape(error)}</div>`).join('')}</div>` : '',
+    ...diagnostics.map((diagnostic, index) => diagnosticMarkup(diagnostic, String(index), expandedDiagnostics)),
+    run.diagnosticsOmitted ? `<p class="hint diagnostics-omitted">${number(run.diagnosticsOmitted)} additional diagnostic entries were omitted to keep this run within its storage limits. Use the run ID to find service logs.</p>` : ''
   ].join('');
   const expandedRules = [...$('run-targets').querySelectorAll('details')].map(element => element.open);
   $('run-target-heading').textContent = direct ? 'Gateway processing' : 'Rule assignments';
@@ -863,13 +906,13 @@ async function loadItems() {
   try {
     const page = await api.items(id, state.itemsFrom, state.itemsSize, state.itemsOutcome);
     if (id !== state.runId || version !== itemsVersion) return;
-    $('run-items').innerHTML = page.items.length ? page.items.map(item => `<tr><td><span class="mono">${escape(item.overlayId)}</span><span class="cell-sub">${escape(item.sensorName)}</span></td><td>${escape(formatTime(item.photoTime))}</td><td>${directRun(state.run) ? '<span class="cell-sub">Gateway rules</span>' : item.targets.map(target => `<div>${escape(target.pipelineId)}<span class="cell-sub mono">${escape(target.ruleId)}</span></div>`).join('')}</td><td>${badge(item.outcome)}${item.error ? `<span class="item-error">${escape(item.error)}</span>` : ''}</td></tr>`).join('') : '<tr><td colspan="4"><div class="run-empty">No selected overlays for this view.</div></td></tr>';
+    $('run-items').innerHTML = page.items.length ? page.items.map(item => `<tr><td><span class="mono">${escape(item.overlayId)}</span><span class="cell-sub">${escape(item.sensorName)}${item.sensorType ? ` · ${escape(item.sensorType)}` : ''}</span></td><td>${escape(formatTime(item.photoTime))}</td><td>${directRun(state.run) ? '<span class="cell-sub">Gateway rules</span>' : item.targets.map(target => `<div>${escape(target.pipelineId)}<span class="cell-sub mono">${escape(target.ruleId)}</span></div>`).join('')}</td><td>${badge(item.outcome)}${item.error ? `<span class="item-error">${escape(item.error)}</span>` : ''}</td></tr>`).join('') : '<tr><td colspan="4"><div class="run-empty">No selected overlays for this view.</div></td></tr>';
     $('items-count').textContent = page.total ? `${number(page.from + 1)}–${number(page.from + page.items.length)} of ${number(page.total)} overlays` : '0 overlays';
     $('items-prev').disabled = state.itemsFrom === 0;
     $('items-next').disabled = page.from + page.items.length >= page.total;
   } catch (error) {
     if (id !== state.runId || version !== itemsVersion) return;
-    $('run-items').innerHTML = `<tr><td colspan="4"><div class="inline-error">${escape(error.message)}</div></td></tr>`;
+    $('run-items').innerHTML = `<tr><td colspan="4"><div class="inline-error">${errorMarkup(error)}</div></td></tr>`;
     $('items-prev').disabled = true; $('items-next').disabled = true;
   }
 }
@@ -920,6 +963,7 @@ async function rerun() {
 async function updatePublication(event) {
   event.preventDefault();
   const id = state.runId;
+  hideError('run-error');
   // An older poll must not overwrite the settings returned by this mutation.
   clearTimeout(state.timer);
   state.refreshVersion++;
@@ -941,11 +985,73 @@ async function updatePublication(event) {
   }
 }
 
-function showError(id, error) {
+function renderProviderProgress(run) {
+  const progress = run.state === 'Preparing' ? run.providerProgress : null;
+  const element = $('provider-progress');
+  element.hidden = !progress;
+  if (!progress) return;
+  const context = [progress.operation,
+    progress.queryIndex != null ? `query ${number(progress.queryIndex)}${progress.queryCount ? ` of ${number(progress.queryCount)}` : ''}` : '',
+    progress.page != null ? `page ${number(progress.page)}` : '',
+    progress.attempt ? `attempt ${number(progress.attempt)} of ${number(progress.maxAttempts || progress.attempt)}` : '',
+    progress.lastStatusCode != null ? `last response HTTP ${progress.lastStatusCode}` : ''].filter(Boolean).join(' · ');
+  const remaining = progress.nextAttemptAt ? Math.max(0, Math.ceil((new Date(progress.nextAttemptAt).getTime() - Date.now()) / 1000)) : null;
+  const waiting = progress.phase === 'retryWait'
+    ? `Waiting to retry Elastic Provider${remaining !== null && Number.isFinite(remaining) ? remaining > 0 ? ` in ${remaining} s` : '; retry is due' : ''}.`
+    : progress.phase === 'requestDelay'
+      ? `Waiting between provider requests${remaining !== null && Number.isFinite(remaining) && remaining > 0 ? ` · next request in ${remaining} s` : ''}.`
+      : 'Waiting for Elastic Provider to respond.';
+  element.textContent = `${waiting} ${context}. Already scanned ${number(run.counters.scanned)} records.`;
+}
+
+function contextMarkup(entries) {
+  const values = entries.filter(([, value]) => value !== null && value !== undefined && value !== '');
+  return values.length ? `<dl class="diagnostic-context">${values.map(([label, value]) => `<div><dt>${escape(label)}</dt><dd>${escape(String(value).slice(0, 1000))}</dd></div>`).join('')}</dl>` : '';
+}
+
+function responseBodyMarkup(value, truncated, unavailableReason) {
+  if (value == null || value === '') return `<p class="hint">${escape(unavailableReason ? `Response body unavailable: ${unavailableReason}` : 'No response body was returned.')}</p>`;
+  let text = String(value);
+  if (!truncated) {
+    try { text = JSON.stringify(JSON.parse(text), null, 2); } catch { /* Keep plain text and partial JSON readable. */ }
+  }
+  const shortened = truncated || text.length > 8192;
+  return `<pre class="diagnostic-body mono" tabindex="0" aria-label="Response body">${escape(text.slice(0, 8192))}</pre>${shortened ? '<p class="hint diagnostic-truncated">Response excerpt shortened; the full response is not retained here.</p>' : ''}${unavailableReason ? `<p class="hint">${escape(unavailableReason)}</p>` : ''}`;
+}
+
+function diagnosticMarkup(diagnostic, index = '', expanded = new Set(), messageShown = false) {
+  const upstream = diagnostic.upstream;
+  const key = `${diagnostic.timestamp ?? ''}|${diagnostic.code ?? ''}|${diagnostic.overlayId ?? ''}|${index}`;
+  const severity = String(diagnostic.severity ?? 'Error').toLowerCase();
+  const style = severity === 'warning' ? 'warning' : ['information', 'info', 'success'].includes(severity) ? 'success' : 'error';
+  const context = contextMarkup([
+    ['Stage', diagnostic.stage], ['Code', diagnostic.code], ['Recorded', diagnostic.timestamp ? formatTime(diagnostic.timestamp) : null],
+    ['Operation', upstream?.operation], ['Method', upstream?.method], ['HTTP status', upstream?.statusCode],
+    ['Attempts', upstream?.attempts], ['Elapsed', upstream?.elapsedMs != null ? `${number(Math.round(upstream.elapsedMs))} ms` : null],
+    ['Query', diagnostic.queryIndex], ['Page', diagnostic.page], ['Overlay ID', diagnostic.overlayId],
+    ['Pipeline', diagnostic.pipelineId], ['Rule ID', diagnostic.ruleId], ['Trace ID', diagnostic.traceId],
+    ['Content type', upstream?.contentType], ['Response bytes read', upstream?.bytesRead]
+  ]);
+  return `<div class="run-diagnostic${messageShown ? '' : ` notice ${style}`}">${messageShown ? '' : `<p class="diagnostic-message">${escape(diagnostic.message)}</p>`}<details class="diagnostic-details" data-diagnostic-key="${escape(key)}" ${expanded.has(key) ? 'open' : ''}><summary>${upstream ? 'Provider response & details' : 'Diagnostic details'}${upstream?.statusCode != null ? ` · HTTP ${escape(upstream.statusCode)}` : ''}</summary>${context}${upstream ? responseBodyMarkup(upstream.bodyExcerpt, upstream.bodyTruncated, upstream.bodyUnavailableReason) : ''}</details></div>`;
+}
+
+function errorMarkup(error, depth = 0) {
+  const fields = error.validationErrors;
+  const context = contextMarkup([
+    ['Request', error.method && error.path ? `${error.method} ${error.path.split('?')[0]}` : null],
+    ['HTTP status', error.status > 0 ? error.status : null], ['Code', error.code], ['Trace ID', error.traceId]
+  ]);
+  const validation = fields ? `<ul class="error-fields">${Object.entries(fields).slice(0, 100).map(([field, messages]) =>
+    `<li><strong>${escape(field || 'Request')}</strong>: ${escape([].concat(messages).join(' ').slice(0, 1000))}</li>`).join('')}</ul>` : '';
+  return `<p class="error-message">${escape(String(error.message || error).slice(0, 4000))}</p>${validation}${context}${error.diagnostic ? diagnosticMarkup(error.diagnostic, 'request', new Set(), error.diagnostic.message === error.message) : ''}${error.responseBody != null ? `<details class="diagnostic-details"><summary>Rules API response</summary>${responseBodyMarkup(error.responseBody, error.responseBodyTruncated)}</details>` : ''}${depth < 1 && error.causes ? error.causes.slice(0, 100).map(cause => `<div class="error-cause">${errorMarkup(cause, depth + 1)}</div>`).join('') : ''}`;
+}
+
+function showError(id, error, source = 'action') {
   const element = $(id);
   element.classList.add(id === 'global-notice' ? 'notice' : 'error');
   if (id === 'global-notice') element.classList.add('error');
-  element.textContent = error.message || String(error);
+  element.innerHTML = errorMarkup(error);
+  element.dataset.source = source;
   element.hidden = false;
 }
 function hideError(id) { $(id).hidden = true; }
