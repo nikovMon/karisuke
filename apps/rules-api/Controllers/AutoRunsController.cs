@@ -36,7 +36,12 @@ public sealed class AutoRunsController(
             SingleInstance = true,
             Ui = options.Ui,
             Memory = memory.Snapshot(),
-            Provider = new { providerOptions.Value.MaxResponseBytes, providerOptions.Value.TimeoutSeconds, providerOptions.Value.To }
+            Provider = new
+            {
+                providerOptions.Value.MaxResponseBytes, providerOptions.Value.TimeoutSeconds, providerOptions.Value.To,
+                providerOptions.Value.RequestDelayMs, providerOptions.Value.MaxRetries, providerOptions.Value.RetryDelayMs,
+                providerOptions.Value.SensorTypeMappings
+            }
         });
     }
 

@@ -8,21 +8,30 @@ public sealed class ElasticProviderOptions
     public string TableEntitiesPath { get; set; } = "/ErisImages/v2.0/ErisImages/Images/TableEntities";
     public int To { get; set; } = 1000;
     public int TimeoutSeconds { get; set; } = 30;
+    public int RequestDelayMs { get; set; } = 1000;
+    public int MaxRetries { get; set; } = 2;
+    public int RetryDelayMs { get; set; } = 2000;
     public int MaxResponseBytes { get; set; } = 64 * 1024 * 1024;
     public Dictionary<string, string> Headers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> SensorTypeMappings { get; set; } = new(StringComparer.Ordinal)
+    {
+        ["VIS"] = "VIS", ["PAN"] = "PAN", ["PAN_Sharpen_RGB"] = "PAN_Sharpen_RGB",
+        ["PAN_MSI"] = "PAN_MSI", ["EO"] = "EO", ["IR"] = "IR", ["CIR"] = "CIR",
+        ["NIR"] = "NIR", ["MWIR"] = "MWIR", ["SAR"] = "SAR", ["SWIR"] = "SWIR"
+    };
     public ProviderRequestFields RequestFields { get; set; } = new();
     public ProviderResponseFields ResponseFields { get; set; } = new();
 }
 
 /// <summary>
-/// SENSOR, geo, date, CREATED, gridType.keyword and hasalgorithmicregistration are confirmed request aliases. Other aliases remain provisional
+/// SENSOR, geo, date, CREATED, sensorType.keyword, gridType.keyword and hasalgorithmicregistration are confirmed request aliases. Other aliases remain provisional
 /// deployment defaults; response property names are configured separately.
 /// </summary>
 public sealed class ProviderRequestFields
 {
     public string Id { get; set; } = "GlobalId";
     public string SensorName { get; set; } = "SENSOR";
-    public string SensorType { get; set; } = "IMAGINGTECHNIQUE";
+    public string SensorType { get; set; } = "sensorType.keyword";
     public string GridType { get; set; } = "gridType.keyword";
     public string RegistrationQuality { get; set; } = "hasalgorithmicregistration";
     public string SortieId { get; set; } = "SORTIE";

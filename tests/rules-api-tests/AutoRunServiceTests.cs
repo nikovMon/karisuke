@@ -433,6 +433,257 @@ public sealed class AutoRunServiceTests
     }
 
     [Fact]
+    public async Task RawSensorTypesAreResolvedBeforeExactMatchingAndQuotaSelection()
+    {
+        await using var fixture = await Fixture.StartAsync([
+            Overlay("newer-pan", "2025-01-01T00:00:00Z"), Overlay("older-vis", "2020-01-01T00:00:00Z")]);
+        fixture.Resolver.Rules["rule-a"].Match!.SensorTypes = ["VIS"];
+        fixture.Provider.Resolve = (overlay, _) => Task.FromResult(new ProviderOverlayResult(
+            WithSensorType(overlay, overlay.Input.ImageId == "newer-pan" ? "PAN" : "VIS"), null));
+
+        var ready = await fixture.ReadyAsync(Request([], [Target("a", 1, 1)]) with
+        {
+            Source = new() { Mode = AutoRunSourceMode.Rules }, MaxOverlays = 1
+        });
+
+        Assert.Equal(2, ready.Counters.Scanned);
+        Assert.Equal(1, ready.Counters.ObservedMatches);
+        Assert.Equal(0, Assert.Single(ready.Targets).Shortfall);
+        Assert.Equal(new[] { "newer-pan", "older-vis" }, fixture.Provider.SensorTypeCalls);
+        var item = Assert.Single(fixture.Service.Items(ready.Id, 0, 10, null).Items);
+        Assert.Equal("older-vis", item.OverlayId);
+        Assert.Equal("VIS", item.SensorType);
+        Assert.Equal(new[] { "VIS" }, Assert.Single(ready.Targets).Rule.Match!.SensorTypes);
+
+        fixture.Service.Start(ready.Id);
+        await fixture.WaitAsync(ready.Id, AutoRunState.Completed);
+        var publication = Assert.Single(fixture.Publisher.Calls);
+        using var payload = JsonDocument.Parse(publication.Payload);
+        Assert.Equal("VIS", payload.RootElement.GetProperty("sensorType").GetString());
+    }
+
+    [Fact]
+    public async Task RawLookupRunsOncePerUniqueCandidateAcrossPagesAndRuleQueries()
+    {
+        await using var fixture = await Fixture.StartAsync([]);
+        fixture.Resolver.Rules["rule-a"].Match!.SensorTypes = ["VIS"];
+        fixture.Resolver.Rules["rule-b"].Match!.SensorTypes = ["PAN"];
+        fixture.Provider.Search = (_, next, _) => Task.FromResult(new ProviderPage(
+            [new(Overlay("same"), null)], next is null ? "/next" : null));
+        fixture.Provider.Resolve = (overlay, _) => Task.FromResult(new ProviderOverlayResult(WithSensorType(overlay, "VIS"), null));
+
+        var ready = await fixture.ReadyAsync(Request([], [Target("a"), Target("b")]) with
+        {
+            Source = new() { Mode = AutoRunSourceMode.Rules }
+        });
+
+        Assert.Equal(4, ready.Counters.Scanned);
+        Assert.Equal(3, ready.Counters.Duplicates);
+        Assert.Equal("same", Assert.Single(fixture.Provider.SensorTypeCalls));
+        Assert.Equal(1, ready.Targets.Single(target => target.RuleId == "rule-a").Selected);
+        Assert.Equal(0, ready.Targets.Single(target => target.RuleId == "rule-b").Selected);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NonTypeIneligibleOverlaysSkipRawLookup(bool explicitFilter)
+    {
+        await using var fixture = await Fixture.StartAsync([Overlay("outside")]);
+        if (!explicitFilter) fixture.Resolver.Rules["rule-a"].Match!.Resolution = new() { Min = 1 };
+        var ready = await fixture.ReadyAsync(Request([], explicitFilter ? [] : [Target("a")]) with
+        {
+            Source = new()
+            {
+                Mode = AutoRunSourceMode.Filters,
+                Filters = explicitFilter ? new() { SensorNames = ["other-camera"], SensorTypes = ["VIS"] } : null
+            }
+        });
+
+        Assert.Equal(1, ready.Counters.Scanned);
+        Assert.Equal(0, ready.Counters.Selected);
+        Assert.Empty(fixture.Provider.SensorTypeCalls);
+    }
+
+    [Fact]
+    public async Task DirectSensorTypeFilterUsesResolvedTypeAndFreezesItForPublication()
+    {
+        await using var fixture = await Fixture.StartAsync([Overlay("pan"), Overlay("vis")]);
+        fixture.Provider.Resolve = (overlay, _) => Task.FromResult(new ProviderOverlayResult(
+            WithSensorType(overlay, overlay.Input.ImageId == "vis" ? "VIS" : "PAN"), null));
+        var ready = await fixture.ReadyAsync(Request([], []) with
+        {
+            Source = new() { Mode = AutoRunSourceMode.Filters, Filters = new() { SensorTypes = ["VIS"] } }
+        });
+
+        Assert.Equal("vis", Assert.Single(fixture.Service.Items(ready.Id, 0, 10, null).Items).OverlayId);
+        Assert.Equal(2, fixture.Provider.SensorTypeCalls.Count);
+        fixture.Provider.Resolve = (_, _) => throw new InvalidOperationException("Must use frozen payload after preview.");
+        fixture.Service.Start(ready.Id);
+        await fixture.WaitAsync(ready.Id, AutoRunState.Completed);
+        var call = Assert.Single(fixture.Publisher.Calls);
+        Assert.Empty(call.Targets);
+        Assert.Equal("VIS", GatewayInputMessageParser.Parse(call.Payload).SensorType);
+    }
+
+    [Theory]
+    [InlineData(false, "vis")]
+    [InlineData(false, "unknown")]
+    [InlineData(true, "vis")]
+    [InlineData(true, "unknown")]
+    public async Task UnsupportedFilterAndRuleSensorTypesFailAdmissionBeforeProviderWork(bool ruleType, string type)
+    {
+        await using var fixture = await Fixture.StartAsync([Overlay("one")]);
+        if (ruleType) fixture.Resolver.Rules["rule-a"].Match!.SensorTypes = [type];
+        var request = Request([]) with
+        {
+            Source = new()
+            {
+                Mode = AutoRunSourceMode.Rules,
+                Filters = ruleType ? null : new() { SensorTypes = [type] }
+            }
+        };
+
+        var error = await Assert.ThrowsAsync<AutoRunRequestException>(() =>
+            fixture.Service.PreviewAsync(request, CancellationToken.None));
+
+        Assert.Equal(400, error.StatusCode);
+        Assert.Contains(type, error.Message);
+        Assert.Contains(ruleType ? "rule-a" : "source.filters.sensorTypes", error.Message);
+        Assert.Empty(fixture.Service.List());
+        Assert.Empty(fixture.Provider.SearchCursors);
+        Assert.Empty(fixture.Provider.GetCalls);
+        Assert.Empty(fixture.Provider.SensorTypeCalls);
+    }
+
+    [Fact]
+    public async Task ExhaustedProviderRetriesPreserveEarlierCandidatesAndRetainedDiagnostics()
+    {
+        var options = EnabledOptions();
+        var retained = Overlay("retained");
+        await using var fixture = await Fixture.StartAsync([], options);
+        fixture.Provider.Search = (_, next, _) => next is null
+            ? Task.FromResult(new ProviderPage([new(retained, null)], "/next"))
+            : throw Unavailable("continuation page", "POST");
+
+        var ready = await fixture.ReadyAsync(Request([], []) with { Source = new() { Mode = AutoRunSourceMode.Filters } });
+
+        Assert.Equal("providerUnavailable", ready.StoppedReason);
+        Assert.False(ready.SourceExhausted);
+        Assert.Equal(1, ready.Counters.Selected);
+        Assert.Equal(2, fixture.Provider.SearchCursors.Count);
+        var diagnostic = Assert.Single(ready.Diagnostics);
+        Assert.Equal("providerUnavailable", diagnostic.Code);
+        Assert.Equal(1, diagnostic.QueryIndex);
+        Assert.Equal(2, diagnostic.Page);
+        Assert.Equal(503, diagnostic.Upstream!.StatusCode);
+        Assert.Equal(3, diagnostic.Upstream.Attempts);
+        Assert.Null(ready.ProviderProgress);
+
+        fixture.Service.Start(ready.Id);
+        var completed = await fixture.WaitAsync(ready.Id, AutoRunState.Completed);
+        Assert.Equal(diagnostic, Assert.Single(completed.Diagnostics));
+        Assert.Equal(retained.Payload.Length, ready.RetainedBytes - completed.RetainedBytes);
+        Assert.True(completed.RetainedBytes > 0);
+        Assert.Single(fixture.Publisher.Calls);
+        var deleted = fixture.Service.Delete(ready.Id);
+        if (deleted.PendingIds.Count == 0) Assert.Equal(completed.RetainedBytes, deleted.ReleasedRetainedBytes);
+        await UntilAsync(() => fixture.Service.List().Count == 0);
+        Assert.Equal(404, Assert.Throws<AutoRunRequestException>(() => fixture.Service.Get(ready.Id)).StatusCode);
+    }
+
+    [Fact]
+    public async Task RawLookupOutageStopsRemainingCandidatesAndKeepsOverlayContext()
+    {
+        await using var fixture = await Fixture.StartAsync([Overlay("one"), Overlay("two"), Overlay("three")]);
+        fixture.Provider.Resolve = (overlay, _) => overlay.Input.ImageId == "two"
+            ? throw Unavailable("sensor type lookup", "GET")
+            : Task.FromResult(new ProviderOverlayResult(overlay, null));
+
+        var ready = await fixture.ReadyAsync(Request([], []) with { Source = new() { Mode = AutoRunSourceMode.Filters } });
+
+        Assert.Equal("providerUnavailable", ready.StoppedReason);
+        Assert.Equal(1, ready.Counters.Selected);
+        Assert.Equal(new[] { "one", "two" }, fixture.Provider.SensorTypeCalls);
+        var diagnostic = Assert.Single(ready.Diagnostics);
+        Assert.Equal("two", diagnostic.OverlayId);
+        Assert.Equal(1, diagnostic.QueryIndex);
+        Assert.Equal(1, diagnostic.Page);
+        Assert.Equal("sensor type lookup", diagnostic.Upstream!.Operation);
+    }
+
+    [Fact]
+    public async Task ProviderUnavailableBeforeAnyCandidatesCreatesIncompleteEmptyPreviewThatCannotStart()
+    {
+        await using var fixture = await Fixture.StartAsync([]);
+        fixture.Provider.Search = (_, _, _) => throw Unavailable("initial search page", "POST");
+        var ready = await fixture.ReadyAsync(Request([], []) with
+        {
+            Source = new() { Mode = AutoRunSourceMode.Filters }, MinOverlays = 1
+        });
+
+        Assert.Equal("providerUnavailable", ready.StoppedReason);
+        Assert.False(ready.SourceExhausted);
+        Assert.Equal(0, ready.Counters.Selected);
+        Assert.Single(ready.Diagnostics);
+        Assert.Equal(409, Assert.Throws<AutoRunRequestException>(() => fixture.Service.Start(ready.Id)).StatusCode);
+        Assert.Empty(fixture.Publisher.Calls);
+    }
+
+    [Fact]
+    public async Task ProviderProgressIncludesCurrentQueryAndPageAndClearsWhenReady()
+    {
+        await using var fixture = await Fixture.StartAsync([]);
+        var entered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var nextAttempt = DateTimeOffset.UtcNow.AddSeconds(2);
+        fixture.Provider.Search = async (_, _, token) =>
+        {
+            fixture.Provider.Report?.Invoke(new("retryWait", "initial search page", 2, 3, 503, nextAttempt));
+            entered.TrySetResult(true);
+            await release.Task.WaitAsync(token);
+            return new([], null);
+        };
+        var admitted = await fixture.Service.PreviewAsync(Request([], []) with
+        {
+            Source = new() { Mode = AutoRunSourceMode.Filters }
+        }, CancellationToken.None);
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var summary = fixture.Service.Get(admitted.Id);
+            Assert.Equal(AutoRunState.Preparing, summary.State);
+            var progress = Assert.IsType<ProviderProgress>(summary.ProviderProgress);
+            Assert.Equal("retryWait", progress.Phase);
+            Assert.Equal(2, progress.Attempt);
+            Assert.Equal(3, progress.MaxAttempts);
+            Assert.Equal(503, progress.LastStatusCode);
+            Assert.Equal(nextAttempt, progress.NextAttemptAt);
+            Assert.Equal(1, progress.QueryIndex);
+            Assert.Equal(1, progress.QueryCount);
+            Assert.Equal(1, progress.Page);
+        }
+        finally { release.TrySetResult(true); }
+        var ready = await fixture.WaitAsync(admitted.Id, AutoRunState.Ready);
+        Assert.Null(ready.ProviderProgress);
+    }
+
+    [Fact]
+    public async Task RepeatedInvalidRawTypesRetainBoundedDiagnosticsAndCountOmittedEntries()
+    {
+        await using var fixture = await Fixture.StartAsync(Enumerable.Range(0, 125).Select(i => Overlay($"invalid-{i}")).ToArray());
+        fixture.Provider.Resolve = (_, _) => Task.FromResult(new ProviderOverlayResult(null, "Raw sensorType is missing."));
+
+        var ready = await fixture.ReadyAsync(Request([], []) with { Source = new() { Mode = AutoRunSourceMode.Filters } });
+
+        Assert.Equal(125, ready.Counters.Invalid);
+        Assert.Equal(0, ready.Counters.Selected);
+        Assert.InRange(ready.Diagnostics.Count, 1, 100);
+        Assert.True(ready.DiagnosticsOmitted > 0);
+        Assert.All(ready.Diagnostics, diagnostic => Assert.NotNull(diagnostic.OverlayId));
+    }
+
+    [Fact]
     public async Task SearchFollowsPagesDeduplicatesIdsAndCountsInvalidRecords()
     {
         await using var fixture = await Fixture.StartAsync([]);
@@ -1098,6 +1349,19 @@ public sealed class AutoRunServiceTests
 
     private static AutoRunCandidate Candidate(string id, int[] matches) => new(Overlay(id), matches);
 
+    private static ProviderOverlay WithSensorType(ProviderOverlay overlay, string type)
+    {
+        var node = JsonNode.Parse(overlay.Payload)!;
+        node["sensorType"] = type;
+        var payload = JsonSerializer.SerializeToUtf8Bytes(node);
+        return overlay with { Payload = payload, Input = GatewayInputMessageParser.Parse(payload) };
+    }
+
+    private static ProviderUnavailableException Unavailable(string operation, string method) => new(
+        "Elastic Provider returned HTTP 503 after 3 attempts.",
+        new(DateTimeOffset.UtcNow, "error", "providerUnavailable", "provider", "Provider unavailable.",
+            Upstream: new(operation, method, 503, 3, 2000, "text/plain", "Temporarily unavailable.")));
+
     private static ProviderOverlay Overlay(
         string id, string photoTime = "2020-01-02T10:00:00Z", string imageUrl = "https://example.invalid/image")
     {
@@ -1156,22 +1420,38 @@ public sealed class AutoRunServiceTests
         public Dictionary<string, ProviderOverlay> Overlays { get; } = overlays.ToDictionary(o => o.Input.ImageId, StringComparer.Ordinal);
         public ConcurrentQueue<string> GetCalls { get; } = new();
         public ConcurrentQueue<string?> SearchCursors { get; } = new();
+        public ConcurrentQueue<string> SensorTypeCalls { get; } = new();
+        public Action<ProviderProgress>? Report { get; private set; }
         public Func<string, CancellationToken, Task<ProviderOverlayResult>>? Get { get; set; }
         public Func<JsonElement, string?, CancellationToken, Task<ProviderPage>>? Search { get; set; }
+        public Func<ProviderOverlay, CancellationToken, Task<ProviderOverlayResult>>? Resolve { get; set; }
 
-        public Task<ProviderOverlayResult> GetAsync(string id, CancellationToken cancellationToken)
+        public Task<ProviderOverlayResult> GetAsync(string id, CancellationToken cancellationToken,
+            Action<ProviderProgress>? report = null)
         {
+            Report = report;
             GetCalls.Enqueue(id);
             return Get is { } handler ? handler(id, cancellationToken)
                 : Task.FromResult(Overlays.TryGetValue(id, out var overlay)
                     ? new ProviderOverlayResult(overlay, null) : new(null, "Missing overlay."));
         }
 
-        public Task<ProviderPage> SearchPageAsync(JsonElement query, string? nextPage, CancellationToken cancellationToken)
+        public Task<ProviderPage> SearchPageAsync(JsonElement query, string? nextPage, CancellationToken cancellationToken,
+            Action<ProviderProgress>? report = null)
         {
+            Report = report;
             SearchCursors.Enqueue(nextPage);
             return Search is { } handler ? handler(query, nextPage, cancellationToken)
                 : Task.FromResult(new ProviderPage(Overlays.Values.Select(o => new ProviderOverlayResult(o, null)).ToArray(), null));
+        }
+
+        public Task<ProviderOverlayResult> ResolveSensorTypeAsync(ProviderOverlay overlay, CancellationToken cancellationToken,
+            Action<ProviderProgress>? report = null)
+        {
+            Report = report;
+            SensorTypeCalls.Enqueue(overlay.Input.ImageId);
+            return Resolve is { } handler ? handler(overlay, cancellationToken)
+                : Task.FromResult(new ProviderOverlayResult(overlay, null));
         }
     }
 

@@ -16,6 +16,8 @@ namespace ImagingPipeline.Rules.Api.AutoRuns.Provider;
 public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> configured, IAutoRunMemoryGuard? memory = null)
 {
     private readonly ElasticProviderOptions _options = configured.Value;
+    private readonly IReadOnlyDictionary<string, string> _sensorTypeMappings =
+        SensorTypeCatalog.Snapshot(configured.Value.SensorTypeMappings);
     private static readonly ConditionalWeakTable<AutoRunFilters, CompiledFilter> FilterCache = new();
 
     public IReadOnlyList<JsonElement> Build(AutoRunSource source, IReadOnlyList<PipelineRuleDocument> rules)
@@ -27,6 +29,9 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
             var errors = Validate(source.Filters).ToArray();
             if (errors.Length != 0) throw new ArgumentException(string.Join(" ", errors), nameof(source));
         }
+        var sensorTypeErrors = ValidateSensorTypes(source.Filters, rules).ToArray();
+        if (sensorTypeErrors.Length != 0)
+            throw new ArgumentException(string.Join(" ", sensorTypeErrors), nameof(source));
         if (source.Mode == AutoRunSourceMode.OverlayIds) return [];
         var result = new List<JsonElement>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -43,7 +48,7 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
                 if (match?.LocationWkt is { } area)
                     common.Add(Clause("geo_intersect", _options.RequestFields.Geometry, new object[] { area }));
                 if (match?.SensorTypes is { Count: > 0 } types)
-                    common.Add(Clause("match", _options.RequestFields.SensorType, types.ToArray()));
+                    common.Add(Clause("match", _options.RequestFields.SensorType, TranslateSensorTypes(types)));
                 if (match?.ModeSar is { Count: > 0 } modes && !string.IsNullOrWhiteSpace(_options.RequestFields.ModeSar))
                     common.Add(Clause("match", _options.RequestFields.ModeSar, modes.ToArray()));
                 // MaxPhotoAgeDays is intentionally not pushed down for historical execution.
@@ -82,6 +87,32 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
             if (seen.Add(raw)) result.Add(query);
         }
     }
+
+    /// <summary>Checks the configured vocabulary before a preview job is created or provider work begins.</summary>
+    public IEnumerable<string> ValidateSensorTypes(AutoRunFilters? filters,
+        IReadOnlyList<PipelineRuleDocument>? rules = null)
+    {
+        foreach (var error in ValidateTypes(filters?.SensorTypes, "source.filters.sensorTypes", trim: true))
+            yield return error;
+        foreach (var rule in rules ?? [])
+            foreach (var error in ValidateTypes(rule.Match?.SensorTypes, $"Rule '{rule.Id}' match.sensorTypes", trim: false))
+                yield return error;
+    }
+
+    private IEnumerable<string> ValidateTypes(IEnumerable<string>? types, string context, bool trim)
+    {
+        if (types is null) yield break;
+        foreach (var type in types)
+        {
+            var key = trim ? type?.Trim() : type;
+            if (key is null || !_sensorTypeMappings.ContainsKey(key))
+                yield return $"{context} contains unsupported sensor type '{type ?? "<null>"}'. " +
+                    $"Allowed sensor types (case-sensitive): {string.Join(", ", _sensorTypeMappings.Keys)}.";
+        }
+    }
+
+    private string[] TranslateSensorTypes(IEnumerable<string> types) =>
+        types.Select(type => _sensorTypeMappings[type]).Distinct(StringComparer.Ordinal).ToArray();
 
     public static IEnumerable<string> Validate(AutoRunFilters filters)
     {
@@ -137,13 +168,18 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
     public static bool Matches(ProviderOverlay overlay, AutoRunFilters filters) =>
         FilterCache.GetValue(filters, static value => new CompiledFilter(value)).Matches(overlay);
 
+    /// <summary>Checks every other filter before retrieving the original sensor type.</summary>
+    public static bool MatchesWithoutSensorType(ProviderOverlay overlay, AutoRunFilters filters) =>
+        FilterCache.GetValue(filters, static value => new CompiledFilter(value)).Matches(overlay, ignoreSensorType: true);
+
     private List<object> FilterClauses(AutoRunFilters? filters)
     {
         var clauses = new List<object>();
         if (filters is null) return clauses;
         var fields = _options.RequestFields;
         AddList(fields.SensorName, filters.SensorNames);
-        AddList(fields.SensorType, filters.SensorTypes);
+        if (filters.SensorTypes is { } types)
+            clauses.Add(Clause("match", fields.SensorType, TranslateSensorTypes(types.Select(value => value.Trim()))));
         AddList(fields.GridType, filters.GridTypes);
         if (filters.RegistrationQualities is { } qualities)
             clauses.Add(Clause("match", fields.RegistrationQuality, qualities.Select(value =>
@@ -237,10 +273,10 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
             _area = filters.Wkt is null ? null : GeometryUtilities.ReadWkt(filters.Wkt);
         }
 
-        public bool Matches(ProviderOverlay overlay)
+        public bool Matches(ProviderOverlay overlay, bool ignoreSensorType = false)
         {
             var input = overlay.Input;
-            return In(_sensors, input.SensorName) && In(_types, input.SensorType) && In(_grids, input.GridType) &&
+            return In(_sensors, input.SensorName) && (ignoreSensorType || In(_types, input.SensorType)) && In(_grids, input.GridType) &&
                    In(_qualities, input.RegistrationQuality.ToJsonValue()) && In(_sorties, overlay.SortieId) &&
                    (_realtime is null || overlay.IsRealtime == _realtime) &&
                    (_minimum is null || input.BestResolution >= _minimum) &&

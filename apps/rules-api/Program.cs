@@ -114,7 +114,10 @@ public sealed class Program
                 if (exception is AutoRunRequestException autoRunException)
                 {
                     context.Response.StatusCode = autoRunException.StatusCode;
-                    await context.Response.WriteAsJsonAsync(new { error = autoRunException.Message });
+                    var traceId = Activity.Current?.TraceId.ToString() ?? context.TraceIdentifier;
+                    app.Logger.LogWarning("Auto Run request rejected: {ErrorCode}, HTTP {StatusCode}, trace {TraceId}: {ErrorMessage}",
+                        autoRunException.Code, autoRunException.StatusCode, traceId, autoRunException.Message);
+                    await context.Response.WriteAsJsonAsync(new { error = autoRunException.Message, code = autoRunException.Code, traceId });
                     return;
                 }
                 if (exception is RulePersistenceException persistenceException)
@@ -143,6 +146,15 @@ public sealed class Program
                 }
 
                 context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                if (context.Features.Get<IExceptionHandlerPathFeature>()?.Path.StartsWith("/auto-runs", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    await context.Response.WriteAsJsonAsync(new
+                    {
+                        error = "Auto Run could not complete this request. Use the trace ID to find the service log.",
+                        code = "auto_run_internal_error", traceId = Activity.Current?.TraceId.ToString() ?? context.TraceIdentifier
+                    });
+                    return;
+                }
                 await context.Response.WriteAsJsonAsync(new { error = "Unexpected server error." });
             });
         });

@@ -18,11 +18,14 @@ const options = {
     maxScannedRecords: 1000000, maxCandidates: 200000, payloadBudgetBytes: 536870912,
     readyLifetimeMinutes: 30, summaryLifetimeMinutes: 60, maxTargets: 100 },
   singleInstance: true,
+  provider: { requestDelayMs: 250, maxRetries: 2, retryDelayMs: 1000,
+    sensorTypeMappings: { VIS: 'VIS', PAN: 'PAN', 'Thermal imagery': 'IR', SAR: 'SAR' } },
   ui: { mapUrl: null },
   memory: { availableBytes: 12884901888, processBytes: 1073741824, managedBytes: 536870912,
     limitBytes: 10307921510, headroomBytes: 9234179686, isUnderPressure: false }
 };
 const sensorTypeLabel = '<img src=x onerror="window.sensorTypeInjected=true">';
+options.provider.sensorTypeMappings[sensorTypeLabel] = 'TEST';
 const rules = Array.from({ length: 11 }, (_, i) => ({
   _id: `rule-${i + 1}`, ruleName: i === 0 ? 'Urban detail' : i === 1 ? 'Archive coverage' : `Rule ${i + 1}`,
   isActive: i !== 1, matchAll: false,
@@ -59,6 +62,7 @@ let rerunFailure = false;
 let rerunGate = null;
 let startFailure = false;
 let startGate = null;
+let previewFailure = null;
 const reads = new Map();
 let runSequence = 0;
 let pipelineFailure = false;
@@ -104,6 +108,9 @@ function makeRun(body) {
     queries: directIds ? [] : [{ filter: { logical_operators: { AND: [{ match: { SENSOR: { type: 'IN', values: ['SENSOR_A'] } } }] } } }],
     confirmedPerSecond: 0, memory: structuredClone(options.memory), retainedBytes: 2048 + selected * 4096, deletionRequested: false
   };
+  if (body.source.filters?.sensorTypes?.length) run.queries[0].filter.logical_operators.AND.push({ match: {
+    'sensorType.keyword': { type: 'IN', values: body.source.filters.sensorTypes.map(type => options.provider.sensorTypeMappings[type]) }
+  } });
   runs.set(run.id, run);
   previewRequests.set(run.id, structuredClone(body));
   return run;
@@ -152,7 +159,14 @@ const server = http.createServer(async (req, res) => {
       const rule = rules.find(r => r._id === id);
       return json(rule ?? { error: 'Rule not found.' }, rule ? 200 : 404);
     }
-    if (url.pathname === '/auto-runs/preview') return json(makeRun(body), 202);
+    if (url.pathname === '/auto-runs/preview') {
+      if (previewFailure?.text !== undefined) {
+        res.writeHead(previewFailure.status, { 'Content-Type': 'text/plain' });
+        return res.end(previewFailure.text);
+      }
+      if (previewFailure) return json(previewFailure.body, previewFailure.status);
+      return json(makeRun(body), 202);
+    }
     if (url.pathname === '/auto-runs') {
       if (req.method === 'DELETE') {
         if (deletionFailure) return json({ error: 'Cleanup unavailable. Try again.' }, 503);
@@ -176,7 +190,7 @@ const server = http.createServer(async (req, res) => {
           return json(result, result.pendingIds.length ? 202 : 200);
         }
         reads.set(run.id, (reads.get(run.id) ?? 0) + 1);
-        if (run.state === 'Preparing') { run.state = 'Ready'; run.readyAt = new Date().toISOString(); }
+        if (run.state === 'Preparing' && !run.providerProgress) { run.state = 'Ready'; run.readyAt = new Date().toISOString(); }
         return json(run);
       }
       if (match[2] === 'rerun') {
@@ -186,7 +200,7 @@ const server = http.createServer(async (req, res) => {
       }
       if (match[2] === 'items') {
         let items = Array.from({ length: run.counters.selected }, (_, i) => ({
-          overlayId: run.overlayIds?.[i] ?? `overlay-${String(i + 1).padStart(3, '0')}`, sensorName: 'SENSOR_A',
+          overlayId: run.overlayIds?.[i] ?? `overlay-${String(i + 1).padStart(3, '0')}`, sensorName: 'SENSOR_A', sensorType: 'VIS',
           photoTime: '2026-10-19T10:00:00Z', targets: run.targets.map(t => ({ pipelineId: t.pipelineId, ruleId: t.ruleId })),
           outcome: run.overlayIds ? (i < run.counters.confirmed ? 'Confirmed' : 'Pending')
             : i === 1 ? 'Failed' : i === 2 ? 'Uncertain' : run.state === 'Publishing' ? 'Confirmed' : 'Pending',
@@ -299,6 +313,13 @@ try {
   await page.getByLabel('Maximum for Urban detail').fill('30');
   await page.locator('#filter-details summary').click();
   await page.locator('#sensor-names').fill('SENSOR_A, SENSOR_A');
+  assert.equal(await page.locator('#sensor-types input[type="text"]').count(), 0, 'sensor types cannot be entered as arbitrary text');
+  assert.deepEqual(await page.locator('#sensor-types input').evaluateAll(inputs => inputs.map(input => input.value)), Object.keys(options.provider.sensorTypeMappings));
+  assert.equal(await page.locator('#sensor-types img').count(), 0, 'configured type labels are escaped');
+  await page.locator('#sensor-types').getByRole('checkbox', { name: 'VIS', exact: true }).focus();
+  await page.keyboard.press('Space');
+  await page.locator('#sensor-types').getByRole('checkbox', { name: 'PAN', exact: true }).check();
+  assert.match(await page.locator('#sensor-types-help').textContent(), /2 selected/);
   await page.locator('#is-realtime').selectOption('false');
   await page.locator('#resolution-min').fill('0.3');
   await page.locator('#resolution-max').fill('0.3');
@@ -314,6 +335,8 @@ try {
   assert.equal(preview.source.filters.sortieIds, undefined);
   assert.equal(preview.source.filters.isRealtime, false);
   assert.deepEqual(preview.source.filters.sensorNames, ['SENSOR_A']);
+  assert.deepEqual(preview.source.filters.sensorTypes, ['VIS', 'PAN']);
+  assert.match(await page.locator('#run-items').textContent(), /SENSOR_A · VIS/);
   assert.equal(preview.source.filters.createdTime.from, '2026-10-01T06:30:00.000Z');
   assert.equal(preview.source.filters.photoTime.to, '2026-10-20T09:00:00.000Z');
   assert.deepEqual(preview.source.filters.resolution, { min: 0.3, max: 0.3 });
@@ -368,6 +391,7 @@ try {
   assert.equal(reads.get('run-1'), stoppedReads, 'terminal jobs must stop polling');
   await page.getByText('← Back to configuration', { exact: true }).click();
   assert.equal(await page.locator('#sensor-names').inputValue(), 'SENSOR_A, SENSOR_A');
+  assert.deepEqual(await page.locator('#sensor-types input:checked').evaluateAll(inputs => inputs.map(input => input.value)), ['VIS', 'PAN'], 'sensor type draft survives run navigation');
   assert.equal(await page.getByLabel('Minimum for Urban detail').inputValue(), '25');
   await page.locator('[name="source-mode"][value="OverlayIds"]').check();
   assert.ok(await page.locator('[name="id-processing"][value="direct"]').isChecked(), 'Overlay IDs defaults to direct gateway processing');
@@ -762,6 +786,11 @@ try {
   assert.equal(await filtersPage.locator('#overall-max').getAttribute('placeholder'), 'Default: 100 overlays');
   assert.ok(await filtersPage.locator('#preview-form').evaluate(form => form.checkValidity()), 'hidden invalid rule quota cannot block filters');
   await filtersPage.locator('#sensor-names').fill('ar');
+  await filtersPage.locator('#sensor-types').getByRole('checkbox', { name: 'Thermal imagery', exact: true }).check();
+  await filtersPage.locator('#sensor-types').getByRole('checkbox', { name: 'PAN', exact: true }).check();
+  await filtersPage.locator('[name="source-mode"][value="Rules"]').check();
+  assert.equal(await filtersPage.locator('#sensor-types input:checked').count(), 2, 'Rules and Filters share the same sensor type draft');
+  await filtersPage.locator('[name="source-mode"][value="Filters"]').check();
   await filtersPage.locator('#resolution-min').fill('1');
   await filtersPage.locator('#resolution-max').fill('20');
   await filtersPage.locator('#photo-from').fill('2026-10-04T19:40');
@@ -781,13 +810,15 @@ try {
   const filtersRunId = new URL(filtersPage.url()).pathname.split('/').pop();
   const filtersRequest = requests.filter(r => r.path === '/auto-runs/preview').at(-1).body;
   assert.deepEqual(filtersRequest, {
-    source: { mode: 'Filters', filters: { sensorNames: ['ar'], resolution: { min: 1, max: 20 },
+    source: { mode: 'Filters', filters: { sensorNames: ['ar'], sensorTypes: ['PAN', 'Thermal imagery'], resolution: { min: 1, max: 20 },
       photoTime: { from: '2026-10-04T16:40:00.000Z', to: '2026-10-05T16:40:00.000Z' } } },
     targets: [], minOverlays: 2, maxOverlays: 25, publication: { batchSize: 6, delayMs: 250 }
   });
   assert.ok(await filtersPage.locator('#run-target-table').isHidden());
   assert.ok(await filtersPage.locator('#direct-run-note').isVisible());
   assert.match(await filtersPage.locator('#provider-queries').textContent(), /logical_operators/);
+  const frozenTypeQuery = JSON.parse(await filtersPage.locator('#provider-queries').textContent())[0].filter.logical_operators.AND.at(-1);
+  assert.deepEqual(frozenTypeQuery, { match: { 'sensorType.keyword': { type: 'IN', values: ['PAN', 'IR'] } } }, 'frozen query displays exact server query values without translating them');
   assert.equal(await filtersPage.locator('#run-items').getByText('Gateway rules', { exact: true }).count(), 20);
   await filtersPage.locator('#start-run').click();
   await filtersPage.locator('#run-state').getByText('Publishing', { exact: true }).waitFor();
@@ -871,7 +902,7 @@ try {
   // A bounded partial preview remains usable after a memory or provider-page limit.
   const partialPage = await context.newPage();
   partialPage.on('pageerror', error => pageErrors.push(error.message));
-  for (const stoppedReason of ['memoryLimit', 'payloadBudget', 'responseLimit']) {
+  for (const stoppedReason of ['memoryLimit', 'payloadBudget', 'responseLimit', 'providerUnavailable']) {
     const partialRun = makeRun({ source: { mode: 'Filters' }, targets: [], minOverlays: 30,
       maxOverlays: 50, publication: { batchSize: 10, delayMs: 1000 } });
     partialRun.state = 'Ready';
@@ -897,6 +928,97 @@ try {
     assert.equal(requests.filter(request => request.path === `/auto-runs/${partialRun.id}/start`).length, 1);
   }
   await partialPage.close();
+
+  // Provider progress and bounded diagnostics remain understandable while polling.
+  const diagnosticsPage = await context.newPage();
+  diagnosticsPage.on('pageerror', error => pageErrors.push(error.message));
+  const diagnosticRun = makeRun({ source: { mode: 'Filters' }, targets: [], minOverlays: 0,
+    maxOverlays: 50, publication: { batchSize: 10, delayMs: 1000 } });
+  diagnosticRun.providerProgress = { phase: 'requesting', operation: 'continuation page', attempt: 1,
+    maxAttempts: 3, queryIndex: 1, queryCount: 2, page: 4 };
+  await diagnosticsPage.goto(`${origin}/ui/auto-run/runs/${diagnosticRun.id}`);
+  await diagnosticsPage.locator('#provider-progress').filter({ hasText: 'Waiting for Elastic Provider to respond' }).waitFor();
+  assert.match(await diagnosticsPage.locator('#provider-progress').textContent(), /query 1 of 2 · page 4 · attempt 1 of 3/);
+  assert.equal(await diagnosticsPage.locator('#provider-progress').getAttribute('aria-live'), 'polite');
+  diagnosticRun.providerProgress = { ...diagnosticRun.providerProgress, phase: 'retryWait', attempt: 2,
+    lastStatusCode: 503, nextAttemptAt: new Date(Date.now() + 15000).toISOString() };
+  await diagnosticsPage.locator('#provider-progress').filter({ hasText: 'Waiting to retry' }).waitFor();
+  assert.match(await diagnosticsPage.locator('#provider-progress').textContent(), /in \d+ s.*attempt 2 of 3.*HTTP 503/);
+  diagnosticRun.providerProgress.phase = 'requestDelay';
+  await diagnosticsPage.locator('#provider-progress').filter({ hasText: 'Waiting between provider requests' }).waitFor();
+  const diagnosticMessage = 'Provider search stopped after 3 attempts. Collected overlays remain available.';
+  diagnosticRun.state = 'Ready';
+  diagnosticRun.providerProgress = null;
+  diagnosticRun.sourceExhausted = false;
+  diagnosticRun.stoppedReason = 'providerUnavailable';
+  diagnosticRun.warnings = [diagnosticMessage, 'A legacy note remains visible.'];
+  diagnosticRun.diagnosticsOmitted = 3;
+  diagnosticRun.diagnostics = [{ timestamp: new Date().toISOString(), severity: 'Warning',
+    code: 'provider_retries_exhausted', stage: 'Preparation', message: diagnosticMessage,
+    traceId: 'trace-ui-123', queryIndex: 1, page: 4, upstream: { operation: 'continuation page', method: 'POST',
+      statusCode: 503, attempts: 3, elapsedMs: 1250, contentType: 'application/json', bytesRead: 85,
+      bodyExcerpt: '{"error":"<img src=x onerror=window.diagnosticInjected=true>","detail":"Search expired"}', bodyTruncated: false } },
+    { timestamp: new Date().toISOString(), severity: 'Warning', code: 'provider_body_sample', stage: 'Preparation',
+      message: 'A plain-text response sample.', upstream: { operation: 'initial search page', method: 'POST',
+        statusCode: 502, attempts: 1, elapsedMs: 20, contentType: 'text/plain', bytesRead: 8193,
+        bodyExcerpt: '<script>window.diagnosticInjected=true</script>\n' + 'proxy detail '.repeat(900), bodyTruncated: true } }];
+  await diagnosticsPage.locator('#partial-selection-note').waitFor();
+  assert.equal(await diagnosticsPage.getByText(diagnosticMessage, { exact: true }).count(), 1, 'structured messages are not repeated in legacy warnings');
+  assert.ok(await diagnosticsPage.locator('#provider-progress').isHidden());
+  assert.ok(await diagnosticsPage.locator('#start-run').isEnabled());
+  assert.match(await diagnosticsPage.locator('.diagnostics-omitted').textContent(), /3 additional diagnostic entries/);
+  const firstDiagnostic = diagnosticsPage.locator('#run-notices .diagnostic-details').first();
+  await firstDiagnostic.locator('summary').focus();
+  await diagnosticsPage.keyboard.press('Enter');
+  assert.match(await firstDiagnostic.locator('.diagnostic-body').textContent(), /\n  "error":/);
+  assert.match(await firstDiagnostic.textContent(), /trace-ui-123/);
+  assert.match(await firstDiagnostic.textContent(), /HTTP status503/);
+  const plainDiagnostic = diagnosticsPage.locator('#run-notices .diagnostic-details').nth(1);
+  await plainDiagnostic.locator('summary').click();
+  assert.ok((await plainDiagnostic.locator('.diagnostic-body').textContent()).length <= 8192);
+  assert.match(await plainDiagnostic.locator('.diagnostic-truncated').textContent(), /shortened/);
+  const diagnosticReads = reads.get(diagnosticRun.id);
+  await diagnosticsPage.waitForFunction(() => document.getElementById('run-notices').querySelectorAll('details[open]').length === 2);
+  while (reads.get(diagnosticRun.id) === diagnosticReads) await diagnosticsPage.waitForTimeout(100);
+  assert.equal(await diagnosticsPage.locator('#run-notices details[open]').count(), 2, 'expanded diagnostics survive a poll');
+  assert.equal(await diagnosticsPage.locator('#run-notices img, #run-notices script').count(), 0);
+  assert.equal(await diagnosticsPage.evaluate(() => window.diagnosticInjected), undefined);
+  await diagnosticsPage.setViewportSize({ width: 390, height: 844 });
+  await diagnosticsPage.screenshot({ path: path.join(screenshots, 'provider-diagnostics-mobile.png'), fullPage: true });
+  assert.ok(await diagnosticsPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'long diagnostic excerpts fit mobile');
+  diagnosticRun.state = 'Completed';
+  diagnosticRun.counters.confirmed = diagnosticRun.counters.selected;
+  await diagnosticsPage.locator('#run-outcome-note').filter({ hasText: 'Publication complete: 25 submissions' }).waitFor();
+  assert.match(await diagnosticsPage.locator('#run-outcome-note').textContent(), /queued to the gateway; downstream processing is not tracked/);
+
+  // Every action error can retain field, request and trace context; non-JSON bodies are escaped and bounded.
+  await diagnosticsPage.goto(`${origin}/ui/auto-run`);
+  await diagnosticsPage.locator('#prepare-button:not(:disabled)').waitFor();
+  await diagnosticsPage.locator('[name="source-mode"][value="Filters"]').check();
+  previewFailure = { status: 400, body: { error: 'Check the selected sensor types.', code: 'invalid_source',
+    traceId: 'validation-trace', errors: { 'source.filters.sensorTypes': ['Choose a configured sensor type.'] } } };
+  await diagnosticsPage.locator('#prepare-button').click();
+  await diagnosticsPage.locator('#form-error .error-fields').waitFor();
+  assert.match(await diagnosticsPage.locator('#form-error').textContent(), /source.filters.sensorTypes/);
+  assert.match(await diagnosticsPage.locator('#form-error').textContent(), /POST \/auto-runs\/preview/);
+  assert.match(await diagnosticsPage.locator('#form-error').textContent(), /validation-trace/);
+  previewFailure = { status: 503, body: { error: diagnosticMessage, code: 'provider_unavailable',
+    traceId: 'request-trace', diagnostic: diagnosticRun.diagnostics[0] } };
+  await diagnosticsPage.locator('#prepare-button').click();
+  await diagnosticsPage.locator('#form-error .diagnostic-details summary').click();
+  assert.equal(await diagnosticsPage.locator('#form-error').getByText(diagnosticMessage, { exact: true }).count(), 1);
+  assert.match(await diagnosticsPage.locator('#form-error .diagnostic-body').textContent(), /Search expired/);
+  previewFailure = { status: 502, text: '<script>window.rawErrorInjected=true</script>\nProxy unavailable\n' + 'x'.repeat(70000) };
+  await diagnosticsPage.locator('#prepare-button').click();
+  await diagnosticsPage.locator('#form-error .diagnostic-details summary').click();
+  const rawErrorText = await diagnosticsPage.locator('#form-error .diagnostic-body').textContent();
+  assert.match(rawErrorText, /Proxy unavailable/);
+  assert.ok(rawErrorText.length <= 8192);
+  assert.match(await diagnosticsPage.locator('#form-error .diagnostic-truncated').textContent(), /shortened/);
+  assert.equal(await diagnosticsPage.locator('#form-error script').count(), 0);
+  assert.equal(await diagnosticsPage.evaluate(() => window.rawErrorInjected), undefined);
+  previewFailure = null;
+  await diagnosticsPage.close();
 
   // Empty Ready is a finished search, not a publishable selection, even after a partial scan.
   const emptyPreviewPage = await context.newPage();
@@ -1152,7 +1274,11 @@ try {
     'server rule search by name ID sensor type and description with status, full paging, matching bulk selection and preserved quotas',
     'cancelled searches cannot overwrite newer results',
     'Rules and Rules Simulate Coming Soon routes, deep links, mobile keyboard navigation and preserved Auto Run drafts',
-    'all retained runs show data weights with individual and bulk deletion, pending cleanup polling, errors and deleted deep links'], screenshots }, null, 2));
+    'all retained runs show data weights with individual and bulk deletion, pending cleanup polling, errors and deleted deep links',
+    'configured sensor type multi-select preserves shared drafts, local names and exact frozen provider values',
+    'provider request pacing and retry progress, partial provider failure and queued-only success wording',
+    'bounded escaped JSON and plain-text diagnostics preserve expansion across polling and fit mobile',
+    'action errors retain validation fields, request status, trace identifiers and bounded non-JSON bodies'], screenshots }, null, 2));
 } finally {
   for (const release of pendingResponses) release();
   if (browser) await browser.close();

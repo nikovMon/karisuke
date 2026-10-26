@@ -63,16 +63,18 @@ In **From filters**, the UI shows overlay filters and overall quotas without rul
 
 The optional filter forms in both modes omit grid types and sortie IDs. Existing API clients can still supply `source.filters.gridTypes` and `source.filters.sortieIds`; saved rules' grid-type conditions are still honored. The run page refreshes automatically while active; its redundant circular refresh control has been removed.
 
+**Sensor types** is a checkbox multi-select populated from `provider.sensorTypeMappings` in the options response. With no selection, this filter does not restrict sensor type. The same selection is preserved when switching between Rules and Filters or returning from a run; Overlay IDs does not submit the hidden filters. Types are configured choices rather than free-text values. The run page shows the resolved sensor type beside each selected overlay and preserves the exact provider query in its frozen-query view.
+
 **Open map**, beside Search area, opens the website configured in `AutoRun:Ui:MapUrl` in an iframe dialog. The default is blank, which disables the button and shows a configuration hint. Supply an absolute HTTP(S) URL without embedded credentials. The map loads only when opened and unloads on close. Copy WKT from the map and paste it into Search area; no cross-site geometry transfer protocol is assumed. The configured website must permit iframe embedding. An **Open map in new tab** link is available when embedding is blocked. The dialog supports keyboard navigation, Escape from its own controls, and focus return to the trigger; the embedded website controls its own keyboard events.
 
 ### Workflow and routes
 
 | Method and route | Behavior |
 | --- | --- |
-| `GET /auto-runs/options` | Feature status, publication defaults, effective limits, `ui.mapUrl`, provider response limit, timeout and `to`, current `memory` measurements, and `singleInstance: true`. |
+| `GET /auto-runs/options` | Feature status, publication defaults, effective limits, `ui.mapUrl`, provider response limit, timeout, `to`, request/retry delays, retry count and sensor-type catalog, current `memory` measurements, and `singleInstance: true`. |
 | `POST /auto-runs/preview` | Accepts a preview request and returns `202 Accepted`, a run summary, and its `Location` URL. No messages are published. |
 | `GET /auto-runs` | Lists retained run summaries, newest first. |
-| `GET /auto-runs/{id}` | Returns state, counters, target quotas, frozen rules, provider queries, warnings, errors, per-run `retainedBytes`, `deletionRequested`, and current process `memory` measurements. |
+| `GET /auto-runs/{id}` | Returns state, counters, target quotas, frozen rules, provider queries, warnings, errors, structured `diagnostics`, `diagnosticsOmitted`, current `providerProgress`, per-run `retainedBytes`, `deletionRequested`, and current process `memory` measurements. |
 | `GET /auto-runs/{id}/items?from=0&size=50` | Pages through selected overlays and their assigned pipeline/rule pairs. `size` is 1–200; optional `outcome` filters by `Pending`, `InFlight`, `Confirmed`, `Failed`, or `Uncertain`. |
 | `POST /auto-runs/{id}/start` | Starts a ready, unexpired preview. Repeating start for a run that has already started returns its current state without publishing it again. |
 | `POST /auto-runs/{id}/rerun` | Prepares a new run from retained criteria with the latest publication settings. Returns `202 Accepted`, a new run summary, and its `Location` URL. No messages are published. |
@@ -85,11 +87,11 @@ Poll the summary until `state` is `Ready`, inspect the selection and warnings, t
 
 **Rerun** uses the original source, filters, target IDs, and quotas with that run's latest requested batch size and delay. It fetches current overlays and re-resolves current saved rules, producing a fresh preview with a new run ID; it does not reuse the old frozen payloads or rule snapshots. Review the new preview and explicitly click **Start**. The rerun route takes no body, returns `409` if the original run is `Preparing` or `Publishing` or another job is active, and returns `404` if the original run is no longer retained, including after a restart.
 
-Invalid requests return `400`; missing or forgotten runs return `404`; a busy worker, full retained-job budget, or invalid state transition returns `409`; preparing while disabled returns `503`. A provider failure after the preview is accepted changes the job to `Failed`, so inspect the job summary rather than relying only on the initial HTTP response.
+Invalid requests return `400`; missing or forgotten runs return `404`; a busy worker, full retained-job budget, or invalid state transition returns `409`; preparing while disabled returns `503`. Inspect the job summary after acceptance rather than relying only on the initial HTTP response. A non-retryable provider failure changes the job to `Failed`. Exhausted HTTP 429/503 retries instead stop collection and produce a partial `Ready` preview from eligible candidates already collected, with `sourceExhausted: false` and `stoppedReason: "providerUnavailable"`; an empty selection cannot start.
 
 ### Recent runs and memory cleanup
 
-Recent runs lists every retained job with its retained-data size, a **Delete** button, and a **Delete all** control above the list. `retainedBytes` counts the serialized request, frozen rules, queries, and still-retained overlay payloads charged to the payload budget. It is an estimate of retained data, not the job's full heap size; CLR objects and item metadata add overhead. Terminal jobs have already released their overlay payloads, so their remaining size is usually smaller.
+Recent runs lists every retained job with its retained-data size, a **Delete** button, and a **Delete all** control above the list. `retainedBytes` counts the serialized request, frozen rules, queries, structured diagnostics, and still-retained overlay payloads charged to the payload budget. It is an estimate of retained data, not the job's full heap size; CLR objects and item metadata add overhead. Terminal jobs have already released their overlay payloads, so their remaining size is usually smaller. Diagnostics remain with the summary until deletion or expiry and their retained byte charge is released with the run.
 
 Deletion returns `{ "deletedIds": [], "pendingIds": [], "releasedRetainedBytes": 0 }`, with HTTP `200` when all requested removals are immediate or `202` while any are pending. The released byte count covers removals completed during that request. Pending jobs expose `deletionRequested: true`; the UI polls until they disappear. Their settings, start, and rerun actions are disabled. Once removed, run and item URLs return `404`; saved rules are unaffected. Bulk deletion is safe to repeat when no jobs remain.
 
@@ -211,16 +213,19 @@ Each selected target requires `maxOverlays`; its `minOverlays` defaults to zero 
 
 Selection prioritizes overlays that help the most unmet target minimums, then fills available target maxima. Ties prefer newer photo times, then ordinal overlay ID. This is a deterministic greedy selection, not a proof that no other assignment could meet the minimums. Maxima are hard limits; minimum shortfalls are reported per target and overall, and do not prevent starting the available selection. Quotas measure selected overlays, not successful downstream processing.
 
-`counters.scanned` counts processed provider records, including invalid records and duplicates. `observedMatches` counts distinct eligible candidates found before selection; it is not the provider's total hit count. A malformed entity or missing explicit ID is reported as invalid and preparation continues. A failed provider request, malformed page, or invalid continuation fails preparation. Memory safeguards and the response-size limit instead stop collection and preserve eligible candidates already collected for a partial preview.
+`counters.scanned` counts processed provider records, including invalid records and duplicates. `observedMatches` counts distinct eligible candidates found before selection; it is not the provider's total hit count. A malformed entity, missing explicit ID, or invalid raw sensor-type result is reported as invalid and preparation continues. A non-retryable provider request failure, malformed search page, or invalid continuation fails preparation. Memory safeguards, the response-size limit, and exhausted HTTP 429/503 retries instead stop collection and preserve eligible candidates already collected for a partial preview.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `AutoRun:MaxSelectedOverlays` | 100,000 | Maximum unique selected overlays per run; configurable downward. |
 | `AutoRun:MaxScannedRecords` | 1,000,000 | Maximum processed source records per preview; configurable downward. |
 | `AutoRun:MaxCandidates` | 200,000 | Maximum eligible candidates retained for selection; configurable downward. |
-| `AutoRun:PayloadBudgetBytes` | 536,870,912 | Process-wide retained serialized request, rule, query, and overlay byte budget; configurable downward. |
+| `AutoRun:PayloadBudgetBytes` | 536,870,912 | Process-wide retained serialized request, rule, query, diagnostic, and overlay byte budget; configurable downward. |
 | `AutoRun:Provider:MaxResponseBytes` | 67,108,864 (64 MiB) | Maximum raw bytes per provider response, including responses without Content-Length; positive and at most 536,870,912 bytes. |
 | `AutoRun:Provider:TimeoutSeconds` | 30 | Deadline for each provider HTTP request, including sending the request and downloading its response body; positive. Independent of publication timeout. |
+| `AutoRun:Provider:RequestDelayMs` | 1,000 | Minimum gap from completion of one provider attempt to the next provider request; integer 0–60,000. Applies to searches, continuations, ordinary ID lookups, raw sensor-type lookups, and retries. |
+| `AutoRun:Provider:MaxRetries` | 2 | Extra attempts after HTTP 429 or 503; integer 0–5. The default allows at most three attempts per request; zero disables retries. |
+| `AutoRun:Provider:RetryDelayMs` | 2,000 | Initial retry delay; integer 1–60,000. Doubles for successive retries, capped at 60 seconds, subject to request pacing and `Retry-After` below. |
 | `AutoRun:Provider:To` | 1,000 | Value of the provider `to` query parameter on every request, including continuation pages; integer 0 through 10,000. |
 | `AutoRun:Memory:LimitBytes` | 0 | Optional additional process-memory ceiling in bytes; zero derives the ceiling from runtime measurements and the following two settings. |
 | `AutoRun:Memory:MaxUsagePercent` | 80 | Percentage of runtime-reported available memory allowed before stopping collection; integer 1–99. |
@@ -238,14 +243,15 @@ Reaching a preparation limit produces a partial preview from the eligible candid
 | `payloadBudget` | The serialized payload budget could not admit more preparation data. |
 | `memoryLimit` | The memory guard could not safely admit more work, or memory measurements were unavailable. |
 | `responseLimit` | A provider response exceeded `MaxResponseBytes`. |
+| `providerUnavailable` | HTTP 429/503 exhausted the retry budget, or the provider requested a `Retry-After` longer than the supported 60-second wait. |
 
-The UI marks a ready selection stopped by memory, payload, or response limits as **Partial selection ready**. Review its warnings and minimum shortfalls, then explicitly start the retained selection. A preview with zero selected overlays cannot start. Partial results do not establish the source's total count or guarantee the newest overlays outside the scanned subset; later query branches may never have run. An oversized response that was not parsed contributes no records, while candidates from earlier responses remain available. `sourceExhausted: true` means the adapter exhausted the supplied IDs or returned continuation chain; it is not a transactional snapshot of Elasticsearch.
+The UI marks a ready selection with incomplete search coverage as **Partial selection ready**. Review its warnings, diagnostics, and minimum shortfalls, then explicitly start the retained selection; stopping collection never publishes automatically. A preview with zero selected overlays cannot start. Partial results do not establish the source's total count or guarantee the newest overlays outside the scanned subset; later query branches may never have run. An oversized response that was not parsed contributes no records, while candidates from earlier responses remain available. `sourceExhausted: true` means the adapter exhausted the supplied IDs or returned continuation chain; it is not a transactional snapshot of Elasticsearch.
 
 The payload budget counts serialized bytes, not total heap usage: object overhead, geometry, deduplication structures, and transient provider buffers require additional memory. Its 512 MiB maximum remains separate from the configurable provider response limit and the process-memory guard. Provider responses are read into bounded buffers and parsed; batch entities are then normalized and consumed one at a time instead of retaining a second normalized list for the entire page. Raising `MaxResponseBytes` allows larger pages but can increase peak memory while buffering and parsing.
 
 The guard reads `GC.GetGCMemoryInfo().TotalAvailableMemoryBytes` when it initializes. This value reflects the runtime's effective available memory and can be lower than the container's memory limit. Its effective ceiling is the smallest of the percentage limit, available memory minus the free-byte reserve, and a positive explicit `LimitBytes`. For example, if the runtime reports 12 GiB, the default 80% ceiling is 9.6 GiB; a lower runtime report produces a lower ceiling. Kubernetes CPU and memory requests do not automatically change these application settings.
 
-Before buffering, parsing, and retaining additional data, admission checks compare estimated allocations against remaining headroom. Current usage is the larger of process working set and managed-memory usage; the managed heap is already part of process memory and is not added twice. These checks are conservative estimates, not an OOM guarantee: concurrent service work, native allocations, geometry parsing, and garbage collection can change memory between checks. Keep reserve for those operations and monitor actual deployment usage before increasing limits. Terminal jobs release overlay payload references immediately; garbage collection reclaims their memory later. Retained requests, rule snapshots, and queries remain charged until summary expiry.
+Before buffering, parsing, and retaining additional data, admission checks compare estimated allocations against remaining headroom. Current usage is the larger of process working set and managed-memory usage; the managed heap is already part of process memory and is not added twice. These checks are conservative estimates, not an OOM guarantee: concurrent service work, native allocations, geometry parsing, and garbage collection can change memory between checks. Keep reserve for those operations and monitor actual deployment usage before increasing limits. Terminal jobs release overlay payload references immediately; garbage collection reclaims their memory later. Retained requests, rule snapshots, queries, and diagnostics remain charged until deletion or summary expiry.
 
 Options and run summaries expose `memory.availableBytes`, `processBytes`, `managedBytes`, `limitBytes`, `headroomBytes`, and `isUnderPressure`. `availableBytes` is the initialization-time capacity measurement, while the usage fields are current process measurements. A negative usage value means the measurement was unavailable; the guard stops further collection. The UI displays process usage, the safeguard ceiling, remaining headroom, and partial-selection warnings.
 
@@ -284,6 +290,7 @@ The adapter uses:
 
 - `GET /ErisImages/v2.0/ErisImages/Images/TableEntities/{id}` for one overlay.
 - `POST /ErisImages/v2.0/ErisImages/Images/TableEntities` with `Content-Type: application/json-patch+json` for filtered batches, including continuation requests.
+- `GET /ErisImages/v2.0/ErisImages/Images/TableEntities/{id}?to=1000&result_type=4` to resolve the actual sensor type before retaining an eligible overlay. The `to` value uses the configured setting.
 
 Every provider request includes `to=<AutoRun:Provider:To>`, defaulting to `to=1000`. Set this integer to any value from 0 through 10,000 in configuration, or use `AutoRun__Provider__To`, then restart Rules API. Zero is sent as `to=0`; it does not omit the parameter or mean unlimited locally. The provider determines the result of that value. This page-size control is separate from the overall selected-overlay quota and the byte limit on each response.
 
@@ -291,7 +298,11 @@ Batch responses must contain `entities_list`; the optional `next_page` URL is fo
 
 For slow provider searches or large pages, set `AutoRun:Provider:TimeoutSeconds` to a larger value, such as `120`, and restart Rules API. The deadline resets for each lookup or page request and covers waiting for response headers plus downloading the body; it is not a deadline for the entire preparation. Increasing `MaxResponseBytes` does not increase this timeout. `AutoRun:PublishTimeoutSeconds` only controls RabbitMQ publication.
 
-`GET /auto-runs/options` exposes the effective `provider.to`, `provider.timeoutSeconds`, and `provider.maxResponseBytes`. Timeout errors identify an overlay lookup, initial search page, or continuation page, whether the request was waiting for headers or reading the body, and how many body bytes were read. They do not include request URLs, cursor values, or headers. A transport timeout fails preparation and is not automatically retried. Provider HTTP 408/504 responses are reported as HTTP errors; a larger client timeout cannot override a proxy or provider's own deadline. Narrowing the time range or search area can reduce search work; selected-overlay quotas do not control provider page size.
+`GET /auto-runs/options` exposes the effective `provider.to`, `provider.timeoutSeconds`, `provider.maxResponseBytes`, `provider.requestDelayMs`, `provider.maxRetries`, `provider.retryDelayMs`, and `provider.sensorTypeMappings`. Timeout errors identify an overlay lookup, sensor type lookup, initial search page, or continuation page, whether the request was waiting for headers or reading the body, and how many body bytes were read. They do not include request URLs, cursor values, or headers. A transport timeout or network failure fails preparation and is not automatically retried. Provider HTTP 408/504 responses are reported as HTTP errors; a larger client timeout cannot override a proxy or provider's own deadline. Narrowing the time range or search area can reduce search work; selected-overlay quotas do not control provider page size.
+
+Provider requests are sequential and paced with `RequestDelayMs`, separately from RabbitMQ publication's `publication.delayMs`. The first request can start immediately; subsequent attempts wait until the configured gap after the previous attempt's completion. HTTP **429 and 503 only** are retried, using the same URL, method, body, and configured headers. The default `MaxRetries: 2` and `RetryDelayMs: 2000` allow three total attempts, with retry delays of 2 seconds and 4 seconds. Each attempt gets a fresh `TimeoutSeconds` deadline after the wait. Cancellation interrupts either the request or its wait.
+
+For 429/503, a valid `Retry-After` in delta-seconds or HTTP-date form can extend the retry wait. The effective wait is the larger of the remaining request-pacing gap, exponential retry delay, and server-requested wait. Retry waits are bounded at 60 seconds. A server request to wait longer stops preparation with `providerUnavailable` instead of retrying early; an absent, invalid, or past `Retry-After` adds no wait. Other HTTP statuses, malformed JSON, and transport failures are not retried. These settings do not cause publication retries or an automatic start of a partial preview. Restart Rules API after changing them, or supply environment variables such as `AutoRun__Provider__RequestDelayMs`, `AutoRun__Provider__MaxRetries`, and `AutoRun__Provider__RetryDelayMs`.
 
 Optional `AutoRun:Provider:Headers` configures string header names and values for every provider GET, search POST, and continuation request. The default is `{}`. For example:
 
@@ -308,7 +319,7 @@ Optional `AutoRun:Provider:Headers` configures string header names and values fo
 }
 ```
 
-Supply real credentials through deployment secrets, for example the environment variable `AutoRun__Provider__Headers__Authorization`. Header names are case-insensitive; values are preserved. Malformed headers and content/transport-managed headers such as `Content-Type`, `Content-Length`, `Host`, and `Connection` fail startup validation. The adapter sets `application/json-patch+json` itself for POST bodies; do not put `Content-Type` in the configured header dictionary. Header values are redacted in the provider HTTP client's logs and are not exposed through the Auto-run API or UI. Restart Rules API after changing these settings. Continuation requests remain restricted to the configured origin, and redirects remain disabled.
+Supply real credentials through deployment secrets, for example the environment variable `AutoRun__Provider__Headers__Authorization`. Header names are case-insensitive; values are preserved. Malformed headers and content/transport-managed headers such as `Content-Type`, `Content-Length`, `Host`, and `Connection` fail startup validation. The adapter sets `application/json-patch+json` itself for POST bodies; do not put `Content-Type` in the configured header dictionary. Provider request logging uses sanitized operation context instead of raw request URLs or headers. Configured header values reflected in error bodies are redacted before those excerpts reach the Auto-run API, UI, or application logs. Restart Rules API after changing these settings. Continuation requests remain restricted to the configured origin, and redirects remain disabled.
 
 Request construction follows the supplied working logical-operator example, not the differing Swagger skeleton:
 
@@ -333,7 +344,7 @@ Different rule/sensor branches use separate AND queries, and each query's entire
 | --- | --- |
 | `Id` | `GlobalId` |
 | `SensorName` | `SENSOR` |
-| `SensorType` | `IMAGINGTECHNIQUE` |
+| `SensorType` | `sensorType.keyword` |
 | `GridType` | `gridType.keyword` |
 | `RegistrationQuality` | `hasalgorithmicregistration` |
 | `SortieId` | `SORTIE` |
@@ -363,9 +374,19 @@ Also remove or update any explicit `RequestFields:RegistrationQuality` value of 
 
 Grid-type searches use `RequestFields:GridType = "gridType.keyword"` for both saved-rule conditions and explicit API filters. Remove an old `SOLUTIONTYPE`/`solutionType` override or set `AutoRun__Provider__RequestFields__GridType=gridType.keyword`. The response mapping remains independent: `ResponseFields:GridType` still defaults to `SolutionType`. If the provider returns `properties_list.gridType` instead, set `ResponseFields:GridType` to `gridType`; `.keyword` is the query field suffix, not an assumed response property.
 
-Other request aliases remain deployment assumptions. Confirmed aliases include `SENSOR`, `geo`, `hasalgorithmicregistration`, photo-time `date`/`DATE`, and the creation-time aliases above, together with the logical grammar; not every alias in the table has been verified. Requests always use native JSON numbers and booleans, such as `1`, `20`, and `false`.
+Sensor-type searches use `RequestFields:SensorType = "sensorType.keyword"`. Remove an explicit `IMAGINGTECHNIQUE` override or set `AutoRun__Provider__RequestFields__SensorType=sensorType.keyword`. For example, the default catalog turns a VIS/PAN selection into:
 
-The response contract is separate from request aliases. Both GET and each batch entity contain `properties_list` and `geo.wkt`. These configured response mappings use the supplied example and confirmed provider property names:
+```json
+{ "match": { "sensorType.keyword": { "type": "IN", "values": ["VIS", "PAN"] } } }
+```
+
+`AutoRun:Provider:SensorTypeMappings` defines case-sensitive public sensor-type names and their provider query values. Its default identity mappings are `VIS`, `PAN`, `PAN_Sharpen_RGB`, `PAN_MSI`, `EO`, `IR`, `CIR`, `NIR`, `MWIR`, `SAR`, and `SWIR`, each mapped to the same string. Supplying the dictionary replaces the default catalog, so include every allowed type. It must contain 1–128 entries; keys and values must be nonblank, at most 128 characters, and have no surrounding whitespace. Unsupported filter types or selected-rule `match.sensorTypes` fail preview validation before provider work begins. This validation applies to AutoRun preparation, not general rule CRUD.
+
+Mappings affect outbound query values only. Preview requests, rule snapshots, and local matching keep their original public type names, and the UI displays the provider query exactly as sent. The raw overlay's actual `sensorType` is not renamed through this dictionary; configure public names to agree with those actual values. A configured subset can be supplied as `"SensorTypeMappings": { "VIS": "VIS", "PAN": "PAN" }` under `AutoRun:Provider`.
+
+Other request aliases remain deployment assumptions. Confirmed aliases include `SENSOR`, `geo`, `sensorType.keyword`, `gridType.keyword`, `hasalgorithmicregistration`, photo-time `date`/`DATE`, and the creation-time aliases above, together with the logical grammar; not every alias in the table has been verified. Requests always use native JSON numbers and booleans, such as `1`, `20`, and `false`.
+
+The response contract is separate from request aliases. The ordinary GET and each search batch entity contain `properties_list` and `geo.wkt`. The additional `result_type=4` GET has the distinct raw shape described below. These configured mappings normalize the ordinary response:
 
 | Provider response field | Normalized overlay field |
 | --- | --- |
@@ -373,7 +394,7 @@ The response contract is separate from request aliases. Both GET and each batch 
 | `properties_list.Url` | `imageUrl` |
 | `properties_list.GridPath` | `gridURI` |
 | `properties_list.Sensor` | `sensorName` |
-| `properties_list.ImagingTechnique` | `sensorType` |
+| `properties_list.ImagingTechnique` | Initial coarse `sensorType`; replaced by the raw lookup before matching/selection. |
 | `properties_list.SolutionType` | `gridType` |
 | `properties_list.Sortie` | `sortieId` |
 | `properties_list.Resolution` | `bestResolution` |
@@ -385,6 +406,12 @@ The response contract is separate from request aliases. Both GET and each batch 
 | `geo.wkt` | Polygon/MultiPolygon GeoJSON `roiFootprint` |
 
 Response aliases can be changed under `AutoRun:Provider:ResponseFields` using the option names in [ElasticProviderOptions.cs](AutoRuns/Provider/ElasticProviderOptions.cs). The GET result's mapped `GlobalId` must equal the requested ID. Response resolution must be a JSON number, and `IsRealTime`, when present, must be a JSON boolean.
+
+The search projection can collapse VIS, PAN, and other optical types into a coarse `ImagingTechnique: "EO"`. AutoRun therefore deduplicates and checks the non-type criteria first, then performs a raw `result_type=4` GET for each remaining candidate before evaluating sensor-type conditions, pipeline validation, quota assignment, or direct selection. This also applies to Overlay IDs, where the ordinary overlay GET is followed by the raw lookup. A query branch or selected rule is never used to infer the actual type.
+
+The raw response must be a JSON object with a nonempty root `id` equal to the requested overlay ID and a nonempty string `sensorType`, for example `{ "id": "overlay-001", "sensorType": "PAN" }`. Other raw fields are ignored. Only the normalized payload's `sensorType` and the in-memory matching input's `SensorType` are overwritten; image URLs, dimensions, geometry, grid data, and other normalized fields stay from the ordinary response. A missing overlay, mismatched ID, malformed raw JSON, or absent/invalid type is counted as an invalid record and cannot consume quotas. HTTP failures follow the retry/failure policy above. No UnifiedGateway behavior or message contract changes are required for this resolution step.
+
+This adds one GET for each distinct candidate that passes non-type checks, including direct submissions without a sensor-type filter. Those lookups share the provider pacing, timeout, and retry policy. Search pages and their candidates are processed sequentially; `RequestDelayMs: 1000` therefore adds roughly one second of pacing per lookup, before network latency, plus page requests and any retries. Preparation can take much longer than a page-only search even when the final selection quota is small. Narrow the source criteria and size the provider's capacity before reducing pacing or increasing scan limits.
 
 Every normalized overlay requires a nonempty `gridType`, including direct Filters and Overlay IDs submissions. Saved sensor conditions can restrict grid types, local matching verifies those restrictions, and FindAir includes grid type in its downstream payload. Changing the outbound query alias does not remove this input requirement. A provider response missing its configured grid-type property is counted as invalid.
 
@@ -457,16 +484,24 @@ Deployment sequence:
 
 1. For runs with selected rules, deploy the gateway version supporting historical envelopes to **every consumer** of the input queue and enable `HistoricalInput__Enabled=true` before publication. Filters and Overlay IDs without rules use ordinary input and do not require this flag or historical-envelope support.
 2. Deploy one Rules API instance with `AutoRun:Enabled=false`, configure its provider and exact gateway destination, and verify the enabled pipeline IDs and contracts agree with the gateway.
-3. Verify the real provider contract in the deployment: field casing, numeric resolution bounds, both boolean values, date ranges/timezone, Polygon and MultiPolygon intersections, required response mappings, and at least two pages followed by termination. Check returned values, not only HTTP success.
+3. Verify the real provider contract in the deployment: field casing, numeric resolution bounds, both boolean values, date ranges/timezone, Polygon and MultiPolygon intersections, required response mappings, and at least two pages followed by termination. Confirm `sensorType.keyword` filtering and the additional `result_type=4` GET's root `id`/`sensorType`, including a VIS/PAN result whose ordinary projection says EO. Check that these raw lookups preserve the search continuation and measure their latency/load. Exercise 429/503 with the deployment's actual `Retry-After` behavior and verify a partial preview after exhausted retries. Check returned values, not only HTTP success.
 4. Enable `AutoRun__Enabled=true`, prepare a small preview, inspect its assigned targets and warnings, then start it. Verify broker confirmations and correlated gateway dispatch before increasing quotas or batch size.
 
 The implementation has local automated coverage; **the real Elastic Provider, RabbitMQ deployment topology, and end-to-end dispatch have not been validated against a live deployment**. A ready preview validates available overlay data and, for selected-rule runs, their pipeline contracts, but does not establish broker connectivity. Scaling this version to multiple Rules API replicas is unsupported.
 
 ### Auto-run observability
 
-Preparation and publication emit `auto_run.prepare` and `auto_run.publish` spans with `auto_run.id`, plus correlated logs for state, selected counts, and confirmed/failed/uncertain publications. The Rules API meter exposes `auto_run.selected.overlays` and `auto_run.publications`; the latter has a bounded `outcome` dimension. IDs remain in spans/logs and are not metric labels.
+Preparation and publication emit `auto_run.prepare` and `auto_run.publish` spans with `auto_run.id`. Information logs report admission, preparation/page progress, readiness, publication, settings changes, cancellation, final counts, and data release. Detailed per-overlay normalization/matching activity is available at Debug; rejected or uncertain publication and provider failures retain warning/error context. Correlate using the run and trace IDs. The Rules API meter exposes `auto_run.selected.overlays` and `auto_run.publications`; the latter has a bounded `outcome` dimension. IDs remain in spans/logs and are not metric labels.
 
-The summary exposes current counts, per-target shortfalls, `confirmedPerSecond`, current memory measurements, `sourceExhausted`, `stoppedReason`, and bounded warning/error samples. Preparation logs identify collection limits and how many candidates were retained. Gateway telemetry identifies historical envelopes through `auto_run.run_id` and `unified_gateway.input_kind`. Direct input follows ordinary gateway telemetry, with the run ID retained in the message correlation ID. Use gateway events to distinguish confirmed enqueueing from later dispatch or downstream failures.
+Provider telemetry adds `auto_run.provider.requests`, `auto_run.provider.retries`, and `auto_run.provider.request.duration` in milliseconds. Each completed attempt records operation, HTTP method/status, and outcome; retry counts reflect actual extra attempts. Raw sensor-type lookup completion logs use Debug to keep per-candidate traffic out of normal Information logs.
+
+The summary retains `warnings` and `errors` for existing clients and adds `diagnostics`, `diagnosticsOmitted`, and nullable `providerProgress`. A diagnostic carries a timestamp, severity, stable code, stage, readable message, trace ID, and available query/page/overlay/pipeline/rule context. Provider failures also carry an `upstream` object with operation, HTTP method/status, attempt count, elapsed time, content type, response bytes read, and a sanitized response-body excerpt with truncation/unavailability flags. The UI displays JSON or plain-text excerpts as escaped text under expandable details. Synchronous AutoRun errors retain `error` and add code/trace context when available; validation fields remain visible.
+
+Error-body capture reads at most **8 KiB**, or the lower configured `MaxResponseBytes`; it never reads an unbounded error response. Stored text is also bounded after redaction. A failed/timed-out body read preserves the HTTP status and marks unavailable or partial content. Credentials, secret-bearing fields, request URLs, and continuation cursors are redacted rather than exposed as troubleshooting context. Diagnostics retain at most **50 entries and 64 KiB of serialized UTF-8 per run**, with at most 12 KiB per entry. Messages are capped at 1,000 characters; oversized excerpts may be omitted, important provider/final failures can displace older record warnings, and `diagnosticsOmitted` counts dropped entries. Global retained-data and memory limits can further reduce these samples. Diagnostic bytes are included in the run's `retainedBytes` and the shared payload budget, stay through terminal summary retention, and are released on deletion or expiry.
+
+During preparation, `providerProgress` describes the latest operation, not an event history. Its phase is `requesting`, `requestDelay`, or `retryWait`, with attempt/max-attempt counts, the last HTTP status when present, and `nextAttemptAt` for a scheduled wait. Query/page indices are one-based when applicable. The UI polls this state to explain waiting and retry countdowns while keeping collected counts visible. A failed provider page does not look like a successful empty search.
+
+The summary also exposes current counts, per-target shortfalls, `confirmedPerSecond`, current memory measurements, `sourceExhausted`, and `stoppedReason`. Gateway telemetry identifies historical envelopes through `auto_run.run_id` and `unified_gateway.input_kind`. Direct input follows ordinary gateway telemetry, with the run ID retained in the message correlation ID. Use gateway events to distinguish confirmed enqueueing from later dispatch or downstream failures; AutoRun's provider changes do not alter gateway behavior.
 
 ## Rule Schema
 
