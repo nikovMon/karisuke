@@ -1,5 +1,7 @@
 using System.Text.Json;
+using ImagingPipeline.PipelineContracts;
 using ImagingPipeline.RabbitMqClient;
+using ImagingPipeline.RuleEngine.Input;
 using ImagingPipeline.Rules.Api.AutoRuns;
 using ImagingPipeline.Rules.Api.Tests.Fakes;
 using Microsoft.Extensions.Logging;
@@ -21,7 +23,14 @@ public sealed class AutoRunPublisherTests
         var transport = new Transport();
         var destination = Destination();
         var publisher = new AutoRunPublisher(transport, Options.Create(new AutoRunOptions { Destination = destination }), NullLogger<AutoRunPublisher>.Instance);
-        var payload = """{ "id": "overlay-1", "photoTime": "2000-01-01T00:00:00Z", "gridType": "grid", "extra": [1,2] }"""u8.ToArray();
+        var payload = """
+            { "id": "overlay-1", "photoTime": "2026-10-27T08:00:00Z",
+              "sensorName": "ar", "sensorType": "VIS", "registrationQuality": "Accurate",
+              "gridType": "Telemetry", "gridURI": "https://images.example/image.grid",
+              "imageUrl": "https://images.example/image.tif", "bestResolution": 1.5,
+              "width": 8836, "height": 3608, "extra": [1,2],
+              "roiFootprint": { "type": "Polygon", "coordinates": [[[34,31],[35,31],[35,32],[34,32],[34,31]]] } }
+            """u8.ToArray();
 
         var first = await publisher.PublishAsync("run-1", payload, CancellationToken.None);
         await publisher.PublishAsync("run-1", payload, CancellationToken.None);
@@ -40,6 +49,14 @@ public sealed class AutoRunPublisherTests
             Assert.False(document.RootElement.TryGetProperty("targets", out _));
             Assert.False(document.RootElement.TryGetProperty("overlay", out _));
             Assert.False(document.RootElement.TryGetProperty("runId", out _));
+            // Verify the actual published bytes against the same parser and projection
+            // used by Unified Gateway, including FindAir's stricter image metadata.
+            var input = GatewayInputMessageParser.Parse(message.Body);
+            Assert.Equal("VIS", input.SensorType);
+            Assert.Equal(8836, input.ImageWidth);
+            Assert.Equal(3608, input.ImageHeight);
+            var context = OverlayDispatchContextFactory.Create("dispatch-1", "rule-1", document.RootElement);
+            Assert.Empty(new FindAirPipelineContract().ValidateContext(context));
         });
         Assert.Equal("run-1", transport.Messages[0].CorrelationId);
         Assert.Equal(transport.Messages[0].MessageId, transport.Messages[1].MessageId);

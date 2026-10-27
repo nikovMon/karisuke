@@ -44,7 +44,7 @@ public sealed class AutoRunProviderTests
     }
 
     [Fact]
-    public void Rule_queries_keep_sensor_conditions_together_and_leave_relative_photo_age_to_matcher()
+    public void Rule_queries_keep_sensor_conditions_together_and_include_photo_age_in_each_branch()
     {
         var rule = new PipelineRuleDocument
         {
@@ -72,7 +72,10 @@ public sealed class AutoRunProviderTests
         Assert.All([first, second], clauses => Assert.Equal("SAR", Find(clauses, "match", "sensorType.keyword")[0].GetString()));
         Assert.All(queries, query =>
         {
-            Assert.DoesNotContain("\"date\"", query.GetProperty("filter").GetRawText(), StringComparison.Ordinal);
+            var photoRange = Assert.Single(Find(Clauses(query), "range", "date").EnumerateArray());
+            Assert.Equal(Find(first, "range", "date")[0].GetProperty("gte").GetString(),
+                photoRange.GetProperty("gte").GetString());
+            Assert.False(photoRange.TryGetProperty("lte", out _));
             Assert.DoesNotContain("strip", query.GetRawText(), StringComparison.Ordinal);
             Assert.DoesNotContain("\"OR\"", query.GetRawText(), StringComparison.Ordinal);
             Assert.DoesNotContain("SOLUTIONTYPE", query.GetRawText(), StringComparison.OrdinalIgnoreCase);

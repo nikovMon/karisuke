@@ -247,8 +247,9 @@ public sealed class AutoRunApiTests
     public async Task AgeOnlyRulesRetainTheirLimitDuringSelection(
         AutoRunSourceMode mode, int photoAgeDays, int expectedSelected)
     {
-        using var fixture = new Fixture();
-        fixture.Provider.PhotoTime = DateTimeOffset.UtcNow.AddDays(-photoAgeDays).ToString("O");
+        var clock = new MutableTimeProvider(DateTimeOffset.Parse("2026-10-27T10:00:00Z"));
+        using var fixture = new Fixture(time: clock);
+        fixture.Provider.PhotoTime = clock.GetUtcNow().AddDays(-photoAgeDays).ToString("O");
         var rule = Rule("One-day limit", "tenant");
         rule.IsActive = true;
         rule.Match = new() { MaxPhotoAgeDays = 1 };
@@ -268,6 +269,25 @@ public sealed class AutoRunApiTests
         Assert.Equal(expectedSelected, target.Selected);
         Assert.Equal(1 - expectedSelected, target.Shortfall);
         Assert.Contains(ready.Warnings, warning => warning.Contains("photo-age", StringComparison.Ordinal));
+        var searches = fixture.Provider.Calls.Where(call => call.Method == HttpMethod.Post).ToArray();
+        if (mode == AutoRunSourceMode.Rules)
+        {
+            var frozenQuery = Assert.Single(ready.Queries);
+            Assert.Equal(2, searches.Length);
+            Assert.All(searches, call => Assert.Equal(frozenQuery.GetRawText(), call.Body));
+            Assert.False(searches[0].Uri.Query.Contains("searchAfter", StringComparison.Ordinal));
+            Assert.Contains("searchAfter=next", searches[1].Uri.Query);
+            var dateRange = Assert.Single(frozenQuery.GetProperty("filter").GetProperty("logical_operators")
+                .GetProperty("AND").EnumerateArray()).GetProperty("range").GetProperty("date");
+            Assert.Equal("IN", dateRange.GetProperty("type").GetString());
+            Assert.Equal("2026-10-26T10:00:00.000Z", dateRange.GetProperty("values")[0].GetProperty("gte").GetString());
+        }
+        else
+        {
+            Assert.Empty(ready.Queries);
+            Assert.Empty(searches);
+            Assert.All(fixture.Provider.Calls, call => Assert.Equal(HttpMethod.Get, call.Method));
+        }
         using var started = await fixture.Client.PostAsync($"/auto-runs/{ready.Id}/start", null);
         if (expectedSelected == 0)
         {
@@ -285,9 +305,14 @@ public sealed class AutoRunApiTests
     [Fact]
     public async Task OverlappingRulesApplyTheirOwnAgeLimitsAndNoLimitRemainsUnrestricted()
     {
-        using var fixture = new Fixture();
-        fixture.Provider.PhotoTime = DateTimeOffset.UtcNow.AddDays(-3).ToString("O");
-        foreach (var (id, age) in new (string, int?)[] { ("one-day", 1), ("seven-days", 7), ("no-limit", null) })
+        var referenceTime = DateTimeOffset.Parse("2026-10-27T10:00:00Z");
+        var clock = new MutableTimeProvider(referenceTime);
+        using var fixture = new Fixture(time: clock,
+            configurationOverrides: new Dictionary<string, string?> { ["AutoRun:Provider:RequestFields:PhotoTime"] = "DATE" });
+        fixture.Provider.PhotoTime = referenceTime.AddDays(-3).ToString("O");
+        // Time advances while paging; all branches must keep their original cutoff and body.
+        fixture.Provider.BeforeResponse = _ => { clock.Advance(TimeSpan.FromMinutes(1)); return Task.CompletedTask; };
+        foreach (var (id, age) in new (string, int?)[] { ("one-day", 1), ("seven-days", 7), ("same-seven-days", 7), ("no-limit", null) })
         {
             var rule = Rule(id, "tenant");
             rule.IsActive = true;
@@ -298,7 +323,7 @@ public sealed class AutoRunApiTests
         var request = Request() with
         {
             Source = new() { Mode = AutoRunSourceMode.Rules },
-            Targets = new[] { "one-day", "seven-days", "no-limit" }
+            Targets = new[] { "one-day", "seven-days", "same-seven-days", "no-limit" }
                 .Select(id => new AutoRunTarget { PipelineId = "FindAir", RuleId = id, MinOverlays = 1, MaxOverlays = 1 }).ToList()
         };
 
@@ -309,11 +334,27 @@ public sealed class AutoRunApiTests
         Assert.Equal(1, ready.Counters.Selected);
         Assert.Equal(0, ready.Targets.Single(target => target.RuleId == "one-day").Selected);
         Assert.Equal(1, ready.Targets.Single(target => target.RuleId == "seven-days").Selected);
+        Assert.Equal(1, ready.Targets.Single(target => target.RuleId == "same-seven-days").Selected);
         Assert.Equal(1, ready.Targets.Single(target => target.RuleId == "no-limit").Selected);
         Assert.Equal(7, ready.Targets.Single(target => target.RuleId == "seven-days").Rule.Match!.MaxPhotoAgeDays);
+        Assert.Equal(3, ready.Queries.Count); // Different ages stay separate; equal age branches deduplicate.
+        var searches = fixture.Provider.Calls.Where(call => call.Method == HttpMethod.Post).ToArray();
+        Assert.Equal(6, searches.Length);
+        for (var i = 0; i < ready.Queries.Count; i++)
+        {
+            Assert.Equal(ready.Queries[i].GetRawText(), searches[i * 2].Body);
+            Assert.Equal(searches[i * 2].Body, searches[i * 2 + 1].Body);
+            Assert.DoesNotContain("searchAfter", searches[i * 2].Uri.Query, StringComparison.Ordinal);
+            Assert.Contains("searchAfter=next", searches[i * 2 + 1].Uri.Query);
+        }
+        var cutoffs = ready.Queries.Take(2).Select(query => Assert.Single(query.GetProperty("filter")
+                .GetProperty("logical_operators").GetProperty("AND").EnumerateArray())
+            .GetProperty("range").GetProperty("DATE").GetProperty("values")[0].GetProperty("gte").GetString()).ToArray();
+        Assert.Equal(new[] { "2026-10-26T10:00:00.000Z", "2026-10-20T10:00:00.000Z" }, cutoffs);
+        Assert.Empty(ready.Queries[2].GetProperty("filter").GetProperty("logical_operators").GetProperty("AND").EnumerateArray());
         using var itemsResponse = await fixture.Client.GetAsync($"/auto-runs/{ready.Id}/items");
         var item = Assert.Single((await Read<AutoRunItemsPage>(itemsResponse)).Items);
-        Assert.Equal(new[] { "no-limit", "seven-days" }, item.Targets.Select(target => target.RuleId).Order());
+        Assert.Equal(new[] { "no-limit", "same-seven-days", "seven-days" }, item.Targets.Select(target => target.RuleId).Order());
 
         using var started = await fixture.Client.PostAsync($"/auto-runs/{ready.Id}/start", null);
         await AssertStatus(started, HttpStatusCode.OK);
@@ -1043,7 +1084,7 @@ public sealed class AutoRunApiTests
         public HttpClient Client { get; }
 
         public Fixture(bool enabled = true, IReadOnlyDictionary<string, string>? providerHeaders = null, int maxSelectedOverlays = 100000,
-            IReadOnlyDictionary<string, string?>? configurationOverrides = null)
+            IReadOnlyDictionary<string, string?>? configurationOverrides = null, TimeProvider? time = null)
         {
             _baseFactory = new(Store);
             _app = _baseFactory.WithWebHostBuilder(builder =>
@@ -1072,6 +1113,11 @@ public sealed class AutoRunApiTests
                 builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(configuration));
                 builder.ConfigureServices(services =>
                 {
+                    if (time is not null)
+                    {
+                        services.RemoveAll<TimeProvider>();
+                        services.AddSingleton(time);
+                    }
                     services.AddHttpClient<IElasticOverlayProvider, ElasticOverlayProvider>()
                         .ConfigurePrimaryHttpMessageHandler(() => Provider);
                     services.RemoveAll<IRabbitMqDestinationPublisher>();
@@ -1087,6 +1133,13 @@ public sealed class AutoRunApiTests
             _app.Dispose();
             _baseFactory.Dispose();
         }
+    }
+
+    private sealed class MutableTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        private long _utcTicks = now.UtcTicks;
+        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref _utcTicks), TimeSpan.Zero);
+        public void Advance(TimeSpan duration) => Interlocked.Add(ref _utcTicks, duration.Ticks);
     }
 
     private sealed record ProviderCall(HttpMethod Method, Uri Uri, string? Body, IReadOnlyDictionary<string, string[]> Headers);

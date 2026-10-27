@@ -13,7 +13,8 @@ namespace ImagingPipeline.Rules.Api.AutoRuns.Provider;
 /// Uses only the verified AND grammar. Separate sensor branches keep each sensor's qualities
 /// and grid types together; callers union pages locally instead of guessing provider OR syntax.
 /// </summary>
-public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> configured, IAutoRunMemoryGuard? memory = null)
+public sealed class ProviderQueryBuilder(
+    IOptions<ElasticProviderOptions> configured, IAutoRunMemoryGuard? memory = null, TimeProvider? timeProvider = null)
 {
     private readonly ElasticProviderOptions _options = configured.Value;
     private readonly IReadOnlyDictionary<string, string> _sensorTypeMappings =
@@ -39,9 +40,12 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
             AddQuery(FilterClauses(source.Filters));
         else if (source.Mode == AutoRunSourceMode.Rules)
         {
+            // Capture once: every branch and continuation page belongs to the same frozen search.
+            var referenceTime = (timeProvider ?? TimeProvider.System).GetUtcNow().ToUniversalTime();
             foreach (var rule in rules)
             {
-                var common = FilterClauses(source.Filters);
+                if (!TryRuleFilters(source.Filters, rule, referenceTime, out var filters)) continue;
+                var common = FilterClauses(filters);
                 var match = rule.Match;
                 if (match?.Resolution is { } resolution)
                     AddRange(common, _options.RequestFields.Resolution, resolution.Min, resolution.Max);
@@ -51,8 +55,8 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
                     common.Add(Clause("match", _options.RequestFields.SensorType, TranslateSensorTypes(types)));
                 if (match?.ModeSar is { Count: > 0 } modes && !string.IsNullOrWhiteSpace(_options.RequestFields.ModeSar))
                     common.Add(Clause("match", _options.RequestFields.ModeSar, modes.ToArray()));
-                // Relative photo age is checked by the local matcher at evaluation time;
-                // the gateway checks it again against its current rules when dispatching.
+                // Photo age narrows this rule's query above and is still rechecked locally
+                // and by the gateway, since an overlay can age out after preparation starts.
                 if (match?.Sensors is { Count: > 0 } sensors)
                 {
                     foreach (var sensor in sensors)
@@ -114,6 +118,34 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
 
     private string[] TranslateSensorTypes(IEnumerable<string> types) =>
         types.Select(type => _sensorTypeMappings[type]).Distinct(StringComparer.Ordinal).ToArray();
+
+    private static bool TryRuleFilters(AutoRunFilters? supplied, PipelineRuleDocument rule,
+        DateTimeOffset referenceTime, out AutoRunFilters? filters)
+    {
+        filters = supplied;
+        if (rule.Match?.MaxPhotoAgeDays is not { } days) return true;
+        if (days <= 0 || days > TimeSpan.MaxValue.TotalDays)
+            throw new ArgumentException($"Rule '{rule.Id}' maxPhotoAgeDays must be positive and within the supported time span.");
+
+        // A valid, very large age can precede the representable calendar. Every valid photo
+        // timestamp then satisfies the age constraint, so use the earliest representable date.
+        var from = days > (referenceTime - DateTimeOffset.MinValue).TotalDays
+            ? DateTimeOffset.MinValue : referenceTime.AddDays(-days);
+        if (ProviderDates.TryExplicitOffset(supplied?.PhotoTime?.From, out var suppliedFrom) && suppliedFrom > from)
+            from = suppliedFrom;
+        if (ProviderDates.TryExplicitOffset(supplied?.PhotoTime?.To, out var to) && from > to)
+            return false; // This rule and the explicit photo-time window cannot both match.
+
+        filters = (supplied ?? new AutoRunFilters()) with
+        {
+            PhotoTime = new AutoRunTimeRange
+            {
+                From = from.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+                To = supplied?.PhotoTime?.To
+            }
+        };
+        return true;
+    }
 
     public static IEnumerable<string> Validate(AutoRunFilters filters)
     {
