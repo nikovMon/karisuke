@@ -57,8 +57,7 @@ public sealed class AutoRunService(
         var rulesBytes = requestBytes.LongLength +
             targets.Sum(t => (long)JsonSerializer.SerializeToUtf8Bytes(t.Rule, AutoRunJson.Options).Length);
         var job = new Job(frozen, targets, time.GetUtcNow(), Maximum(frozen));
-        if (job.IsDirect)
-            AddWarning(job, "These overlays will be submitted as ordinary gateway input. Current active gateway rules, including photo-age limits, apply; pipeline assignments and downstream processing are not predicted by this preview.");
+        AddWarning(job, "These overlays will be submitted as ordinary gateway input. The gateway evaluates all current active rules, including each rule's photo-age limit. Preview rule assignments and quotas describe selection only; they do not restrict downstream routing or guarantee processing.");
         lock (_gate)
         {
             EnsureAvailable();
@@ -619,8 +618,7 @@ public sealed class AutoRunService(
                 timeout.CancelAfter(TimeSpan.FromSeconds(_options.PublishTimeoutSeconds));
                 try
                 {
-                    result = await publisher.PublishAsync(job.Id, item.Payload!,
-                        item.Assignments.Select(i => job.Targets[i]).ToArray(), timeout.Token);
+                    result = await publisher.PublishAsync(job.Id, item.Payload!, timeout.Token);
                     if (result.Outcome is not (AutoRunItemOutcome.Confirmed or AutoRunItemOutcome.Failed or AutoRunItemOutcome.Uncertain))
                         result = new(AutoRunItemOutcome.Uncertain, "Publisher returned no definitive outcome.");
                 }

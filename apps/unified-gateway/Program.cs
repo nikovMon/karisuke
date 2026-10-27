@@ -48,9 +48,6 @@ public sealed partial class Program
         builder.Services.AddRabbitMqConsumer(builder.Configuration);
         builder.Services.AddSingleton(TimeProvider.System);
         builder.Services.AddSingleton<RuleMatcher>();
-        builder.Services.AddOptions<HistoricalInputOptions>()
-            .Bind(builder.Configuration.GetSection(HistoricalInputOptions.SectionName));
-        builder.Services.AddSingleton<HistoricalSourceMessageHandler>();
         builder.Services.AddSingleton<IRabbitMqMessageHandler, SourceMessageHandler>();
         builder.Services.AddHostedService<RabbitMqConsumerService>();
 

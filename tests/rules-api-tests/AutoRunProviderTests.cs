@@ -44,7 +44,7 @@ public sealed class AutoRunProviderTests
     }
 
     [Fact]
-    public void Rule_queries_keep_sensor_conditions_together_and_do_not_apply_photo_age()
+    public void Rule_queries_keep_sensor_conditions_together_and_leave_relative_photo_age_to_matcher()
     {
         var rule = new PipelineRuleDocument
         {

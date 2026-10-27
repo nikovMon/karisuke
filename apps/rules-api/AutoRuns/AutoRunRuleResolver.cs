@@ -2,7 +2,7 @@ using System.Text.Json;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.PipelineCatalog;
 using ImagingPipeline.PipelineContracts;
-using ImagingPipeline.RuleEngine.Historical;
+using ImagingPipeline.RuleEngine.Loading;
 using ImagingPipeline.RuleEngine.Rules;
 using ImagingPipeline.Rules.Api.Services;
 
@@ -38,7 +38,14 @@ public sealed class AutoRunRuleResolver(
             var contract = contracts.GetRequired(pipeline.ContractId);
             try
             {
-                var matchRule = HistoricalRuleSnapshot.Build(rule, contract);
+                if (rule.Match?.MaxPhotoAgeDays is { } days && days > TimeSpan.MaxValue.TotalDays)
+                    throw new ArgumentException("maxPhotoAgeDays exceeds the supported time span.");
+                // Freeze the selection rule without altering its conditions. Gateway dispatch
+                // independently evaluates its current active rules when it receives the overlay.
+                var snapshot = RuleSnapshotBuilder.Build(new RuleLoadResult([rule], []), contract);
+                if (snapshot.Rules.Count != 1 || snapshot.Rejections.Count != 0)
+                    throw new ArgumentException(string.Join("; ", snapshot.Rejections.Select(rejection => rejection.Reason)));
+                var matchRule = snapshot.Rules[0];
                 result.Add(new(target, rule, matchRule, contract));
             }
             catch (ArgumentException ex)

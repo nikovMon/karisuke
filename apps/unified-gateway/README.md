@@ -48,67 +48,11 @@ The source consumer uses the application's `RabbitMq` section. Output transports
 
 ## Input validation and filtering
 
-An update is considered only when `x-updated-fields` contains `gridType`. Common validation checks JSON structure, image identity, photo time, sensor name, registration quality, resolution, grid type and geometry needed for rule matching.
+An update is considered only when `x-updated-fields` contains `gridType`. Common validation checks JSON structure, image identity, photo time, sensor name, registration quality, resolution, grid type and geometry needed for rule matching. Every accepted overlay uses the currently loaded active rules. Each rule applies its own `maxPhotoAgeDays` when configured; rules without it impose no age limit.
 
 FindAir validates image URL, dimensions, sensor type, grid URI and optional area metadata when preparing its payload. DeepWisdom validates relationship fields only for runs using `runEveryOtherImage`. Missing or malformed fields belonging to one contract do not prevent another matched contract from dispatching. Failures remain associated with their pipeline; the source can still be dead-lettered after valid siblings are sent.
 
 Debug event `6022` explains filtered work using `unified_gateway.filter.reason`: `grid_type_not_updated`, `no_enabled_pipelines`, `no_matching_rules`, or `duplicate_run`. The log includes the source message ID and pipeline/rule scopes when available. To see these logs, set `Logging__LogLevel__ImagingPipeline.UnifiedGateway.Source.SourceMessageHandler=Debug`.
-
-## Historical auto-run input
-
-The Rules API can publish a versioned historical envelope to the existing gateway input queue. This path is disabled by default. Deploy the gateway with `HistoricalInput__Enabled=true` **before enabling auto-run publication in the Rules API**. Every consumer of that queue must support the historical contract; an older gateway may acknowledge the envelope through its live update filter without processing it. The producer must use the same queue and declaration arguments, including its configured dead-letter settings.
-
-```json
-{
-  "kind": "historical-auto-run",
-  "version": 1,
-  "runId": "auto-run-unique-id",
-  "overlay": {
-    "id": "overlay-id",
-    "sensorName": "camera",
-    "sensorType": "EO",
-    "registrationQuality": "Accurate",
-    "bestResolution": 0.7,
-    "photoTime": "2020-01-02T10:00:00Z",
-    "imageUrl": "https://images.example/overlay-id",
-    "width": 100,
-    "height": 100,
-    "gridType": "grid",
-    "gridURI": "https://images.example/overlay-id/grid",
-    "roiFootprint": {
-      "type": "Polygon",
-      "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
-    }
-  },
-  "targets": [
-    {
-      "pipelineId": "FindAir",
-      "rule": {
-        "_id": "saved-rule-id",
-        "schemaVersion": 2,
-        "ruleName": "Historical example",
-        "isActive": false,
-        "match": { "maxPhotoAgeDays": 1 },
-        "runParams": [
-          {
-            "tenantId": "example",
-            "algorithmNames": ["FindAir"],
-            "tilingConfigs": [
-              { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 0, "tileOverlapHeight": 0 }
-            ]
-          }
-        ]
-      }
-    }
-  ]
-}
-```
-
-The envelope carries the exact saved rule snapshots frozen by preview. Historical messages require no `x-updated-fields` header. Each target must identify an enabled pipeline in the gateway catalog and a valid saved rule ID. Matching uses only the supplied snapshots; live rule refreshes and other matching pipelines cannot add work. Inactive saved rules are accepted. The original rule is validated before removing only `maxPhotoAgeDays`; sensor, quality, grid, resolution, location and `modeSAR` conditions still apply. Geometry clipping and pipeline-specific input requirements are the same as live dispatch.
-
-All targets, matches and pipeline payloads are validated before any target is delivered. Missing fields, unsupported versions or kinds, duplicate JSON keys, duplicate pipeline/rule targets, disabled pipelines, nonmatching targets and invalid contract fields dead-letter the envelope. They never fall back to live matching. Top-level `kind` is reserved as the envelope discriminator.
-
-Historical dispatch IDs include `runId` plus the existing image/pipeline/rule/canonical-parameters identity. Retrying the same envelope preserves IDs; deliberately creating a new run produces new IDs. A retryable downstream failure retries the entire envelope, including siblings that already succeeded. Downstream receivers still need deduplication. Rules API run completion means publication to the gateway input queue was confirmed; it does not mean downstream processing finished. Gateway traces and logs include `auto_run.run_id` and `unified_gateway.input_kind` for correlation.
 
 ## Delivery and retry
 

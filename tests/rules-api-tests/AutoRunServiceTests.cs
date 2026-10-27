@@ -6,7 +6,8 @@ using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.PipelineContracts;
-using ImagingPipeline.RuleEngine.Historical;
+using ImagingPipeline.RuleEngine.Loading;
+using ImagingPipeline.RuleEngine.Rules;
 using ImagingPipeline.RuleEngine.Input;
 using ImagingPipeline.Rules.Api.AutoRuns;
 using ImagingPipeline.Rules.Api.AutoRuns.Provider;
@@ -78,7 +79,7 @@ public sealed class AutoRunServiceTests
 
         Assert.Equal(1, complete.Counters.Confirmed);
         Assert.All(complete.Targets, target => Assert.Equal(1, target.Confirmed));
-        Assert.Equal(2, Assert.Single(fixture.Publisher.Calls).Targets.Count);
+        Assert.Equal("only", Assert.Single(fixture.Publisher.Calls).OverlayId);
     }
 
     [Fact]
@@ -101,8 +102,10 @@ public sealed class AutoRunServiceTests
         using var payload = JsonDocument.Parse(call.Payload);
         Assert.Equal("frozen", payload.RootElement.GetProperty("id").GetString());
         Assert.Equal("https://example.invalid/image", payload.RootElement.GetProperty("imageUrl").GetString());
-        Assert.Equal("original-tenant", Assert.Single(call.Targets).Rule.RunParams![0].GetProperty("tenantId").GetString());
-        Assert.True(call.Targets[0].Rule.IsActive);
+        var frozenTarget = Assert.Single(fixture.Service.Get(ready.Id).Targets);
+        Assert.Equal("original-tenant", frozenTarget.Rule.RunParams![0].GetProperty("tenantId").GetString());
+        Assert.True(frozenTarget.Rule.IsActive);
+        Assert.False(payload.RootElement.TryGetProperty("targets", out _));
         Assert.Equal(1, fixture.Resolver.Calls);
         Assert.Equal(["frozen"], fixture.Provider.GetCalls);
     }
@@ -129,8 +132,8 @@ public sealed class AutoRunServiceTests
         Assert.Equal(1, ready.Counters.ObservedMatches);
         Assert.Equal(1, ready.Counters.Selected);
         Assert.Empty(Assert.Single(fixture.Service.Items(ready.Id, 0, 10, null).Items).Targets);
-        Assert.Contains(ready.Warnings, warning => warning.Contains("Current active gateway rules", StringComparison.Ordinal)
-            && warning.Contains("photo-age", StringComparison.Ordinal) && warning.Contains("not predicted", StringComparison.Ordinal));
+        Assert.Contains(ready.Warnings, warning => warning.Contains("current active rules", StringComparison.Ordinal)
+            && warning.Contains("photo-age", StringComparison.Ordinal) && warning.Contains("selection only", StringComparison.Ordinal));
 
         // Mutating the provider's original buffer cannot alter the frozen preview.
         Array.Fill(overlay.Payload, (byte)'x');
@@ -141,7 +144,7 @@ public sealed class AutoRunServiceTests
         Assert.Equal(1, complete.Counters.Confirmed);
         var publication = Assert.Single(fixture.Publisher.Calls);
         Assert.Equal(frozenPayload, publication.Payload);
-        Assert.Empty(publication.Targets);
+        Assert.Equal(ready.Id, publication.RunId);
         Assert.Equal(["old"], fixture.Provider.GetCalls);
     }
 
@@ -267,7 +270,7 @@ public sealed class AutoRunServiceTests
         fixture.Service.Start(ready.Id);
         var completed = await fixture.WaitAsync(ready.Id, AutoRunState.Completed);
         Assert.Equal(ready.Counters.Selected, completed.Counters.Confirmed);
-        Assert.All(fixture.Publisher.Calls, publication => Assert.Empty(publication.Targets));
+        Assert.All(fixture.Publisher.Calls, publication => Assert.Equal(ready.Id, publication.RunId));
     }
 
     [Theory]
@@ -341,7 +344,8 @@ public sealed class AutoRunServiceTests
         Assert.NotEqual(calls[0].RunId, calls[1].RunId);
         using var payload = JsonDocument.Parse(calls[1].Payload);
         Assert.Equal("https://fresh.invalid/image", payload.RootElement.GetProperty("imageUrl").GetString());
-        Assert.Equal("fresh-tenant", calls[1].Targets[0].Rule.RunParams![0].GetProperty("tenantId").GetString());
+        Assert.Equal("fresh-tenant", Assert.Single(rerun.Targets).Rule.RunParams![0].GetProperty("tenantId").GetString());
+        Assert.False(payload.RootElement.TryGetProperty("targets", out _));
     }
 
     [Fact]
@@ -438,6 +442,7 @@ public sealed class AutoRunServiceTests
         await using var fixture = await Fixture.StartAsync([
             Overlay("newer-pan", "2025-01-01T00:00:00Z"), Overlay("older-vis", "2020-01-01T00:00:00Z")]);
         fixture.Resolver.Rules["rule-a"].Match!.SensorTypes = ["VIS"];
+        fixture.Resolver.Rules["rule-a"].MatchAll = false;
         fixture.Provider.Resolve = (overlay, _) => Task.FromResult(new ProviderOverlayResult(
             WithSensorType(overlay, overlay.Input.ImageId == "newer-pan" ? "PAN" : "VIS"), null));
 
@@ -468,6 +473,8 @@ public sealed class AutoRunServiceTests
         await using var fixture = await Fixture.StartAsync([]);
         fixture.Resolver.Rules["rule-a"].Match!.SensorTypes = ["VIS"];
         fixture.Resolver.Rules["rule-b"].Match!.SensorTypes = ["PAN"];
+        fixture.Resolver.Rules["rule-a"].MatchAll = false;
+        fixture.Resolver.Rules["rule-b"].MatchAll = false;
         fixture.Provider.Search = (_, next, _) => Task.FromResult(new ProviderPage(
             [new(Overlay("same"), null)], next is null ? "/next" : null));
         fixture.Provider.Resolve = (overlay, _) => Task.FromResult(new ProviderOverlayResult(WithSensorType(overlay, "VIS"), null));
@@ -490,7 +497,11 @@ public sealed class AutoRunServiceTests
     public async Task NonTypeIneligibleOverlaysSkipRawLookup(bool explicitFilter)
     {
         await using var fixture = await Fixture.StartAsync([Overlay("outside")]);
-        if (!explicitFilter) fixture.Resolver.Rules["rule-a"].Match!.Resolution = new() { Min = 1 };
+        if (!explicitFilter)
+        {
+            fixture.Resolver.Rules["rule-a"].Match!.Resolution = new() { Min = 1 };
+            fixture.Resolver.Rules["rule-a"].MatchAll = false;
+        }
         var ready = await fixture.ReadyAsync(Request([], explicitFilter ? [] : [Target("a")]) with
         {
             Source = new()
@@ -522,7 +533,7 @@ public sealed class AutoRunServiceTests
         fixture.Service.Start(ready.Id);
         await fixture.WaitAsync(ready.Id, AutoRunState.Completed);
         var call = Assert.Single(fixture.Publisher.Calls);
-        Assert.Empty(call.Targets);
+        Assert.Equal(ready.Id, call.RunId);
         Assert.Equal("VIS", GatewayInputMessageParser.Parse(call.Payload).SensorType);
     }
 
@@ -534,7 +545,11 @@ public sealed class AutoRunServiceTests
     public async Task UnsupportedFilterAndRuleSensorTypesFailAdmissionBeforeProviderWork(bool ruleType, string type)
     {
         await using var fixture = await Fixture.StartAsync([Overlay("one")]);
-        if (ruleType) fixture.Resolver.Rules["rule-a"].Match!.SensorTypes = [type];
+        if (ruleType)
+        {
+            fixture.Resolver.Rules["rule-a"].Match!.SensorTypes = [type];
+            fixture.Resolver.Rules["rule-a"].MatchAll = false;
+        }
         var request = Request([]) with
         {
             Source = new()
@@ -706,6 +721,8 @@ public sealed class AutoRunServiceTests
         await using var fixture = await Fixture.StartAsync([]);
         fixture.Resolver.Rules["rule-a"].Match = new() { Resolution = new() { Min = 0.5 } };
         fixture.Resolver.Rules["rule-b"].Match = new() { Resolution = new() { Min = 0.6 } };
+        fixture.Resolver.Rules["rule-a"].MatchAll = false;
+        fixture.Resolver.Rules["rule-b"].MatchAll = false;
         var branches = new Dictionary<string, int>(StringComparer.Ordinal);
         var requests = new List<(int Branch, string? Cursor)>();
         fixture.Provider.Search = (query, next, _) =>
@@ -1343,7 +1360,8 @@ public sealed class AutoRunServiceTests
     private static PipelineRuleDocument Rule(string id) => new()
     {
         Id = id, RuleName = id, IsActive = true,
-        Match = new() { MaxPhotoAgeDays = 1 },
+        MatchAll = true,
+        Match = new(),
         RunParams = [RunParams("original-tenant")]
     };
 
@@ -1386,7 +1404,7 @@ public sealed class AutoRunServiceTests
     }
 
     private sealed record BlockedPublication(PublicationCall Call, TaskCompletionSource<AutoRunPublishResult> Completion);
-    private sealed record PublicationCall(string RunId, string OverlayId, byte[] Payload, IReadOnlyList<AutoRunResolvedTarget> Targets);
+    private sealed record PublicationCall(string RunId, string OverlayId, byte[] Payload);
 
     private sealed class RecordingPublisher(
         Func<PublicationCall, CancellationToken, Task<AutoRunPublishResult>>? action = null) : IAutoRunPublisher
@@ -1398,10 +1416,10 @@ public sealed class AutoRunServiceTests
         public ConcurrentQueue<PublicationCall> Calls { get; } = new();
 
         public async Task<AutoRunPublishResult> PublishAsync(
-            string runId, byte[] payload, IReadOnlyList<AutoRunResolvedTarget> targets, CancellationToken cancellationToken)
+            string runId, byte[] payload, CancellationToken cancellationToken)
         {
             using var json = JsonDocument.Parse(payload);
-            var call = new PublicationCall(runId, json.RootElement.GetProperty("id").GetString()!, payload.ToArray(), targets.ToArray());
+            var call = new PublicationCall(runId, json.RootElement.GetProperty("id").GetString()!, payload.ToArray());
             Calls.Enqueue(call);
             var active = Interlocked.Increment(ref _active);
             int observed;
@@ -1472,7 +1490,9 @@ public sealed class AutoRunServiceTests
             {
                 var rule = JsonSerializer.Deserialize<PipelineRuleDocument>(
                     JsonSerializer.SerializeToUtf8Bytes(Rules[target.RuleId], AutoRunJson.Options), AutoRunJson.Options)!;
-                return new AutoRunResolvedTarget(target with { }, rule, HistoricalRuleSnapshot.Build(rule, contract), contract);
+                var snapshot = RuleSnapshotBuilder.Build(new RuleLoadResult([rule], []), contract);
+                Assert.Empty(snapshot.Rejections);
+                return new AutoRunResolvedTarget(target with { }, rule, Assert.Single(snapshot.Rules), contract);
             }).ToArray();
             OnResolved?.Invoke();
             return Task.FromResult(resolved);

@@ -51,7 +51,8 @@ public sealed class ProviderQueryBuilder(IOptions<ElasticProviderOptions> config
                     common.Add(Clause("match", _options.RequestFields.SensorType, TranslateSensorTypes(types)));
                 if (match?.ModeSar is { Count: > 0 } modes && !string.IsNullOrWhiteSpace(_options.RequestFields.ModeSar))
                     common.Add(Clause("match", _options.RequestFields.ModeSar, modes.ToArray()));
-                // MaxPhotoAgeDays is intentionally not pushed down for historical execution.
+                // Relative photo age is checked by the local matcher at evaluation time;
+                // the gateway checks it again against its current rules when dispatching.
                 if (match?.Sensors is { Count: > 0 } sensors)
                 {
                     foreach (var sensor in sensors)

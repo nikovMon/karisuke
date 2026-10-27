@@ -343,6 +343,15 @@ try {
   assert.equal(preview.targets[0].minOverlays, 25);
   assert.equal(preview.targets[1].ruleId, 'rule-2');
   assert.equal(await page.locator('#count-selected').textContent(), '25');
+  assert.equal(await page.locator('#run-target-heading').textContent(), 'Selection by rule');
+  assert.match(await page.locator('#run-target-description').textContent(), /not downstream dispatch counts/);
+  assert.ok(await page.locator('#direct-run-note').isVisible(), 'gateway rule processing applies to selected-rule runs too');
+  assert.match(await page.locator('#direct-run-note').textContent(), /Every mode sends ordinary overlay messages/);
+  assert.match(await page.locator('#direct-run-note').textContent(), /current rules, including photo-age limits/);
+  assert.match(await page.locator('#direct-run-note').textContent(), /other matching pipelines/);
+  assert.match(await page.locator('.frozen-rule').first().textContent(), /Maximum photo age: 7 days/);
+  assert.doesNotMatch(await page.locator('.frozen-rule').first().textContent(), /ignored/);
+  assert.equal(await page.locator('#items-target-heading').textContent(), 'Selection rules');
   assert.equal(await page.locator('#refresh-run').count(), 0, 'redundant circular refresh action removed');
   assert.match(await page.locator('#run-memory').textContent(), /Process memory: 1 GiB/);
   const frozenSensorTypes = page.locator('.frozen-rule').nth(1);
@@ -665,9 +674,9 @@ try {
   const matchedIds = requests.filter(r => r.path === '/auto-runs/preview').at(-1).body;
   assert.deepEqual(matchedIds.source, { mode: 'OverlayIds', overlayIds: ['matched-one'] });
   assert.deepEqual(matchedIds.targets, [{ pipelineId: 'imagery', ruleId: 'rule-1', minOverlays: 0, maxOverlays: 13 }]);
-  assert.equal(await directPage.locator('#run-target-heading').textContent(), 'Rule assignments');
-  assert.ok(await directPage.locator('#run-target-table').isVisible(), 'selected-rule IDs retain historical matching details');
-  assert.ok(await directPage.locator('#direct-run-note').isHidden());
+  assert.equal(await directPage.locator('#run-target-heading').textContent(), 'Selection by rule');
+  assert.ok(await directPage.locator('#run-target-table').isVisible(), 'selected-rule IDs retain local selection details');
+  assert.ok(await directPage.locator('#direct-run-note').isVisible(), 'selected-rule IDs use ordinary gateway processing');
   await directPage.getByText('← Back to configuration', { exact: true }).click();
   await directPage.getByLabel('Maximum for Urban detail').fill('');
   await directPage.locator('[name="source-mode"][value="Filters"]').check();
@@ -878,7 +887,7 @@ try {
     const rerunId = new URL(rerunPage.url()).pathname.split('/').pop();
     assert.deepEqual(previewRequests.get(rerunId), { ...previewRequests.get(sourceId), publication: runs.get(sourceId).publication });
     assert.equal(await rerunPage.locator('#run-state').textContent(), 'Ready');
-    assert.equal(await rerunPage.locator('#direct-run-note').isVisible(), sourceId === 'run-2');
+    assert.ok(await rerunPage.locator('#direct-run-note').isVisible(), 'all reruns use ordinary gateway processing');
   }
   await rerunPage.close();
 

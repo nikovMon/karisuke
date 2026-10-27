@@ -133,6 +133,65 @@ public sealed class SourceMessageHandlerTests
         Assert.Contains("asd", result.Error, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(3, true)]
+    [InlineData(30, false)]
+    public async Task EachRuleAppliesItsOwnPhotoAgeLimitAndMissingLimitAllowsOlderPhotos(int photoAgeDays, bool matchesWeek)
+    {
+        var daily = Rule("daily");
+        daily.Match!.MaxPhotoAgeDays = 1;
+        var weekly = Rule("weekly");
+        weekly.Match!.MaxPhotoAgeDays = 7;
+        await using var gateway = await Gateway.StartAsync([daily, weekly, Rule("unlimited")]);
+
+        var result = await gateway.Handler.HandleAsync(ModifiedMessage(json =>
+            json["photoTime"] = DateTimeOffset.UtcNow.AddDays(-photoAgeDays).ToString("O")));
+
+        Assert.True(result.IsSuccess);
+        var ruleIds = gateway.Transport.Sent.Select(unit =>
+        {
+            using var payload = JsonDocument.Parse(unit.Work.Payload.Body);
+            return payload.RootElement.GetProperty("ruleId").GetString();
+        }).Order(StringComparer.Ordinal).ToArray();
+        Assert.Equal(matchesWeek ? ["unlimited", "weekly"] : new[] { "unlimited" }, ruleIds);
+    }
+
+    [Fact]
+    public async Task OlderPhotoCanMatchOnePipelinesAgeLimitWhileMissingAnother()
+    {
+        var daily = Rule("asd-rule");
+        daily.Match!.MaxPhotoAgeDays = 1;
+        var weekly = AlgoRule();
+        weekly.Match!.MaxPhotoAgeDays = 7;
+        await using var gateway = await Gateway.StartAsync(new Dictionary<string, IReadOnlyList<PipelineRuleDocument>>
+        {
+            ["asd"] = [daily],
+            ["algo"] = [weekly]
+        });
+
+        var result = await gateway.Handler.HandleAsync(ModifiedMessage(json =>
+            json["photoTime"] = DateTimeOffset.UtcNow.AddDays(-3).ToString("O")));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("algo", Assert.Single(gateway.Transport.Sent).PipelineId);
+    }
+
+    [Fact]
+    public async Task SourceMessageAndCorrelationIdsDoNotChangeDispatchIdentity()
+    {
+        await using var gateway = await Gateway.StartAsync([Rule("rule-a")]);
+        var message = Message();
+
+        var first = await gateway.Handler.HandleAsync(message with { MessageId = "message-a", CorrelationId = "correlation-a" });
+        var second = await gateway.Handler.HandleAsync(message with { MessageId = "message-b", CorrelationId = "correlation-b" });
+
+        Assert.True(first.IsSuccess);
+        Assert.True(second.IsSuccess);
+        var sent = gateway.Transport.Sent.ToArray();
+        Assert.Equal(2, sent.Length);
+        Assert.Equal(sent[0].DispatchId, sent[1].DispatchId);
+    }
+
     [Fact]
     public async Task RejectedDispatchDeadLettersTheMessage()
     {
