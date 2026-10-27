@@ -4,7 +4,6 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using ImagingPipeline.Common.Dtos.Historical;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.RuleEngine.Input;
@@ -58,7 +57,8 @@ public sealed class AutoRunApiTests
         var completed = await WaitForState(fixture.Client, created.Id, AutoRunState.Completed);
         Assert.Equal(1, completed.Counters.Confirmed);
         using var message = JsonDocument.Parse(Assert.Single(fixture.Broker.Messages).Message.Body);
-        var overlay = direct ? message.RootElement : message.RootElement.GetProperty("overlay");
+        var overlay = message.RootElement;
+        AssertOrdinaryGatewayInput(Assert.Single(fixture.Broker.Messages).Message, created.Id);
         Assert.Equal("8836", overlay.GetProperty("width").GetRawText());
         Assert.Equal("3608", overlay.GetProperty("height").GetRawText());
         var gatewayInput = GatewayInputMessageParser.Parse(Encoding.UTF8.GetBytes(overlay.GetRawText()));
@@ -69,7 +69,7 @@ public sealed class AutoRunApiTests
     [Theory]
     [InlineData(AutoRunSourceMode.Rules)]
     [InlineData(AutoRunSourceMode.Filters)]
-    public async Task PreviewThroughPublicationUsesRealAdaptersAndFrozenScopedHistoricalData(AutoRunSourceMode mode)
+    public async Task PreviewFreezesSelectionDataButPublishesOnlyOrdinaryGatewayInput(AutoRunSourceMode mode)
     {
         using var fixture = new Fixture();
         fixture.Store.Add(RulesIndex, "shared-rule", Rule("Original inactive rule", "original-tenant"));
@@ -100,7 +100,7 @@ public sealed class AutoRunApiTests
         Assert.Equal("shared-rule", target.RuleId);
         Assert.Equal("Original inactive rule", target.RuleName);
         Assert.False(target.IsActive);
-        Assert.Equal(1, target.Rule.Match!.MaxPhotoAgeDays);
+        Assert.Null(target.Rule.Match!.MaxPhotoAgeDays);
         Assert.Empty(fixture.Broker.Messages);
 
         var providerCalls = fixture.Provider.Calls.Where(call => call.Method == HttpMethod.Post).ToArray();
@@ -129,7 +129,8 @@ public sealed class AutoRunApiTests
         Assert.Equal("shared-rule", Assert.Single(items.Items[0].Targets).RuleId);
         Assert.Equal(DateTimeOffset.Parse("2000-01-02T10:00:00Z"), items.Items[0].PhotoTime);
 
-        // Editing both upstream sources after Ready must not affect the frozen dispatch.
+        // Editing upstream sources after Ready cannot alter the selection or overlay payload.
+        // Gateway routing remains independent and uses its current active rules.
         fixture.Store.Add(RulesIndex, "shared-rule", Rule("Changed rule", "changed-tenant"));
         fixture.Provider.ImageUrl = "https://images.invalid/changed";
         using var started = await fixture.Client.PostAsync($"/auto-runs/{created.Id}/start", null);
@@ -147,18 +148,13 @@ public sealed class AutoRunApiTests
         Assert.Equal(created.Id, published.Message.CorrelationId);
         Assert.Equal("application/json", published.Message.ContentType);
         Assert.Equal(64, published.Message.MessageId.Length);
-        var envelope = JsonSerializer.Deserialize<HistoricalOverlayEnvelope>(published.Message.Body, AutoRunJson.Options)!;
-        Assert.Equal(HistoricalOverlayEnvelope.MessageKind, envelope.Kind);
-        Assert.Equal(HistoricalOverlayEnvelope.CurrentVersion, envelope.Version);
-        Assert.Equal(created.Id, envelope.RunId);
-        var frozenTarget = Assert.Single(envelope.Targets);
-        Assert.Equal("FindAir", frozenTarget.PipelineId);
-        Assert.Equal("shared-rule", frozenTarget.Rule.Id);
+        AssertOrdinaryGatewayInput(published.Message, created.Id);
+        var frozenTarget = Assert.Single(completed.Targets);
         Assert.Equal("Original inactive rule", frozenTarget.Rule.RuleName);
         Assert.False(frozenTarget.Rule.IsActive);
-        Assert.Equal(1, frozenTarget.Rule.Match!.MaxPhotoAgeDays);
         Assert.Equal("original-tenant", frozenTarget.Rule.RunParams![0].GetProperty("tenantId").GetString());
-        var overlay = envelope.Overlay;
+        using var body = JsonDocument.Parse(published.Message.Body);
+        var overlay = body.RootElement;
         Assert.Equal("overlay-1", overlay.GetProperty("id").GetString());
         Assert.Equal("https://images.invalid/original", overlay.GetProperty("imageUrl").GetString());
         Assert.Equal("https://grids.invalid/original", overlay.GetProperty("gridURI").GetString());
@@ -241,6 +237,147 @@ public sealed class AutoRunApiTests
         using var repeatedStart = await fixture.Client.PostAsync($"/auto-runs/{created.Id}/start", null);
         await AssertStatus(repeatedStart, HttpStatusCode.OK);
         Assert.Single(fixture.Broker.Messages);
+    }
+
+    [Theory]
+    [InlineData(AutoRunSourceMode.Rules, 0, 1)]
+    [InlineData(AutoRunSourceMode.Rules, 3, 0)]
+    [InlineData(AutoRunSourceMode.OverlayIds, 0, 1)]
+    [InlineData(AutoRunSourceMode.OverlayIds, 3, 0)]
+    public async Task AgeOnlyRulesRetainTheirLimitDuringSelection(
+        AutoRunSourceMode mode, int photoAgeDays, int expectedSelected)
+    {
+        var clock = new MutableTimeProvider(DateTimeOffset.Parse("2026-10-27T10:00:00Z"));
+        using var fixture = new Fixture(time: clock);
+        fixture.Provider.PhotoTime = clock.GetUtcNow().AddDays(-photoAgeDays).ToString("O");
+        var rule = Rule("One-day limit", "tenant");
+        rule.IsActive = true;
+        rule.Match = new() { MaxPhotoAgeDays = 1 };
+        fixture.Store.Add(RulesIndex, "shared-rule", rule);
+        var request = Request() with
+        {
+            Source = new() { Mode = mode, OverlayIds = mode == AutoRunSourceMode.OverlayIds ? ["overlay-1"] : null }
+        };
+
+        using var accepted = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", request, AutoRunJson.Options);
+        await AssertStatus(accepted, HttpStatusCode.Accepted);
+        var ready = await WaitForState(fixture.Client, (await Read<AutoRunSummary>(accepted)).Id, AutoRunState.Ready);
+
+        Assert.Equal(expectedSelected, ready.Counters.Selected);
+        var target = Assert.Single(ready.Targets);
+        Assert.Equal(1, target.Rule.Match!.MaxPhotoAgeDays);
+        Assert.Equal(expectedSelected, target.Selected);
+        Assert.Equal(1 - expectedSelected, target.Shortfall);
+        Assert.Contains(ready.Warnings, warning => warning.Contains("photo-age", StringComparison.Ordinal));
+        var searches = fixture.Provider.Calls.Where(call => call.Method == HttpMethod.Post).ToArray();
+        if (mode == AutoRunSourceMode.Rules)
+        {
+            var frozenQuery = Assert.Single(ready.Queries);
+            Assert.Equal(2, searches.Length);
+            Assert.All(searches, call => Assert.Equal(frozenQuery.GetRawText(), call.Body));
+            Assert.False(searches[0].Uri.Query.Contains("searchAfter", StringComparison.Ordinal));
+            Assert.Contains("searchAfter=next", searches[1].Uri.Query);
+            var dateRange = Assert.Single(frozenQuery.GetProperty("filter").GetProperty("logical_operators")
+                .GetProperty("AND").EnumerateArray()).GetProperty("range").GetProperty("date");
+            Assert.Equal("IN", dateRange.GetProperty("type").GetString());
+            Assert.Equal("2026-10-26T10:00:00.000Z", dateRange.GetProperty("values")[0].GetProperty("gte").GetString());
+        }
+        else
+        {
+            Assert.Empty(ready.Queries);
+            Assert.Empty(searches);
+            Assert.All(fixture.Provider.Calls, call => Assert.Equal(HttpMethod.Get, call.Method));
+        }
+        using var started = await fixture.Client.PostAsync($"/auto-runs/{ready.Id}/start", null);
+        if (expectedSelected == 0)
+        {
+            await AssertStatus(started, HttpStatusCode.Conflict);
+            Assert.Empty(fixture.Broker.Messages);
+        }
+        else
+        {
+            await AssertStatus(started, HttpStatusCode.OK);
+            await WaitForState(fixture.Client, ready.Id, AutoRunState.Completed);
+            AssertOrdinaryGatewayInput(Assert.Single(fixture.Broker.Messages).Message, ready.Id);
+        }
+    }
+
+    [Fact]
+    public async Task OverlappingRulesApplyTheirOwnAgeLimitsAndNoLimitRemainsUnrestricted()
+    {
+        var referenceTime = DateTimeOffset.Parse("2026-10-27T10:00:00Z");
+        var clock = new MutableTimeProvider(referenceTime);
+        using var fixture = new Fixture(time: clock,
+            configurationOverrides: new Dictionary<string, string?> { ["AutoRun:Provider:RequestFields:PhotoTime"] = "DATE" });
+        fixture.Provider.PhotoTime = referenceTime.AddDays(-3).ToString("O");
+        // Time advances while paging; all branches must keep their original cutoff and body.
+        fixture.Provider.BeforeResponse = _ => { clock.Advance(TimeSpan.FromMinutes(1)); return Task.CompletedTask; };
+        foreach (var (id, age) in new (string, int?)[] { ("one-day", 1), ("seven-days", 7), ("same-seven-days", 7), ("no-limit", null) })
+        {
+            var rule = Rule(id, "tenant");
+            rule.IsActive = true;
+            rule.Match = age is null ? null : new() { MaxPhotoAgeDays = age };
+            rule.MatchAll = age is null;
+            fixture.Store.Add(RulesIndex, id, rule);
+        }
+        var request = Request() with
+        {
+            Source = new() { Mode = AutoRunSourceMode.Rules },
+            Targets = new[] { "one-day", "seven-days", "same-seven-days", "no-limit" }
+                .Select(id => new AutoRunTarget { PipelineId = "FindAir", RuleId = id, MinOverlays = 1, MaxOverlays = 1 }).ToList()
+        };
+
+        using var accepted = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", request, AutoRunJson.Options);
+        await AssertStatus(accepted, HttpStatusCode.Accepted);
+        var ready = await WaitForState(fixture.Client, (await Read<AutoRunSummary>(accepted)).Id, AutoRunState.Ready);
+
+        Assert.Equal(1, ready.Counters.Selected);
+        Assert.Equal(0, ready.Targets.Single(target => target.RuleId == "one-day").Selected);
+        Assert.Equal(1, ready.Targets.Single(target => target.RuleId == "seven-days").Selected);
+        Assert.Equal(1, ready.Targets.Single(target => target.RuleId == "same-seven-days").Selected);
+        Assert.Equal(1, ready.Targets.Single(target => target.RuleId == "no-limit").Selected);
+        Assert.Equal(7, ready.Targets.Single(target => target.RuleId == "seven-days").Rule.Match!.MaxPhotoAgeDays);
+        Assert.Equal(3, ready.Queries.Count); // Different ages stay separate; equal age branches deduplicate.
+        var searches = fixture.Provider.Calls.Where(call => call.Method == HttpMethod.Post).ToArray();
+        Assert.Equal(6, searches.Length);
+        for (var i = 0; i < ready.Queries.Count; i++)
+        {
+            Assert.Equal(ready.Queries[i].GetRawText(), searches[i * 2].Body);
+            Assert.Equal(searches[i * 2].Body, searches[i * 2 + 1].Body);
+            Assert.DoesNotContain("searchAfter", searches[i * 2].Uri.Query, StringComparison.Ordinal);
+            Assert.Contains("searchAfter=next", searches[i * 2 + 1].Uri.Query);
+        }
+        var cutoffs = ready.Queries.Take(2).Select(query => Assert.Single(query.GetProperty("filter")
+                .GetProperty("logical_operators").GetProperty("AND").EnumerateArray())
+            .GetProperty("range").GetProperty("DATE").GetProperty("values")[0].GetProperty("gte").GetString()).ToArray();
+        Assert.Equal(new[] { "2026-10-26T10:00:00.000Z", "2026-10-20T10:00:00.000Z" }, cutoffs);
+        Assert.Empty(ready.Queries[2].GetProperty("filter").GetProperty("logical_operators").GetProperty("AND").EnumerateArray());
+        using var itemsResponse = await fixture.Client.GetAsync($"/auto-runs/{ready.Id}/items");
+        var item = Assert.Single((await Read<AutoRunItemsPage>(itemsResponse)).Items);
+        Assert.Equal(new[] { "no-limit", "same-seven-days", "seven-days" }, item.Targets.Select(target => target.RuleId).Order());
+
+        using var started = await fixture.Client.PostAsync($"/auto-runs/{ready.Id}/start", null);
+        await AssertStatus(started, HttpStatusCode.OK);
+        await WaitForState(fixture.Client, ready.Id, AutoRunState.Completed);
+        AssertOrdinaryGatewayInput(Assert.Single(fixture.Broker.Messages).Message, ready.Id);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(int.MaxValue)]
+    public async Task InvalidPhotoAgeFailsBeforeProviderWork(int days)
+    {
+        using var fixture = new Fixture();
+        var rule = Rule("Invalid age", "tenant");
+        rule.Match = new() { MaxPhotoAgeDays = days };
+        fixture.Store.Add(RulesIndex, "shared-rule", rule);
+
+        using var response = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", Request(), AutoRunJson.Options);
+
+        await AssertStatus(response, HttpStatusCode.BadRequest);
+        Assert.Empty(fixture.Provider.Calls);
+        Assert.Empty(fixture.Broker.Messages);
     }
 
     [Theory]
@@ -388,10 +525,10 @@ public sealed class AutoRunApiTests
         var messages = fixture.Broker.Messages.ToArray();
         Assert.Equal(2, messages.Length);
         Assert.NotEqual(originalMessage.MessageId, messages[1].Message.MessageId);
-        var envelope = JsonSerializer.Deserialize<HistoricalOverlayEnvelope>(messages[1].Message.Body, AutoRunJson.Options)!;
-        Assert.Equal(rerun.Id, envelope.RunId);
-        Assert.Equal("https://images.invalid/rerun", envelope.Overlay.GetProperty("imageUrl").GetString());
-        Assert.Equal("Updated rule", Assert.Single(envelope.Targets).Rule.RuleName);
+        AssertOrdinaryGatewayInput(messages[1].Message, rerun.Id);
+        using var body = JsonDocument.Parse(messages[1].Message.Body);
+        Assert.Equal("https://images.invalid/rerun", body.RootElement.GetProperty("imageUrl").GetString());
+        Assert.Equal("Updated rule", Assert.Single(ready.Targets).Rule.RuleName);
     }
 
     [Fact]
@@ -788,7 +925,7 @@ public sealed class AutoRunApiTests
     [InlineData(AutoRunSourceMode.Rules)]
     [InlineData(AutoRunSourceMode.Filters)]
     [InlineData(AutoRunSourceMode.OverlayIds)]
-    public async Task ExactRawSensorTypeReachesPreviewAndExistingHistoricalEnvelope(AutoRunSourceMode mode)
+    public async Task ExactRawSensorTypeReachesPreviewAndOrdinaryGatewayInput(AutoRunSourceMode mode)
     {
         using var fixture = new Fixture();
         fixture.Provider.RawSensorType = "VIS";
@@ -825,10 +962,10 @@ public sealed class AutoRunApiTests
         using var started = await fixture.Client.PostAsync($"/auto-runs/{ready.Id}/start", null);
         await AssertStatus(started, HttpStatusCode.OK);
         await WaitForState(fixture.Client, ready.Id, AutoRunState.Completed);
-        var envelope = JsonSerializer.Deserialize<HistoricalOverlayEnvelope>(Assert.Single(fixture.Broker.Messages).Message.Body, AutoRunJson.Options)!;
-        Assert.Equal(1, envelope.Version);
-        Assert.Equal("VIS", envelope.Overlay.GetProperty("sensorType").GetString());
-        Assert.Equal(new[] { "VIS" }, Assert.Single(envelope.Targets).Rule.Match!.SensorTypes);
+        var message = Assert.Single(fixture.Broker.Messages).Message;
+        AssertOrdinaryGatewayInput(message, ready.Id);
+        using var body = JsonDocument.Parse(message.Body);
+        Assert.Equal("VIS", body.RootElement.GetProperty("sensorType").GetString());
     }
 
     [Fact]
@@ -893,8 +1030,7 @@ public sealed class AutoRunApiTests
         RuleName = name, IsActive = false,
         Match = new()
         {
-            Sensors = [new() { Name = "camera", RegistrationQualities = [RegistrationQuality.Accurate], GridTypes = ["grid"] }],
-            MaxPhotoAgeDays = 1
+            Sensors = [new() { Name = "camera", RegistrationQualities = [RegistrationQuality.Accurate], GridTypes = ["grid"] }]
         },
         RunParams = [JsonSerializer.SerializeToElement(new
         {
@@ -905,6 +1041,18 @@ public sealed class AutoRunApiTests
 
     private static async Task<T> Read<T>(HttpResponseMessage response) =>
         (await response.Content.ReadFromJsonAsync<T>(AutoRunJson.Options))!;
+
+    private static void AssertOrdinaryGatewayInput(RabbitMqMessageEnvelope message, string runId)
+    {
+        Assert.Equal(runId, message.CorrelationId);
+        using var body = JsonDocument.Parse(message.Body);
+        Assert.Equal("overlay-1", body.RootElement.GetProperty("id").GetString());
+        foreach (var name in new[] { "kind", "version", "runId", "overlay", "targets" })
+            Assert.False(body.RootElement.TryGetProperty(name, out _));
+        Assert.Equal(new object[] { "gridType" },
+            Assert.IsAssignableFrom<IEnumerable<object>>(message.Headers!["x-updated-fields"]));
+        Assert.Equal("overlay-1", GatewayInputMessageParser.Parse(message.Body).ImageId);
+    }
 
     private static async Task AssertStatus(HttpResponseMessage response, HttpStatusCode expected) =>
         Assert.True(expected == response.StatusCode, $"Expected {expected}, got {response.StatusCode}: {await response.Content.ReadAsStringAsync()}");
@@ -936,7 +1084,7 @@ public sealed class AutoRunApiTests
         public HttpClient Client { get; }
 
         public Fixture(bool enabled = true, IReadOnlyDictionary<string, string>? providerHeaders = null, int maxSelectedOverlays = 100000,
-            IReadOnlyDictionary<string, string?>? configurationOverrides = null)
+            IReadOnlyDictionary<string, string?>? configurationOverrides = null, TimeProvider? time = null)
         {
             _baseFactory = new(Store);
             _app = _baseFactory.WithWebHostBuilder(builder =>
@@ -965,6 +1113,11 @@ public sealed class AutoRunApiTests
                 builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(configuration));
                 builder.ConfigureServices(services =>
                 {
+                    if (time is not null)
+                    {
+                        services.RemoveAll<TimeProvider>();
+                        services.AddSingleton(time);
+                    }
                     services.AddHttpClient<IElasticOverlayProvider, ElasticOverlayProvider>()
                         .ConfigurePrimaryHttpMessageHandler(() => Provider);
                     services.RemoveAll<IRabbitMqDestinationPublisher>();
@@ -982,11 +1135,19 @@ public sealed class AutoRunApiTests
         }
     }
 
+    private sealed class MutableTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        private long _utcTicks = now.UtcTicks;
+        public override DateTimeOffset GetUtcNow() => new(Interlocked.Read(ref _utcTicks), TimeSpan.Zero);
+        public void Advance(TimeSpan duration) => Interlocked.Add(ref _utcTicks, duration.Ticks);
+    }
+
     private sealed record ProviderCall(HttpMethod Method, Uri Uri, string? Body, IReadOnlyDictionary<string, string[]> Headers);
 
     private sealed class ProviderHandler : HttpMessageHandler
     {
         public string ImageUrl { get; set; } = "https://images.invalid/original";
+        public string PhotoTime { get; set; } = "2000-01-02T10:00:00Z";
         public JsonElement ImageWidth { get; set; } = JsonSerializer.SerializeToElement(100);
         public JsonElement ImageHeight { get; set; } = JsonSerializer.SerializeToElement(50);
         public string RawSensorType { get; set; } = "EO";
@@ -1007,7 +1168,7 @@ public sealed class AutoRunApiTests
                     GlobalId = "overlay-1", Url = ImageUrl, GridPath = "https://grids.invalid/original",
                     Sensor = "camera", ImagingTechnique = "EO", SolutionType = "grid", Sortie = "sortie-1",
                     RegistrationQuality = "Accurate", Resolution = 0.5, ImageWidth, ImageHeight,
-                    PhotoTime = "2000-01-02T10:00:00Z", Created = "2000-01-02T11:00:00Z", IsRealTime = false
+                    PhotoTime, Created = "2000-01-02T11:00:00Z", IsRealTime = false
                 }
             };
             object response = request.Method == HttpMethod.Get

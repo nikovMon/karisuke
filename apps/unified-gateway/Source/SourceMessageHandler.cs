@@ -21,25 +21,12 @@ public sealed class SourceMessageHandler(
     RuleMatcher matcher,
     PipelineWorkPreparer preparer,
     PipelineDispatcher dispatcher,
-    ILogger<SourceMessageHandler> logger,
-    HistoricalSourceMessageHandler? historical = null) : IRabbitMqMessageHandler
+    ILogger<SourceMessageHandler> logger) : IRabbitMqMessageHandler
 {
     public async Task<RabbitMqMessageProcessingResult> HandleAsync(
         RabbitMqMessageEnvelope message,
         CancellationToken cancellationToken = default)
     {
-        if (HistoricalSourceMessageHandler.IsEnvelope(message.Body))
-        {
-            if (historical is not null)
-                return await historical.HandleAsync(message, cancellationToken);
-
-            using var rejected = SourceMessageTelemetry.Begin(message, logger);
-            var exception = new InvalidInputMessageException(
-                "Historical gateway input is unavailable.", "gateway.historical_disabled");
-            rejected.Rejected(exception);
-            return RabbitMqMessageProcessingResult.NonRetryableFailure(exception.ErrorCode);
-        }
-
         if (!UpdatedFields.Contains(message.Headers, "gridType"))
         {
             SourceMessageTelemetry.Filtered(message, logger, "grid_type_not_updated");
@@ -123,7 +110,7 @@ public sealed class SourceMessageHandler(
     }
 
     // The image fields every unit shares. Task and rule IDs are replaced per unit.
-    internal static PipelineDispatchContext CreateImageContext(GatewayInputMessage image, ReadOnlyMemory<byte> body)
+    private static PipelineDispatchContext CreateImageContext(GatewayInputMessage image, ReadOnlyMemory<byte> body)
     {
         try
         {
@@ -137,7 +124,7 @@ public sealed class SourceMessageHandler(
     }
 
     // The task ID is the dispatch ID, which already identifies the image, pipeline, rule and run.
-    internal static PipelineDispatchContext UnitContext(PipelineDispatchContext imageContext, string dispatchId, RuleMatchResult match) =>
+    private static PipelineDispatchContext UnitContext(PipelineDispatchContext imageContext, string dispatchId, RuleMatchResult match) =>
         imageContext with
         {
             TaskId = dispatchId,
@@ -149,7 +136,7 @@ public sealed class SourceMessageHandler(
 
     // A retryable failure retries the whole message; targets dedupe the already delivered units
     // by dispatch ID. A permanent failure dead-letters it, naming the pipelines that failed.
-    internal static RabbitMqMessageProcessingResult Decide(IReadOnlyList<DispatchOutcome> outcomes, IReadOnlyList<string> invalidPipelines)
+    private static RabbitMqMessageProcessingResult Decide(IReadOnlyList<DispatchOutcome> outcomes, IReadOnlyList<string> invalidPipelines)
     {
         var retryable = FailedPipelines(outcomes, DispatchStatus.Retryable);
         if (retryable.Count > 0)

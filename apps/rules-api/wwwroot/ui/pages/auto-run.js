@@ -121,7 +121,7 @@ function configurationMarkup() {
       <div id="overlay-ids-field" hidden><div class="divider"></div><label class="field" for="overlay-ids"><span>Overlay IDs</span><textarea id="overlay-ids" placeholder="overlay-001&#10;overlay-002" spellcheck="false"></textarea><small>Separate IDs with commas or new lines. Duplicate IDs are counted once.</small></label>
         <fieldset class="id-processing"><legend>Processing</legend>
           <label><input type="radio" name="id-processing" value="direct" checked><span><strong>Send directly to gateway</strong><small>The gateway selects pipelines and applies current rules, including photo-age limits.</small></span></label>
-          <label><input type="radio" name="id-processing" value="rules"><span><strong>Match selected rules</strong><small>Preview matches against selected rules and freeze their definitions. Historical photo-age limits are ignored.</small></span></label>
+          <label><input type="radio" name="id-processing" value="rules"><span><strong>Match selected rules</strong><small>Select overlays using saved rules, including each rule's photo-age limit. The gateway matches its current active rules again.</small></span></label>
         </fieldset>
       </div>
       <details id="filter-details" class="filter-details"><summary>Overlay filters <span id="filters-description" class="muted">Optional for rule-derived searches</span></summary><div>
@@ -145,18 +145,18 @@ function configurationMarkup() {
       <details class="paste-rules"><summary>Already have rule IDs?</summary><div class="toolbar"><label class="field" for="pasted-rule-ids"><span>Rule IDs in the selected pipeline</span><textarea id="pasted-rule-ids" rows="2" placeholder="Paste IDs separated by commas or new lines"></textarea></label><button type="button" class="button" id="add-pasted-rules">Add IDs</button></div></details>
       <div id="rule-error" class="inline-error" role="alert" hidden></div>
       <div id="selected-targets"></div>
-      <p class="hint" style="margin-top:14px">Inactive rules can be selected. Historical runs ignore maximum photo age; other rule conditions still apply.</p>
+      <p class="hint" style="margin-top:14px">Selected rules control the preview, including each rule's photo-age limit. Inactive rules can be used for selection; the gateway dispatches using its current active rules, which may include other pipelines.</p>
     </div></fieldset>
     <section id="limits-section" class="panel">${panelHeader('03', 'Set limits & publication', 'Preview first. Publication starts only when you choose Start.')}<div class="panel-body">
       <div class="field-row">${field('overall-min', 'Overall minimum overlays', '0', 'number', 'min="0" max="100000" value="0" step="1"')}${field('overall-max', 'Overall maximum overlays', 'Use the combined rule maximum', 'number', 'min="1" max="100000" step="1"')}</div>
-      <p id="quota-description" class="hint">Shared overlays count once overall and once for each assigned rule. Minimum shortfalls are reported, and available overlays can still run.</p>
+      <p id="quota-description" class="hint">Shared overlays count once overall and once for each rule in the selection. Quotas limit the preview, not downstream dispatch.</p>
       <div class="divider"></div>
       ${publicationPresets()}
       <div class="field-row">${field('batch-size', 'Overlays per batch', '', 'number', 'min="1" max="100" value="10" required step="1"')}${field('delay-ms', 'Delay between batches · ms', '', 'number', 'min="0" max="60000" value="1000" required step="1"')}</div>
       <p class="hint">Publication settings can also be changed while a run is publishing. Updates take effect at a batch boundary.</p>
     </div></section>
     <div id="form-error" class="notice error" role="alert" hidden></div>
-    <div class="submit-bar"><div><strong>Review before you run.</strong><p id="preview-description">The preview freezes selected overlays and rule definitions.</p></div><button id="prepare-button" class="button primary" type="submit" disabled>Prepare preview <span aria-hidden="true">↗</span></button></div>
+    <div class="submit-bar"><div><strong>Review before you run.</strong><p id="preview-description">The preview freezes the selection. Gateway rules are evaluated when messages arrive.</p></div><button id="prepare-button" class="button primary" type="submit" disabled>Prepare preview <span aria-hidden="true">↗</span></button></div>
   </form>
   <aside class="configuration-aside">
     <section class="aside-card"><div class="eyebrow">HOW IT WORKS</div><ol class="process-steps"><li><span id="process-find-title">Find & match</span><p id="process-find-description">Fetch historical overlays and evaluate your selected rules.</p></li><li>Review the selection<p id="process-review-description">Inspect overlaps, quotas, and any shortfalls before starting.</p></li><li>Send to the gateway<p>Track confirmed submissions and inspect failed or uncertain items.</p></li></ol></section>
@@ -424,10 +424,10 @@ function updateSource() {
     : direct ? 'Use all supplied overlay IDs' : 'Use the combined rule maximum';
   $('quota-description').textContent = direct
     ? `Each selected overlay counts once. ${mode === 'Filters' ? `Leave maximum empty to select up to ${number(filterMaximum)} overlays. ` : ''}Minimum shortfalls are reported, and available overlays can still run.`
-    : 'Shared overlays count once overall and once for each assigned rule. Minimum shortfalls are reported, and available overlays can still run.';
+    : 'Shared overlays count once overall and once for each rule in the selection. Quotas limit this preview, not downstream dispatch. Available overlays can run even with minimum shortfalls.';
   $('preview-description').textContent = direct
     ? 'The preview freezes selected overlays. The gateway uses current rules when it receives them.'
-    : 'The preview freezes selected overlays and rule definitions.';
+    : 'The preview freezes the selection and rules used to prepare it. The gateway uses current active rules when messages arrive.';
   $('process-find-title').textContent = direct ? 'Find overlays' : 'Find & match';
   $('process-find-description').textContent = mode === 'Filters' ? 'Search Elastic Provider using your filters.'
     : direct ? 'Fetch the supplied overlay IDs from Elastic Provider.' : 'Fetch historical overlays and evaluate your selected rules.';
@@ -451,7 +451,7 @@ function ruleDescription(rule) {
   if (match.resolution) parts.push(`Resolution ${match.resolution.min ?? 'any'}–${match.resolution.max ?? 'any'}`);
   if (match.locationWkt) parts.push('Geographic area');
   if (match.modeSAR?.length) parts.push(`SAR: ${match.modeSAR.join(', ')}`);
-  if (match.maxPhotoAgeDays) parts.push(`${match.maxPhotoAgeDays}-day age limit ignored for historical runs`);
+  if (match.maxPhotoAgeDays) parts.push(`Maximum photo age: ${match.maxPhotoAgeDays} days`);
   return parts.join(' · ') || 'No additional match constraints';
 }
 
@@ -563,7 +563,7 @@ async function addPastedRules() {
 function renderTargets() {
   $('selected-targets').innerHTML = !state.targets.length
     ? '<div class="targets-empty">No rules selected yet.<br>Choose a pipeline to browse its rules, or paste rule IDs.</div>'
-    : `<div class="section-label" style="margin-top:22px"><h3>Selected targets</h3><span class="selection-count">${state.targets.length} rule${state.targets.length === 1 ? '' : 's'}</span></div><div class="table-wrap"><table class="target-table"><thead><tr><th>Rule / pipeline</th><th>Minimum</th><th>Maximum</th><th><span class="visually-hidden">Actions</span></th></tr></thead><tbody>${state.targets.map((target, i) => `<tr><td>${escape(target.rule.ruleName)}<span class="cell-sub">${escape(target.pipelineId)}${target.rule.isActive ? '' : ' · inactive'}</span></td><td><input type="number" min="0" max="100000" step="1" required value="${escape(target.minOverlays)}" data-target-index="${i}" data-target-field="minOverlays" aria-label="Minimum for ${escape(target.rule.ruleName)}"></td><td><input type="number" min="1" max="100000" step="1" required value="${escape(target.maxOverlays)}" data-target-index="${i}" data-target-field="maxOverlays" aria-label="Maximum for ${escape(target.rule.ruleName)}"></td><td><button type="button" class="button icon ghost" data-remove-target="${i}" aria-label="Remove ${escape(target.rule.ruleName)}">×</button></td></tr>`).join('')}</tbody></table></div>`;
+    : `<div class="section-label" style="margin-top:22px"><h3>Selection rules</h3><span class="selection-count">${state.targets.length} rule${state.targets.length === 1 ? '' : 's'}</span></div><div class="table-wrap"><table class="target-table"><thead><tr><th>Rule / pipeline</th><th>Minimum</th><th>Maximum</th><th><span class="visually-hidden">Actions</span></th></tr></thead><tbody>${state.targets.map((target, i) => `<tr><td>${escape(target.rule.ruleName)}<span class="cell-sub">${escape(target.pipelineId)}${target.rule.isActive ? '' : ' · inactive'}</span></td><td><input type="number" min="0" max="100000" step="1" required value="${escape(target.minOverlays)}" data-target-index="${i}" data-target-field="minOverlays" aria-label="Minimum for ${escape(target.rule.ruleName)}"></td><td><input type="number" min="1" max="100000" step="1" required value="${escape(target.maxOverlays)}" data-target-index="${i}" data-target-field="maxOverlays" aria-label="Maximum for ${escape(target.rule.ruleName)}"></td><td><button type="button" class="button icon ghost" data-remove-target="${i}" aria-label="Remove ${escape(target.rule.ruleName)}">×</button></td></tr>`).join('')}</tbody></table></div>`;
 }
 
 function optionalNumber(id) {
@@ -733,9 +733,9 @@ function detailMarkup(id) {
     <div class="stat-grid">${[['selected', 'Selected', ''], ['confirmed', 'Confirmed', 'good'], ['failed', 'Failed', 'bad'], ['uncertain', 'Uncertain', 'warning'], ['remaining', 'Remaining', '']].map(([key, label, style]) =>
       `<div class="stat ${style}"><div class="stat-label">${label}</div><div class="stat-value" id="count-${key}">0</div></div>`).join('')}</div>
     <section class="panel"><div class="progress-block"><div class="progress-text"><span id="progress-label"></span><span id="progress-value" class="mono"></span></div><div id="run-progress" class="progress-track" role="progressbar" aria-label="Publication progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progress-fill"></div></div><p id="provider-progress" class="provider-progress" role="status" aria-live="polite" hidden></p><div class="run-meta" id="run-meta"></div><p id="run-memory" class="memory-status hint" hidden></p></div></section>
-    <div class="run-layout"><section class="panel"><div class="panel-header"><div><h2 id="run-target-heading">Rule assignments</h2><p id="run-target-description">Exact counts for this frozen selection.</p></div></div><div id="direct-run-note" class="panel-body" hidden><p>The gateway chooses pipelines and applies its current rules, including photo-age limits. This preview freezes overlay data only.</p><p id="direct-run-limits" class="hint"></p></div><div id="run-target-table" class="table-wrap"><table><thead><tr><th>Rule / pipeline</th><th>Min / max</th><th>Selected</th><th>Confirmed</th><th>Failed</th><th>Uncertain</th><th>Shortfall</th></tr></thead><tbody id="run-targets"></tbody></table></div></section>
+    <div class="run-layout"><section class="panel"><div class="panel-header"><div><h2 id="run-target-heading">Selection by rule</h2><p id="run-target-description">Preview quotas and queue submissions by selection rule.</p></div></div><div id="direct-run-note" class="panel-body" hidden><p>Every mode sends ordinary overlay messages. The gateway chooses pipelines and applies its current rules, including photo-age limits. Only active rules can dispatch; other matching pipelines may receive these overlays. A ready preview does not guarantee downstream dispatch.</p><p id="direct-run-limits" class="hint"></p></div><div id="run-target-table" class="table-wrap"><table><thead><tr><th>Rule / pipeline</th><th>Min / max</th><th>Selected</th><th>Confirmed</th><th>Failed</th><th>Uncertain</th><th>Shortfall</th></tr></thead><tbody id="run-targets"></tbody></table></div></section>
     <section class="panel run-publication"><div class="panel-header"><div><h2>Publication settings</h2><p>Control the pace of this run.</p></div></div><form id="publication-form" class="panel-body">${publicationPresets('run-')}<div class="field-row">${field('run-batch-size', 'Batch size', '', 'number', 'min="1" max="100" required step="1"')}${field('run-delay-ms', 'Delay · ms', '', 'number', 'min="0" max="60000" required step="1"')}</div><button class="button full" id="update-publication" type="submit">Apply settings</button><p id="publication-status" class="publication-status" role="status"></p><p class="hint">Changes apply at a batch boundary. Confirmed means queued to the gateway, not processed downstream.</p></form></section></div>
-    <section class="panel"><div class="panel-header items-toolbar"><div><h2>Selected overlays</h2><p id="items-description">Assigned targets and publication outcomes.</p></div><label class="field" for="item-outcome"><span class="visually-hidden">Filter items by outcome</span><select id="item-outcome"><option value="">All outcomes</option>${['Pending', 'InFlight', 'Confirmed', 'Failed', 'Uncertain'].map(v => `<option>${v}</option>`).join('')}</select></label></div><div class="table-wrap"><table class="items-table"><thead><tr><th>Overlay / sensor</th><th>Photo time</th><th id="items-target-heading">Assigned rules</th><th>Outcome</th></tr></thead><tbody id="run-items"></tbody></table></div><div class="browser-footer"><span id="items-count" class="hint"></span><div class="pagination"><button id="items-prev" class="button compact ghost" type="button">← Previous</button><button id="items-next" class="button compact ghost" type="button">Next →</button></div></div></section>
+    <section class="panel"><div class="panel-header items-toolbar"><div><h2>Selected overlays</h2><p id="items-description">Selection rules and queue submission outcomes.</p></div><label class="field" for="item-outcome"><span class="visually-hidden">Filter items by outcome</span><select id="item-outcome"><option value="">All outcomes</option>${['Pending', 'InFlight', 'Confirmed', 'Failed', 'Uncertain'].map(v => `<option>${v}</option>`).join('')}</select></label></div><div class="table-wrap"><table class="items-table"><thead><tr><th>Overlay / sensor</th><th>Photo time</th><th id="items-target-heading">Selection rules</th><th>Outcome</th></tr></thead><tbody id="run-items"></tbody></table></div><div class="browser-footer"><span id="items-count" class="hint"></span><div class="pagination"><button id="items-prev" class="button compact ghost" type="button">← Previous</button><button id="items-next" class="button compact ghost" type="button">Next →</button></div></div></section>
     <details class="panel"><summary class="panel-body" style="cursor:pointer;font-size:12px">Provider queries · frozen search</summary><div class="panel-body" style="padding-top:0"><pre id="provider-queries" class="mono" style="white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;color:#a7bbc9"></pre></div></details>
   </div><div id="run-loading" class="loading"><span class="spinner"></span>Loading run…</div>`;
 }
@@ -874,14 +874,14 @@ function renderRun(run) {
     run.diagnosticsOmitted ? `<p class="hint diagnostics-omitted">${number(run.diagnosticsOmitted)} additional diagnostic entries were omitted to keep this run within its storage limits. Use the run ID to find service logs.</p>` : ''
   ].join('');
   const expandedRules = [...$('run-targets').querySelectorAll('details')].map(element => element.open);
-  $('run-target-heading').textContent = direct ? 'Gateway processing' : 'Rule assignments';
-  $('run-target-description').textContent = direct ? 'Pipelines and rules are evaluated by the gateway.' : 'Exact counts for this frozen selection.';
+  $('run-target-heading').textContent = direct ? 'Gateway processing' : 'Selection by rule';
+  $('run-target-description').textContent = direct ? 'Pipelines and rules are evaluated by the gateway.' : 'Preview quotas and queue submissions by selection rule; these are not downstream dispatch counts.';
   $('run-target-table').hidden = direct;
-  $('direct-run-note').hidden = !direct;
+  $('direct-run-note').hidden = false;
   $('direct-run-limits').textContent = `Overall minimum: ${number(run.minOverlays)} overlays · Maximum: ${number(run.maxOverlays)} overlays`;
-  $('items-description').textContent = direct ? 'Overlay publication outcomes. Pipeline matching happens at the gateway.' : 'Assigned targets and publication outcomes.';
-  $('items-target-heading').textContent = direct ? 'Processing' : 'Assigned rules';
-  $('run-targets').innerHTML = run.targets.map((target, i) => `<tr><td>${escape(target.ruleName)}<span class="cell-sub">${escape(target.pipelineId)}${target.isActive ? '' : ' · inactive snapshot'}</span><details class="frozen-rule" ${expandedRules[i] ? 'open' : ''}><summary>Frozen conditions</summary><div class="cell-sub">${escape(ruleDescription(target.rule))}</div><div class="cell-sub mono">${escape(target.ruleId)}</div>${target.rule.match?.locationWkt ? `<div class="cell-sub mono">${escape(target.rule.match.locationWkt)}</div>` : ''}</details></td><td>${number(target.minOverlays)} / ${number(target.maxOverlays)}</td><td>${number(target.selected)}</td><td>${number(target.confirmed)}</td><td>${number(target.failed)}</td><td>${number(target.uncertain)}</td><td>${target.shortfall ? `<span class="tag warn">${number(target.shortfall)}</span>` : '—'}</td></tr>`).join('');
+  $('items-description').textContent = direct ? 'Overlay publication outcomes. Pipeline matching happens at the gateway.' : 'Selection rules and queue submission outcomes. The gateway decides dispatch.';
+  $('items-target-heading').textContent = direct ? 'Processing' : 'Selection rules';
+  $('run-targets').innerHTML = run.targets.map((target, i) => `<tr><td>${escape(target.ruleName)}<span class="cell-sub">${escape(target.pipelineId)}${target.isActive ? '' : ' · inactive snapshot'}</span><details class="frozen-rule" ${expandedRules[i] ? 'open' : ''}><summary>Conditions used for selection</summary><div class="cell-sub">${escape(ruleDescription(target.rule))}</div><div class="cell-sub mono">${escape(target.ruleId)}</div>${target.rule.match?.locationWkt ? `<div class="cell-sub mono">${escape(target.rule.match.locationWkt)}</div>` : ''}</details></td><td>${number(target.minOverlays)} / ${number(target.maxOverlays)}</td><td>${number(target.selected)}</td><td>${number(target.confirmed)}</td><td>${number(target.failed)}</td><td>${number(target.uncertain)}</td><td>${target.shortfall ? `<span class="tag warn">${number(target.shortfall)}</span>` : '—'}</td></tr>`).join('');
   if (!state.publicationDirty) {
     $('run-batch-size').value = run.publication.batchSize;
     $('run-delay-ms').value = run.publication.delayMs;
@@ -995,11 +995,12 @@ function renderProviderProgress(run) {
     progress.page != null ? `page ${number(progress.page)}` : '',
     progress.attempt ? `attempt ${number(progress.attempt)} of ${number(progress.maxAttempts || progress.attempt)}` : '',
     progress.lastStatusCode != null ? `last response HTTP ${progress.lastStatusCode}` : ''].filter(Boolean).join(' · ');
-  const remaining = progress.nextAttemptAt ? Math.max(0, Math.ceil((new Date(progress.nextAttemptAt).getTime() - Date.now()) / 1000)) : null;
+  const remaining = progress.nextAttemptAt ? Math.max(0, new Date(progress.nextAttemptAt).getTime() - Date.now()) : null;
+  const remainingLabel = remaining < 1000 ? `${remaining} ms` : `${Math.ceil(remaining / 1000)} s`;
   const waiting = progress.phase === 'retryWait'
-    ? `Waiting to retry Elastic Provider${remaining !== null && Number.isFinite(remaining) ? remaining > 0 ? ` in ${remaining} s` : '; retry is due' : ''}.`
+    ? `Waiting to retry Elastic Provider${remaining !== null && Number.isFinite(remaining) ? remaining > 0 ? ` in ${remainingLabel}` : '; retry is due' : ''}.`
     : progress.phase === 'requestDelay'
-      ? `Waiting between provider requests${remaining !== null && Number.isFinite(remaining) && remaining > 0 ? ` · next request in ${remaining} s` : ''}.`
+      ? `Waiting between provider requests${remaining !== null && Number.isFinite(remaining) && remaining > 0 ? ` · next request in ${remainingLabel}` : ''}.`
       : 'Waiting for Elastic Provider to respond.';
   element.textContent = `${waiting} ${context}. Already scanned ${number(run.counters.scanned)} records.`;
 }

@@ -31,28 +31,6 @@ public static class DispatchIdentity
         return Convert.ToHexStringLower(SHA256.HashData(buffer.WrittenSpan));
     }
 
-    /// <summary>
-    /// A deliberate historical run has a separate identity from both live traffic and other
-    /// historical runs. The original live identity algorithm remains unchanged.
-    /// </summary>
-    public static string CreateHistorical(
-        string runId, string imageId, string pipelineId, string ruleId, JsonElement runParams)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(runId);
-        var liveIdentity = Create(imageId, pipelineId, ruleId, runParams);
-        var buffer = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer))
-        {
-            writer.WriteStartArray();
-            writer.WriteStringValue("historical-auto-run");
-            writer.WriteStringValue(runId);
-            writer.WriteStringValue(liveIdentity);
-            writer.WriteEndArray();
-        }
-
-        return Convert.ToHexStringLower(SHA256.HashData(buffer.WrittenSpan));
-    }
-
     // Rewrites JSON into one fixed form so equal run params hash equally: object properties are
     // sorted and whitespace dropped. Array order is kept on purpose, since it can carry meaning.
     private static void WriteCanonical(Utf8JsonWriter writer, JsonElement element)

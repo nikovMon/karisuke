@@ -1,5 +1,4 @@
 using System.Text.Json;
-using ImagingPipeline.Common.Dtos.Historical;
 using ImagingPipeline.RabbitMqClient;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client.Exceptions;
@@ -11,7 +10,7 @@ public sealed record AutoRunPublishResult(AutoRunItemOutcome Outcome, string? Er
 public interface IAutoRunPublisher
 {
     Task<AutoRunPublishResult> PublishAsync(
-        string runId, byte[] payload, IReadOnlyList<AutoRunResolvedTarget> targets, CancellationToken cancellationToken);
+        string runId, byte[] payload, CancellationToken cancellationToken);
 }
 
 public sealed class AutoRunPublisher(
@@ -19,22 +18,15 @@ public sealed class AutoRunPublisher(
     ILogger<AutoRunPublisher> logger) : IAutoRunPublisher
 {
     public async Task<AutoRunPublishResult> PublishAsync(
-        string runId, byte[] payload, IReadOnlyList<AutoRunResolvedTarget> targets, CancellationToken cancellationToken)
+        string runId, byte[] payload, CancellationToken cancellationToken)
     {
         if (options.Value.Destination is not { } destination)
             return new(AutoRunItemOutcome.Failed, "Gateway destination is not configured.");
-        byte[] body;
         string messageId;
         try
         {
             using var overlay = JsonDocument.Parse(payload);
             var id = overlay.RootElement.GetProperty("id").GetString()!;
-            body = targets.Count == 0 ? payload : JsonSerializer.SerializeToUtf8Bytes(new HistoricalOverlayEnvelope
-            {
-                RunId = runId,
-                Overlay = overlay.RootElement,
-                Targets = targets.Select(t => new HistoricalRuleTarget { PipelineId = t.Target.PipelineId, Rule = t.Rule }).ToList()
-            }, AutoRunJson.Options);
             messageId = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
                 JsonSerializer.SerializeToUtf8Bytes(new[] { runId, id })));
         }
@@ -47,11 +39,11 @@ public sealed class AutoRunPublisher(
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            IReadOnlyDictionary<string, object?>? headers = targets.Count == 0
-                ? new Dictionary<string, object?> { ["x-updated-fields"] = new List<object> { "gridType" } }
-                : null;
+            // Use the gateway's ordinary overlay contract and update trigger in every source mode.
+            IReadOnlyDictionary<string, object?> headers =
+                new Dictionary<string, object?> { ["x-updated-fields"] = new List<object> { "gridType" } };
             await publisher.PublishAsync(destination,
-                new RabbitMqMessageEnvelope(messageId, body, CorrelationId: runId, Headers: headers), cancellationToken);
+                new RabbitMqMessageEnvelope(messageId, payload, CorrelationId: runId, Headers: headers), cancellationToken);
             return new(AutoRunItemOutcome.Confirmed);
         }
         catch (PublishException ex)

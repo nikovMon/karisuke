@@ -45,7 +45,7 @@ The API loads the same pipeline catalog as the unified gateway: `pipelinecatalog
 
 ## Historical auto-run
 
-Auto-run has two explicit stages: prepare a preview, then start publication. Preparation fetches overlays through Elastic Provider and freezes their normalized payloads. When rules are selected, it also evaluates those saved rules, checks each pipeline's input contract, and freezes rule definitions and target assignments. Editing or deleting a selected rule after preparation does not change that run. Filters and Overlay IDs can instead submit overlays directly without selecting rules; the gateway then applies its current rules when it consumes the ordinary input messages.
+Auto-run has two explicit stages: prepare a preview, then start publication. Preparation fetches overlays through Elastic Provider and freezes their normalized payloads. When rules are selected, it evaluates those saved rules, including each rule's `maxPhotoAgeDays`, checks each pipeline's input contract, and records the rule definitions and selection assignments. Editing a rule later does not change the prepared selection. Every mode publishes ordinary overlay input. The gateway evaluates its current active rules when it consumes each message, including photo-age limits, and may dispatch to other matching pipelines or none. Preview assignments and quotas describe selection, not guaranteed downstream routing.
 
 The feature is disabled by default. Jobs and previews are held in memory on **one Rules API instance**. Only one job may prepare or publish at a time; unused ready previews can coexist within the retention and payload limits. Restarting the instance loses all jobs and previews. There is no scheduled execution, restart recovery, or coordination between API replicas.
 
@@ -57,7 +57,7 @@ The rule browser searches within the selected pipeline across pages and supports
 
 Existing rules indexes can disable indexing of match conditions, so text search scans projected source fields through an Elasticsearch point-in-time snapshot, keeping at most 500 projected records per scan page plus the requested result page. Only the selected result page's full rule documents are fetched, from that same snapshot. A request that scans 100,000 rules without finding the requested page or exhausting the source returns an explicit `422` scan-limit error. Each list request opens its own snapshot; edits between UI pages can affect subsequent results. Cancellation and completion close the snapshot. This search concerns saved rule metadata, independently of the Elastic Provider overlay searches.
 
-In **Overlay IDs** mode, direct submission is the default: enter IDs, prepare a preview, then start. No pipeline, rules, or search filters are required. The optional selected-rule mode retains historical matching and per-rule quotas. Switching modes preserves the rule draft, but direct requests do not send hidden targets or filters. Direct previews remain available if the pipeline list cannot be loaded.
+In **Overlay IDs** mode, direct submission is the default: enter IDs, prepare a preview, then start. No pipeline, rules, or search filters are required. The optional selected-rule mode filters the selection using saved rules and per-rule quotas. Switching modes preserves the rule draft, but direct requests do not send hidden targets or filters. Direct previews remain available if the pipeline list cannot be loaded. Both choices publish the same ordinary overlay format.
 
 In **From filters**, the UI shows overlay filters and overall quotas without rule selection. It sends `targets: []` and prepares ordinary gateway input. Its default overall maximum is 100 overlays, capped by the server's configured maximum. Use **From rules** with optional filters when the preview should evaluate specific saved rules and freeze their assignments.
 
@@ -99,9 +99,13 @@ Deleting an active job stops future preparation/publication and releases data on
 
 ### Preview requests
 
-`Rules` requires 1–100 unique `(pipelineId, ruleId)` targets. `Filters` and `OverlayIds` accept omitted or empty `targets` for direct gateway submission. Existing API callers may continue to supply targets in `Filters` mode for local rule matching; the UI uses the direct form. When targets are supplied, IDs reference existing schema-version-2 rules from `/pipelines/{pipelineId}/rules`, and the pipeline must be enabled in the catalog. An explicitly selected inactive rule is allowed. Historical matching with selected targets ignores only `maxPhotoAgeDays`; sensor, registration quality, grid type, sensor type, resolution, geometry, and `modeSAR` conditions still apply. `sensorTypes` is also sent to the provider as a sensor-type filter.
+`Rules` requires 1–100 unique `(pipelineId, ruleId)` targets. `Filters` and `OverlayIds` accept omitted or empty `targets` to skip local rule selection. Existing API callers may continue to supply targets in `Filters` mode for local rule matching; the UI uses the direct form. When targets are supplied, IDs reference existing schema-version-2 rules from `/pipelines/{pipelineId}/rules`, and the pipeline must be enabled in the catalog. An explicitly selected inactive rule is allowed as a selection source, but the gateway only dispatches active rules. All saved match conditions apply locally, including each rule's `maxPhotoAgeDays`, sensor, registration quality, grid type, sensor type, resolution, geometry, and `modeSAR`. `sensorTypes` is also sent to the provider as a sensor-type filter. Photo age is checked against the preparation time and checked again by the gateway at consumption time; an overlay can age out between those checks. Rules without `maxPhotoAgeDays` impose no photo-age limit.
 
-`Rules` derives provider queries from the selected rules. Each sensor branch retains its own quality and grid conditions. The adapter finishes every page of one query before starting the next query, preserving that query's filter and sort body throughout its continuation chain. Searches are not interleaved because the provider does not support multiple active filter/sort searches. Identical queries and repeated overlay IDs are deduplicated. Optional `source.filters` narrows those searches:
+`Rules` derives provider queries from the selected rules. Each sensor branch retains its own quality and grid conditions.
+
+A rule with `maxPhotoAgeDays` also adds an inclusive lower bound on the configured photo-time query field (`date` by default): one captured UTC preparation timestamp minus that rule's age in days. Each rule's cutoff stays fixed across its sensor branches and continuation pages. If an explicit photo-time lower bound is later, that later bound wins; an explicit upper bound is retained. A rule whose resulting time window is empty contributes no query. Rules without an age limit add no age constraint. Local matching and the gateway still recheck age as time advances.
+
+The adapter finishes every page of one query before starting the next query, preserving that query's filter and sort body throughout its continuation chain. Searches are not interleaved because the provider does not support multiple active filter/sort searches. Identical queries and repeated overlay IDs are deduplicated. Optional `source.filters` narrows those searches:
 
 ```json
 {
@@ -182,11 +186,11 @@ WKT must be a valid Polygon or MultiPolygon. The search selects intersecting ove
 }
 ```
 
-Direct submission from Filters or Overlay IDs still validates and normalizes provider overlays, reports invalid records or missing explicit IDs, freezes payloads, and enforces overall quotas, memory/scan limits, expiry, and cancellation. Each selected overlay is published as the ordinary JSON body (`id`, `imageUrl`, `roiFootprint`, `sensorName`, and other mapped fields), with the RabbitMQ `x-updated-fields` array containing `gridType`. It has no historical `kind`, `overlay`, or `targets` wrapper and does not require `HistoricalInput.Enabled` on the gateway.
+Direct submission from Filters or Overlay IDs still validates and normalizes provider overlays, reports invalid records or missing explicit IDs, freezes payloads, and enforces overall quotas, memory/scan limits, expiry, and cancellation. In every mode, each selected overlay is published as the ordinary JSON body (`id`, `imageUrl`, `roiFootprint`, `sensorName`, and other mapped fields), with the RabbitMQ `x-updated-fields` array containing `gridType`. No rule definitions, targets, run ID, or historical wrapper are added to the JSON body. The run ID is carried in the AMQP correlation ID for tracing. The gateway has no Auto Run-specific configuration or message handler.
 
-The gateway evaluates its current cached active rules across enabled pipelines, including photo-age conditions. It may dispatch an overlay to multiple matching pipelines or none. Direct previews therefore show no predicted rule assignments or per-rule counts. Gateway rule edits can affect dispatch after preview; only the input payload is frozen.
+The gateway evaluates its current cached active rules across enabled pipelines, including photo-age conditions. It may dispatch an overlay to multiple matching pipelines or none. Direct previews show no local rule assignments or per-rule counts; selected-rule previews show the rules used to allocate the selection. Neither predicts actual gateway dispatch. Gateway rule edits can affect dispatch after preview, and selection quotas do not cap gateway dispatch counts.
 
-To retain historical matching for specific IDs, supply targets as before:
+To select specific IDs using saved rules and per-rule quotas, supply targets:
 
 ```json
 {
@@ -245,7 +249,7 @@ Reaching a preparation limit produces a partial preview from the eligible candid
 | `responseLimit` | A provider response exceeded `MaxResponseBytes`. |
 | `providerUnavailable` | HTTP 429/503 exhausted the retry budget, or the provider requested a `Retry-After` longer than the supported 60-second wait. |
 
-The UI marks a ready selection with incomplete search coverage as **Partial selection ready**. Review its warnings, diagnostics, and minimum shortfalls, then explicitly start the retained selection; stopping collection never publishes automatically. A preview with zero selected overlays cannot start. Partial results do not establish the source's total count or guarantee the newest overlays outside the scanned subset; later query branches may never have run. An oversized response that was not parsed contributes no records, while candidates from earlier responses remain available. `sourceExhausted: true` means the adapter exhausted the supplied IDs or returned continuation chain; it is not a transactional snapshot of Elasticsearch.
+The UI marks a ready selection with incomplete search coverage as **Partial selection ready**. Review its warnings, diagnostics, and minimum shortfalls, then explicitly start the retained selection; stopping collection never publishes automatically. A preview with zero selected overlays cannot start. Partial results do not establish the source's total count or guarantee the newest overlays outside the scanned subset; later query branches may never have run. An oversized response that was not parsed contributes no records, while candidates from earlier responses remain available. `sourceExhausted: true` means the adapter exhausted the supplied IDs or applicable query continuation chains (including when every rule's time window is empty); it is not a transactional snapshot of Elasticsearch.
 
 The payload budget counts serialized bytes, not total heap usage: object overhead, geometry, deduplication structures, and transient provider buffers require additional memory. Its 512 MiB maximum remains separate from the configurable provider response limit and the process-memory guard. Provider responses are read into bounded buffers and parsed; batch entities are then normalized and consumed one at a time instead of retaining a second normalized list for the entire page. Raising `MaxResponseBytes` allows larger pages but can increase peak memory while buffering and parsing.
 
@@ -270,7 +274,7 @@ Content-Type: application/json
 
 During publication, changes apply at the next batch boundary. The summary exposes requested `publication`, effective `activePublication`, and `publicationChangePending`. Changing settings does not change the selected overlays, rule snapshots, or quotas.
 
-Each selected overlay produces one persistent, mandatory RabbitMQ message. Filters and Overlay IDs without rules use the frozen ordinary overlay body; requests with selected targets use a historical envelope containing the frozen overlay and assigned rule snapshots. Both paths use broker confirmations and the same publication controls. Item outcomes have these meanings:
+Each selected overlay produces one persistent, mandatory RabbitMQ message containing the frozen ordinary overlay body. This format is identical for Rules, Filters, and Overlay IDs, whether or not targets were selected. Every publication uses broker confirmations and the same publication controls. Item outcomes have these meanings:
 
 | Outcome | Meaning |
 | --- | --- |
@@ -280,9 +284,9 @@ Each selected overlay produces one persistent, mandatory RabbitMQ message. Filte
 | `Failed` | The message could not be constructed, the destination was invalid, or the broker explicitly rejected or returned it. |
 | `Uncertain` | A timeout, cancellation, connection failure, or lost confirmation prevents determining delivery. It may already be queued. |
 
-`Completed` means all selected publications were confirmed; `CompletedWithErrors` means publication finished with failed or uncertain items. Neither state means the gateway or downstream algorithms finished processing. Per-rule confirmed counts inherit the result of the shared gateway envelope. The Rules API does not automatically retry failed or uncertain publications. Retrying start on the same run does not resend messages; creating a new run is a deliberate new execution.
+`Completed` means all selected publications were confirmed; `CompletedWithErrors` means publication finished with failed or uncertain items. Neither state means the gateway or downstream algorithms finished processing. Per-rule confirmed counts inherit the queue-submission result of each shared selected overlay, not a pipeline delivery result. The Rules API does not automatically retry failed or uncertain publications. Retrying start on the same run does not resend messages; creating a new run submits a new set of messages.
 
-Historical gateway retries preserve dispatch IDs for the same run, overlay, pipeline, rule, and run parameters. A new historical run has new dispatch IDs. Direct input follows ordinary gateway identity: the same overlay, pipeline, rule, and run parameters reuse downstream dispatch IDs across auto-runs, so downstream deduplication may suppress repeat processing. Broker message IDs and correlation IDs remain scoped to each auto-run in both modes. A gateway retry can resend targets that already succeeded; see [historical gateway input](../unified-gateway/README.md#historical-auto-run-input).
+Every mode follows ordinary gateway identity: the same overlay, pipeline, rule, and run parameters reuse downstream dispatch IDs across auto-runs, so downstream deduplication may suppress repeat processing. Broker message IDs and correlation IDs remain scoped to each Auto Run. The gateway's existing whole-message retry can resend targets that already succeeded; see the [gateway documentation](../unified-gateway/README.md).
 
 ### Elastic Provider configuration and contract
 
@@ -482,10 +486,10 @@ Argument dictionaries are JSON objects containing scalar strings, booleans, inte
 
 Deployment sequence:
 
-1. For runs with selected rules, deploy the gateway version supporting historical envelopes to **every consumer** of the input queue and enable `HistoricalInput__Enabled=true` before publication. Filters and Overlay IDs without rules use ordinary input and do not require this flag or historical-envelope support.
+1. Stop older Rules API instances from publishing historical envelopes, then deploy this ordinary-input producer. Drain any already queued historical envelopes using the old supporting gateway before replacing it with the version that removes historical handling. Plain overlay input works with the gateway's normal path. Remove the obsolete `HistoricalInput` gateway setting; no Auto Run flag is needed on the gateway.
 2. Deploy one Rules API instance with `AutoRun:Enabled=false`, configure its provider and exact gateway destination, and verify the enabled pipeline IDs and contracts agree with the gateway.
 3. Verify the real provider contract in the deployment: field casing, numeric resolution bounds, both boolean values, date ranges/timezone, Polygon and MultiPolygon intersections, required response mappings, and at least two pages followed by termination. Confirm `sensorType.keyword` filtering and the additional `result_type=4` GET's root `id`/`sensorType`, including a VIS/PAN result whose ordinary projection says EO. Check that these raw lookups preserve the search continuation and measure their latency/load. Exercise 429/503 with the deployment's actual `Retry-After` behavior and verify a partial preview after exhausted retries. Check returned values, not only HTTP success.
-4. Enable `AutoRun__Enabled=true`, prepare a small preview, inspect its assigned targets and warnings, then start it. Verify broker confirmations and correlated gateway dispatch before increasing quotas or batch size.
+4. Enable `AutoRun__Enabled=true`, prepare a small preview, inspect its selection rules and warnings, then start it. Verify broker confirmations and gateway dispatch against current active rules, including photo-age limits, before increasing quotas or batch size.
 
 The implementation has local automated coverage; **the real Elastic Provider, RabbitMQ deployment topology, and end-to-end dispatch have not been validated against a live deployment**. A ready preview validates available overlay data and, for selected-rule runs, their pipeline contracts, but does not establish broker connectivity. Scaling this version to multiple Rules API replicas is unsupported.
 
@@ -501,7 +505,7 @@ Error-body capture reads at most **8 KiB**, or the lower configured `MaxResponse
 
 During preparation, `providerProgress` describes the latest operation, not an event history. Its phase is `requesting`, `requestDelay`, or `retryWait`, with attempt/max-attempt counts, the last HTTP status when present, and `nextAttemptAt` for a scheduled wait. Query/page indices are one-based when applicable. The UI polls this state to explain waiting and retry countdowns while keeping collected counts visible. A failed provider page does not look like a successful empty search.
 
-The summary also exposes current counts, per-target shortfalls, `confirmedPerSecond`, current memory measurements, `sourceExhausted`, and `stoppedReason`. Gateway telemetry identifies historical envelopes through `auto_run.run_id` and `unified_gateway.input_kind`. Direct input follows ordinary gateway telemetry, with the run ID retained in the message correlation ID. Use gateway events to distinguish confirmed enqueueing from later dispatch or downstream failures; AutoRun's provider changes do not alter gateway behavior.
+The summary also exposes current counts, per-target shortfalls, `confirmedPerSecond`, current memory measurements, `sourceExhausted`, and `stoppedReason`. All Auto Run messages follow ordinary gateway telemetry, with the run ID retained in the AMQP correlation ID. Use gateway events to distinguish confirmed enqueueing from later dispatch or downstream failures.
 
 ## Rule Schema
 

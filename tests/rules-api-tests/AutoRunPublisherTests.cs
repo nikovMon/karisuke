@@ -1,8 +1,7 @@
 using System.Text.Json;
-using ImagingPipeline.Common.Dtos.Historical;
-using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.PipelineContracts;
 using ImagingPipeline.RabbitMqClient;
+using ImagingPipeline.RuleEngine.Input;
 using ImagingPipeline.Rules.Api.AutoRuns;
 using ImagingPipeline.Rules.Api.Tests.Fakes;
 using Microsoft.Extensions.Logging;
@@ -19,48 +18,23 @@ namespace ImagingPipeline.Rules.Api.Tests;
 public sealed class AutoRunPublisherTests
 {
     [Fact]
-    public async Task ConfirmationCreatesVersionedCorrelatedEnvelopeWithStableRunScopedId()
+    public async Task PublishesExactOrdinaryGatewayBodyAndUpdatedFieldsWithStableRunScopedBrokerIdentity()
     {
         var transport = new Transport();
         var destination = Destination();
         var publisher = new AutoRunPublisher(transport, Options.Create(new AutoRunOptions { Destination = destination }), NullLogger<AutoRunPublisher>.Instance);
-        var payload = """{"id":"overlay-1","photoTime":"2020-01-01T00:00:00Z"}"""u8.ToArray();
-        AutoRunResolvedTarget[] targets = [new(
-            new() { PipelineId = "pipeline", RuleId = "rule", MaxOverlays = 1 },
-            new PipelineRuleDocument { Id = "rule", RuleName = "Saved rule", MatchAll = true, RunParams = [] },
-            new("rule", new Dictionary<string, ImagingPipeline.RuleEngine.Rules.SensorMatchCriteria>(), 0, double.MaxValue, null, null, null, null, []),
-            new FindAirPipelineContract())];
+        var payload = """
+            { "id": "overlay-1", "photoTime": "2026-10-27T08:00:00Z",
+              "sensorName": "ar", "sensorType": "VIS", "registrationQuality": "Accurate",
+              "gridType": "Telemetry", "gridURI": "https://images.example/image.grid",
+              "imageUrl": "https://images.example/image.tif", "bestResolution": 1.5,
+              "width": 8836, "height": 3608, "extra": [1,2],
+              "roiFootprint": { "type": "Polygon", "coordinates": [[[34,31],[35,31],[35,32],[34,32],[34,31]]] } }
+            """u8.ToArray();
 
-        var first = await publisher.PublishAsync("run-1", payload, targets, CancellationToken.None);
-        await publisher.PublishAsync("run-1", payload, targets, CancellationToken.None);
-        await publisher.PublishAsync("run-2", payload, targets, CancellationToken.None);
-
-        Assert.Equal(AutoRunItemOutcome.Confirmed, first.Outcome);
-        Assert.All(transport.Destinations, used => Assert.Same(destination, used));
-        Assert.Equal(transport.Messages[0].MessageId, transport.Messages[1].MessageId);
-        Assert.NotEqual(transport.Messages[0].MessageId, transport.Messages[2].MessageId);
-        Assert.Equal("run-1", transport.Messages[0].CorrelationId);
-        Assert.Equal("application/json", transport.Messages[0].ContentType);
-        using var body = JsonDocument.Parse(transport.Messages[0].Body);
-        Assert.Equal(HistoricalOverlayEnvelope.MessageKind, body.RootElement.GetProperty("kind").GetString());
-        Assert.Equal(1, body.RootElement.GetProperty("version").GetInt32());
-        Assert.Equal("run-1", body.RootElement.GetProperty("runId").GetString());
-        Assert.Equal("overlay-1", body.RootElement.GetProperty("overlay").GetProperty("id").GetString());
-        Assert.Equal("pipeline", Assert.Single(body.RootElement.GetProperty("targets").EnumerateArray()).GetProperty("pipelineId").GetString());
-        Assert.Null(transport.Messages[0].Headers);
-    }
-
-    [Fact]
-    public async Task NoTargetsPublishesExactOrdinaryGatewayBodyAndUpdatedFieldsWithStableIdentity()
-    {
-        var transport = new Transport();
-        var destination = Destination();
-        var publisher = new AutoRunPublisher(transport, Options.Create(new AutoRunOptions { Destination = destination }), NullLogger<AutoRunPublisher>.Instance);
-        var payload = """{ "id": "overlay-1", "photoTime": "2000-01-01T00:00:00Z", "gridType": "grid", "extra": [1,2] }"""u8.ToArray();
-
-        var first = await publisher.PublishAsync("run-1", payload, [], CancellationToken.None);
-        await publisher.PublishAsync("run-1", payload, [], CancellationToken.None);
-        await publisher.PublishAsync("run-2", payload, [], CancellationToken.None);
+        var first = await publisher.PublishAsync("run-1", payload, CancellationToken.None);
+        await publisher.PublishAsync("run-1", payload, CancellationToken.None);
+        await publisher.PublishAsync("run-2", payload, CancellationToken.None);
 
         Assert.Equal(AutoRunItemOutcome.Confirmed, first.Outcome);
         Assert.All(transport.Destinations, used => Assert.Same(destination, used));
@@ -73,6 +47,16 @@ public sealed class AutoRunPublisherTests
             using var document = JsonDocument.Parse(message.Body);
             Assert.False(document.RootElement.TryGetProperty("kind", out _));
             Assert.False(document.RootElement.TryGetProperty("targets", out _));
+            Assert.False(document.RootElement.TryGetProperty("overlay", out _));
+            Assert.False(document.RootElement.TryGetProperty("runId", out _));
+            // Verify the actual published bytes against the same parser and projection
+            // used by Unified Gateway, including FindAir's stricter image metadata.
+            var input = GatewayInputMessageParser.Parse(message.Body);
+            Assert.Equal("VIS", input.SensorType);
+            Assert.Equal(8836, input.ImageWidth);
+            Assert.Equal(3608, input.ImageHeight);
+            var context = OverlayDispatchContextFactory.Create("dispatch-1", "rule-1", document.RootElement);
+            Assert.Empty(new FindAirPipelineContract().ValidateContext(context));
         });
         Assert.Equal("run-1", transport.Messages[0].CorrelationId);
         Assert.Equal(transport.Messages[0].MessageId, transport.Messages[1].MessageId);
@@ -87,7 +71,7 @@ public sealed class AutoRunPublisherTests
         var transport = new Transport(new PublishException(1, returned));
         var publisher = new AutoRunPublisher(transport, Options.Create(new AutoRunOptions { Destination = Destination() }), NullLogger<AutoRunPublisher>.Instance);
 
-        var result = await publisher.PublishAsync("run", """{"id":"one"}"""u8.ToArray(), [], CancellationToken.None);
+        var result = await publisher.PublishAsync("run", """{"id":"one"}"""u8.ToArray(), CancellationToken.None);
 
         Assert.Equal(AutoRunItemOutcome.Failed, result.Outcome);
         Assert.Contains(returned ? "unroutable" : "negatively", result.Error!);
@@ -104,7 +88,7 @@ public sealed class AutoRunPublisherTests
             : new IOException("Connection lost after sending."));
         var publisher = new AutoRunPublisher(transport, Options.Create(new AutoRunOptions { Destination = Destination() }), NullLogger<AutoRunPublisher>.Instance);
 
-        var result = await publisher.PublishAsync("run", """{"id":"one"}"""u8.ToArray(), [], CancellationToken.None);
+        var result = await publisher.PublishAsync("run", """{"id":"one"}"""u8.ToArray(), CancellationToken.None);
 
         Assert.Equal(AutoRunItemOutcome.Uncertain, result.Outcome);
         Assert.Single(transport.Messages);
@@ -122,7 +106,7 @@ public sealed class AutoRunPublisherTests
 
         var result = await publisher.PublishAsync("run-diagnostic",
             """{"id":"one","imageUrl":"https://image.invalid/?token=private-payload-value"}"""u8.ToArray(),
-            [], CancellationToken.None);
+            CancellationToken.None);
 
         Assert.Equal(AutoRunItemOutcome.Uncertain, result.Outcome);
         Assert.Contains("Check Rules API logs", result.Error!);
@@ -142,10 +126,10 @@ public sealed class AutoRunPublisherTests
         var transport = new Transport();
         var publisher = new AutoRunPublisher(transport, Options.Create(new AutoRunOptions { Destination = Destination() }), NullLogger<AutoRunPublisher>.Instance);
         Assert.Equal(AutoRunItemOutcome.Failed,
-            (await publisher.PublishAsync("run", "{}"u8.ToArray(), [], CancellationToken.None)).Outcome);
+            (await publisher.PublishAsync("run", "{}"u8.ToArray(), CancellationToken.None)).Outcome);
         publisher = new AutoRunPublisher(transport, Options.Create(new AutoRunOptions()), NullLogger<AutoRunPublisher>.Instance);
         Assert.Equal(AutoRunItemOutcome.Failed,
-            (await publisher.PublishAsync("run", """{"id":"one"}"""u8.ToArray(), [], CancellationToken.None)).Outcome);
+            (await publisher.PublishAsync("run", """{"id":"one"}"""u8.ToArray(), CancellationToken.None)).Outcome);
         Assert.Empty(transport.Messages);
     }
 
