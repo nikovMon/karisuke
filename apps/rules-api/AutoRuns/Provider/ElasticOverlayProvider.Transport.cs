@@ -15,8 +15,8 @@ public sealed partial class ElasticOverlayProvider
     private static readonly Counter<long> RetriesMetric = TelemetryMeters.RulesApi.CreateCounter<long>("auto_run.provider.retries");
     private static readonly Histogram<double> DurationMetric = TelemetryMeters.RulesApi.CreateHistogram<double>("auto_run.provider.request.duration", "ms");
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
-    private readonly SemaphoreSlim _sendGate = new(1, 1);
-    private long? _lastAttemptFinished;
+    private readonly ProviderRequestCoordinator _coordinator = coordinator ??
+        new(configured, timeProvider ?? TimeProvider.System);
 
     private async Task<JsonDocument?> SendAsync(HttpRequestMessage original, string operation,
         bool allowNotFound, CancellationToken cancellationToken, Action<ProviderProgress>? report)
@@ -25,151 +25,138 @@ public sealed partial class ElasticOverlayProvider
         memory?.ThrowIfUnsafe();
         var started = _time.GetTimestamp();
         var body = original.Content is null ? null : await original.Content.ReadAsByteArrayAsync(cancellationToken);
-        await _sendGate.WaitAsync(cancellationToken);
-        try
+        int? lastStatus = null;
+        for (var attempt = 1; attempt <= _options.MaxRetries + 1; attempt++)
         {
-            var retryDelay = TimeSpan.Zero;
-            int? lastStatus = null;
-            for (var attempt = 1; attempt <= _options.MaxRetries + 1; attempt++)
+            cancellationToken.ThrowIfCancellationRequested();
+            using var admission = await _coordinator.AcquireAsync(operation, attempt,
+                _options.MaxRetries + 1, lastStatus, report, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            memory?.ThrowIfUnsafe();
+            report?.Invoke(new("requesting", operation, attempt, _options.MaxRetries + 1, lastStatus));
+            using var request = CloneRequest(original, body);
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(_options.TimeoutSeconds), _time);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
+            var phase = "waiting for response headers";
+            long bytesRead = 0;
+            int? statusCode = null;
+            var outcome = "failed";
+            var attemptStarted = _time.GetTimestamp();
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var pacing = _lastAttemptFinished is { } finished
-                    ? TimeSpan.FromMilliseconds(_options.RequestDelayMs) - _time.GetElapsedTime(finished)
-                    : TimeSpan.Zero;
-                var delay = pacing > retryDelay ? pacing : retryDelay;
-                if (delay > TimeSpan.Zero)
+                using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+                statusCode = (int)response.StatusCode;
+                phase = "reading the response body";
+                if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound)
                 {
-                    report?.Invoke(new(attempt == 1 ? "requestDelay" : "retryWait", operation,
-                        attempt, _options.MaxRetries + 1, lastStatus, _time.GetUtcNow() + delay));
-                    await Task.Delay(delay, _time, cancellationToken);
+                    outcome = "notFound";
+                    return null;
                 }
-                cancellationToken.ThrowIfCancellationRequested();
-                memory?.ThrowIfUnsafe();
-                report?.Invoke(new("requesting", operation, attempt, _options.MaxRetries + 1, lastStatus));
-                using var request = CloneRequest(original, body);
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(_options.TimeoutSeconds), _time);
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
-                var phase = "waiting for response headers";
-                long bytesRead = 0;
-                int? statusCode = null;
-                var outcome = "failed";
-                var attemptStarted = _time.GetTimestamp();
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorBody = await ReadErrorBodyAsync(response, request.RequestUri!, timeout.Token, cancellationToken);
+                    bytesRead = errorBody.BytesRead;
+                    outcome = "httpError";
+                    var status = (int)response.StatusCode;
+                    var retryable = status is 429 or 503;
+                    var serverDelay = RetryAfter(response);
+                    var tooLong = retryable && serverDelay > MaximumRetryDelay;
+                    var message = $"Elastic Provider returned HTTP {status} during {operation} after {attempt} attempt(s).";
+                    if (tooLong) message += " Retry-After exceeds the maximum allowed 60-second wait.";
+                    var diagnostic = Diagnostic(retryable ? "providerUnavailable" : "providerHttpError", message,
+                        operation, request.Method.Method, status, attempt, started, errorBody, bytesRead: errorBody.BytesRead);
+                    if (!retryable) throw new ElasticProviderException(message, diagnostic: diagnostic);
+                    var retryDelay = TimeSpan.FromMilliseconds(Math.Min(60_000L,
+                        (long)_options.RetryDelayMs * (1L << (attempt - 1))));
+                    // A failed job must still give the other jobs a bounded provider cooldown.
+                    if (serverDelay > retryDelay) retryDelay = serverDelay > MaximumRetryDelay ? MaximumRetryDelay : serverDelay;
+                    _coordinator.ExtendCooldown(retryDelay);
+                    if (attempt > _options.MaxRetries || tooLong)
+                        throw new ProviderUnavailableException(message, diagnostic);
+                    lastStatus = status;
+                    logger?.LogWarning("Elastic Provider returned HTTP {StatusCode} during {Operation}; retry {Attempt} of {MaxAttempts} follows after at least {DelayMs} ms.",
+                        status, operation, attempt + 1, _options.MaxRetries + 1,
+                        Math.Max(_options.RequestDelayMs, retryDelay.TotalMilliseconds));
+                    continue;
+                }
+                if (response.RequestMessage?.RequestUri is { } effective && !SameOrigin(effective, TableUri()))
+                    throw new ElasticProviderException("Provider response redirected outside the configured origin.");
+                if (response.Content.Headers.ContentLength > _options.MaxResponseBytes)
+                    throw new ProviderResponseLimitException(_options.MaxResponseBytes);
+                if (response.Content.Headers.ContentLength is > 0 and var length)
+                    memory?.ThrowIfUnsafe(length * 3);
+                await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
+                using var buffer = new MemoryStream();
+                var chunk = ArrayPool<byte>.Shared.Rent(16 * 1024);
                 try
                 {
-                    using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
-                    statusCode = (int)response.StatusCode;
-                    phase = "reading the response body";
-                    if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound)
+                    int read;
+                    while ((read = await stream.ReadAsync(chunk.AsMemory(0, chunk.Length), timeout.Token)) != 0)
                     {
-                        outcome = "notFound";
-                        return null;
-                    }
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        var errorBody = await ReadErrorBodyAsync(response, request.RequestUri!, timeout.Token, cancellationToken);
-                        bytesRead = errorBody.BytesRead;
-                        outcome = "httpError";
-                        var status = (int)response.StatusCode;
-                        var retryable = status is 429 or 503;
-                        var serverDelay = RetryAfter(response);
-                        var tooLong = retryable && serverDelay > MaximumRetryDelay;
-                        var message = $"Elastic Provider returned HTTP {status} during {operation} after {attempt} attempt(s).";
-                        if (tooLong) message += " Retry-After exceeds the maximum allowed 60-second wait.";
-                        var diagnostic = Diagnostic(retryable ? "providerUnavailable" : "providerHttpError", message,
-                            operation, request.Method.Method, status, attempt, started, errorBody, bytesRead: errorBody.BytesRead);
-                        if (!retryable) throw new ElasticProviderException(message, diagnostic: diagnostic);
-                        if (attempt > _options.MaxRetries || tooLong)
-                            throw new ProviderUnavailableException(message, diagnostic);
-                        retryDelay = TimeSpan.FromMilliseconds(Math.Min(60_000L,
-                            (long)_options.RetryDelayMs * (1L << (attempt - 1))));
-                        if (serverDelay > retryDelay) retryDelay = serverDelay;
-                        lastStatus = status;
-                        logger?.LogWarning("Elastic Provider returned HTTP {StatusCode} during {Operation}; retry {Attempt} of {MaxAttempts} follows after at least {DelayMs} ms.",
-                            status, operation, attempt + 1, _options.MaxRetries + 1,
-                            Math.Max(_options.RequestDelayMs, retryDelay.TotalMilliseconds));
-                        continue;
-                    }
-                    if (response.RequestMessage?.RequestUri is { } effective && !SameOrigin(effective, TableUri()))
-                        throw new ElasticProviderException("Provider response redirected outside the configured origin.");
-                    if (response.Content.Headers.ContentLength > _options.MaxResponseBytes)
-                        throw new ProviderResponseLimitException(_options.MaxResponseBytes);
-                    if (response.Content.Headers.ContentLength is > 0 and var length)
-                        memory?.ThrowIfUnsafe(length * 3);
-                    await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
-                    using var buffer = new MemoryStream();
-                    var chunk = ArrayPool<byte>.Shared.Rent(16 * 1024);
-                    try
-                    {
-                        int read;
-                        while ((read = await stream.ReadAsync(chunk.AsMemory(0, chunk.Length), timeout.Token)) != 0)
+                        bytesRead += read;
+                        var required = buffer.Length + read;
+                        if (required > _options.MaxResponseBytes)
+                            throw new ProviderResponseLimitException(_options.MaxResponseBytes);
+                        if (required > buffer.Capacity)
                         {
-                            bytesRead += read;
-                            var required = buffer.Length + read;
-                            if (required > _options.MaxResponseBytes)
-                                throw new ProviderResponseLimitException(_options.MaxResponseBytes);
-                            if (required > buffer.Capacity)
-                            {
-                                var capacity = Math.Min(_options.MaxResponseBytes,
-                                    Math.Max(required, Math.Max(256L, 2L * buffer.Capacity)));
-                                memory?.ThrowIfUnsafe(capacity + required * 2);
-                                buffer.Capacity = checked((int)capacity);
-                            }
-                            buffer.Write(chunk, 0, read);
+                            var capacity = Math.Min(_options.MaxResponseBytes,
+                                Math.Max(required, Math.Max(256L, 2L * buffer.Capacity)));
+                            memory?.ThrowIfUnsafe(capacity + required * 2);
+                            buffer.Capacity = checked((int)capacity);
                         }
-                        memory?.ThrowIfUnsafe(buffer.Length * 2);
-                        var document = JsonDocument.Parse(buffer.GetBuffer().AsMemory(0, checked((int)buffer.Length)));
-                        outcome = "success";
-                        return document;
+                        buffer.Write(chunk, 0, read);
                     }
-                    finally { ArrayPool<byte>.Shared.Return(chunk); }
+                    memory?.ThrowIfUnsafe(buffer.Length * 2);
+                    var document = JsonDocument.Parse(buffer.GetBuffer().AsMemory(0, checked((int)buffer.Length)));
+                    outcome = "success";
+                    return document;
                 }
-                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                {
-                    outcome = "timeout";
-                    var message = $"Elastic Provider request timed out during {operation} while {phase}. " +
-                        $"Configured per-request timeout: {_options.TimeoutSeconds} seconds (AutoRun.Provider.TimeoutSeconds); " +
-                        $"response bytes read: {bytesRead}. Narrow the search or increase that timeout and prepare again.";
-                    throw new ElasticProviderException(message, diagnostic:
-                        Diagnostic("providerTimeout", message, operation, request.Method.Method, null, attempt, started,
-                            bytesRead: bytesRead));
-                }
-                catch (Exception ex) when (ex is HttpRequestException or IOException)
-                {
-                    outcome = "transportError";
-                    const string message = "Elastic Provider request failed.";
-                    throw new ElasticProviderException(message, diagnostic:
-                        Diagnostic("providerTransportError", message, operation, request.Method.Method, null, attempt, started,
-                            bytesRead: bytesRead));
-                }
-                catch (JsonException)
-                {
-                    outcome = "invalidJson";
-                    const string message = "Elastic Provider returned invalid JSON.";
-                    throw new ElasticProviderException(message, diagnostic:
-                        Diagnostic("providerInvalidJson", message, operation, request.Method.Method, null, attempt, started,
-                            bytesRead: bytesRead));
-                }
-                finally
-                {
-                    _lastAttemptFinished = _time.GetTimestamp();
-                    if (cancellationToken.IsCancellationRequested) outcome = "cancelled";
-                    var elapsed = _time.GetElapsedTime(attemptStarted).TotalMilliseconds;
-                    var tags = new TagList
-                    {
-                        { "provider.operation", operation }, { "http.request.method", request.Method.Method },
-                        { "http.response.status_code", statusCode }, { "outcome", outcome }
-                    };
-                    RequestsMetric.Add(1, tags);
-                    if (attempt > 1) RetriesMetric.Add(1, tags);
-                    DurationMetric.Record(elapsed, tags);
-                    logger?.Log(operation == "sensor type lookup" ? LogLevel.Debug : LogLevel.Information,
-                        "Elastic Provider {Operation} attempt {Attempt} of {MaxAttempts} finished with {Outcome}, HTTP {StatusCode}, {ResponseBytes} bytes in {ElapsedMs} ms.",
-                        operation, attempt, _options.MaxRetries + 1, outcome, statusCode, bytesRead, elapsed);
-                }
+                finally { ArrayPool<byte>.Shared.Return(chunk); }
             }
-            throw new InvalidOperationException("Provider retry loop completed without a result.");
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                outcome = "timeout";
+                var message = $"Elastic Provider request timed out during {operation} while {phase}. " +
+                    $"Configured per-request timeout: {_options.TimeoutSeconds} seconds (AutoRun.Provider.TimeoutSeconds); " +
+                    $"response bytes read: {bytesRead}. Narrow the search or increase that timeout and prepare again.";
+                throw new ElasticProviderException(message, diagnostic:
+                    Diagnostic("providerTimeout", message, operation, request.Method.Method, null, attempt, started,
+                        bytesRead: bytesRead));
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException)
+            {
+                outcome = "transportError";
+                const string message = "Elastic Provider request failed.";
+                throw new ElasticProviderException(message, diagnostic:
+                    Diagnostic("providerTransportError", message, operation, request.Method.Method, null, attempt, started,
+                        bytesRead: bytesRead));
+            }
+            catch (JsonException)
+            {
+                outcome = "invalidJson";
+                const string message = "Elastic Provider returned invalid JSON.";
+                throw new ElasticProviderException(message, diagnostic:
+                    Diagnostic("providerInvalidJson", message, operation, request.Method.Method, null, attempt, started,
+                        bytesRead: bytesRead));
+            }
+            finally
+            {
+                if (cancellationToken.IsCancellationRequested) outcome = "cancelled";
+                var elapsed = _time.GetElapsedTime(attemptStarted).TotalMilliseconds;
+                var tags = new TagList
+                {
+                    { "provider.operation", operation }, { "http.request.method", request.Method.Method },
+                    { "http.response.status_code", statusCode }, { "outcome", outcome }
+                };
+                RequestsMetric.Add(1, tags);
+                if (attempt > 1) RetriesMetric.Add(1, tags);
+                DurationMetric.Record(elapsed, tags);
+                logger?.Log(operation == "sensor type lookup" ? LogLevel.Debug : LogLevel.Information,
+                    "Elastic Provider {Operation} attempt {Attempt} of {MaxAttempts} finished with {Outcome}, HTTP {StatusCode}, {ResponseBytes} bytes in {ElapsedMs} ms.",
+                    operation, attempt, _options.MaxRetries + 1, outcome, statusCode, bytesRead, elapsed);
+            }
         }
-        finally { _sendGate.Release(); }
+        throw new InvalidOperationException("Provider retry loop completed without a result.");
     }
 
     private HttpRequestMessage CloneRequest(HttpRequestMessage original, byte[]? body)
@@ -198,6 +185,8 @@ public sealed partial class ElasticOverlayProvider
     {
         if (_options.TimeoutSeconds <= 0)
             throw new ElasticProviderException("Provider timeout must be positive.");
+        if (_options.MaxConcurrentRequests <= 0)
+            throw new ElasticProviderException("Provider MaxConcurrentRequests must be positive.");
         if (_options.MaxResponseBytes is <= 0 or > 536_870_912)
             throw new ElasticProviderException("Provider MaxResponseBytes must be between 1 and 536870912 bytes.");
         if (_options.RequestDelayMs is < 0 or > 60_000 || _options.MaxRetries is < 0 or > 5 ||

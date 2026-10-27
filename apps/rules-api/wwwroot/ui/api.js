@@ -87,7 +87,7 @@ export const api = {
   },
   rule: (pipeline, id, signal) => request(`/pipelines/${encodeURIComponent(pipeline)}/rules/${encodeURIComponent(id)}`, { signal }),
   preview: body => request('/auto-runs/preview', { method: 'POST', body }),
-  list: () => request('/auto-runs'),
+  list: () => request('/auto-runs?summaryOnly=true'),
   deleteRun: id => request(`/auto-runs/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   deleteAllRuns: () => request('/auto-runs', { method: 'DELETE' }),
   run: id => request(`/auto-runs/${encodeURIComponent(id)}`),

@@ -23,6 +23,7 @@ npm-debug.log*
 
 # Local environment
 /sites/
+*.patch
 .env
 .env.*
 !.env.example

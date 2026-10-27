@@ -167,9 +167,9 @@ public sealed class ProviderQueryBuilder(
         {
             if (resolution.Min is null && resolution.Max is null)
                 yield return "resolution must supply at least one bound.";
-            if (resolution.Min is { } min && (!double.IsFinite(min) || min <= 0) ||
+            if (resolution.Min is { } min && (!double.IsFinite(min) || min < 0) ||
                 resolution.Max is { } max && (!double.IsFinite(max) || max <= 0))
-                yield return "resolution bounds must be positive finite numbers.";
+                yield return "resolution.min must be a finite number greater than or equal to zero; resolution.max must be a positive finite number.";
             if (resolution.Min > resolution.Max) yield return "resolution.min must not exceed resolution.max.";
         }
         foreach (var (name, range) in new[] { ("createdTime", filters.CreatedTime), ("photoTime", filters.PhotoTime) })

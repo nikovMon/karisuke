@@ -18,6 +18,9 @@ const options = {
     maxScannedRecords: 1000000, maxCandidates: 200000, payloadBudgetBytes: 536870912,
     readyLifetimeMinutes: 30, summaryLifetimeMinutes: 60, maxTargets: 100 },
   singleInstance: true,
+  execution: { activePreparations: 2, activePublications: 1, queuedPreparations: 1, queuedPublications: 1,
+    maxConcurrentPreparations: 3, maxConcurrentPublications: 3, maxQueuedJobs: 20,
+    providerMaxConcurrentRequests: 2, publisherConcurrency: 4, preparationReservationBytes: 402653184, reservedPreparationBytes: 805306368 },
   provider: { requestDelayMs: 250, maxRetries: 2, retryDelayMs: 1000,
     sensorTypeMappings: { VIS: 'VIS', PAN: 'PAN', 'Thermal imagery': 'IR', SAR: 'SAR' } },
   ui: { mapUrl: null },
@@ -64,6 +67,8 @@ let startFailure = false;
 let startGate = null;
 let previewFailure = null;
 const reads = new Map();
+const runResponseOverrides = new Map();
+let queueStart = false;
 let runSequence = 0;
 let pipelineFailure = false;
 let pipelineGate = null;
@@ -177,7 +182,12 @@ const server = http.createServer(async (req, res) => {
         if (polls === 0) { runs.delete(id); pendingDeletions.delete(id); }
         else pendingDeletions.set(id, polls - 1);
       }
-      return json([...runs.values()]);
+      const summaries = [...runs.values()].map(run => {
+        if (url.searchParams.get('summaryOnly') !== 'true') return run;
+        const { targets, queries, diagnostics, warnings, errors, ...summary } = run;
+        return { ...summary, isDirect: ['OverlayIds', 'Filters'].includes(run.sourceMode) && targets.length === 0 };
+      });
+      return json(summaries);
     }
     const match = url.pathname.match(/^\/auto-runs\/([^/]+)(?:\/(items|start|cancel|publication|rerun))?$/);
     if (match) {
@@ -191,7 +201,7 @@ const server = http.createServer(async (req, res) => {
         }
         reads.set(run.id, (reads.get(run.id) ?? 0) + 1);
         if (run.state === 'Preparing' && !run.providerProgress) { run.state = 'Ready'; run.readyAt = new Date().toISOString(); }
-        return json(run);
+        return json({ ...run, serverTime: new Date().toISOString(), ...runResponseOverrides.get(run.id)?.(run) });
       }
       if (match[2] === 'rerun') {
         await rerunGate;
@@ -214,6 +224,11 @@ const server = http.createServer(async (req, res) => {
       if (match[2] === 'start') {
         await startGate;
         if (startFailure) return json({ error: 'Another operation is active. Try starting this preview again.' }, 409);
+        if (queueStart) {
+          run.state = 'QueuedPublication'; run.startRequestedAt = new Date().toISOString();
+          run.queuePosition = 2; run.waitReason = 'Waiting for a publication worker'; run.expiresAt = null;
+          return json(run, 202);
+        }
         run.state = 'Publishing'; run.startedAt = new Date().toISOString();
         run.counters.confirmed = run.overlayIds ? 1 : 15; run.counters.failed = run.overlayIds ? 0 : 1;
         run.counters.uncertain = run.overlayIds ? 0 : 1; run.counters.remaining = run.overlayIds ? run.counters.selected - 1 : 8;
@@ -952,7 +967,7 @@ try {
   diagnosticRun.providerProgress = { ...diagnosticRun.providerProgress, phase: 'retryWait', attempt: 2,
     lastStatusCode: 503, nextAttemptAt: new Date(Date.now() + 15000).toISOString() };
   await diagnosticsPage.locator('#provider-progress').filter({ hasText: 'Waiting to retry' }).waitFor();
-  assert.match(await diagnosticsPage.locator('#provider-progress').textContent(), /in \d+ s.*attempt 2 of 3.*HTTP 503/);
+  assert.match(await diagnosticsPage.locator('#provider-progress').textContent(), /in \d+\.\d s.*attempt 2 of 3.*HTTP 503/);
   diagnosticRun.providerProgress.phase = 'requestDelay';
   await diagnosticsPage.locator('#provider-progress').filter({ hasText: 'Waiting between provider requests' }).waitFor();
   const diagnosticMessage = 'Provider search stopped after 3 attempts. Collected overlays remain available.';
@@ -1242,6 +1257,152 @@ try {
   await noMapPage.close();
   options.ui.mapUrl = `${origin}/map-test`;
 
+  // Clearing filters preserves the rule/ID/publication draft; explicit minimum zero is submitted in both modes.
+  const filterControlsPage = await context.newPage();
+  filterControlsPage.on('pageerror', error => pageErrors.push(error.message));
+  await filterControlsPage.goto(`${origin}/ui/auto-run`);
+  await filterControlsPage.locator('#prepare-button:not(:disabled)').waitFor();
+  await filterControlsPage.locator('#pipeline-select').selectOption('imagery');
+  await filterControlsPage.locator('[name="rule-choice"]').first().check();
+  await filterControlsPage.locator('#add-rules').click();
+  await filterControlsPage.locator('#rule-search').fill('Urban');
+  await filterControlsPage.locator('#batch-size').fill('7');
+  await filterControlsPage.locator('#delay-ms').fill('150');
+  await filterControlsPage.locator('#overall-max').fill('30');
+  await filterControlsPage.locator('[name="source-mode"][value="OverlayIds"]').check();
+  await filterControlsPage.locator('#overlay-ids').fill('keep-this-id');
+  for (const mode of ['Rules', 'Filters']) {
+    await filterControlsPage.locator(`[name="source-mode"][value="${mode}"]`).check();
+    await filterControlsPage.locator('#filter-details').evaluate(element => { element.open = true; });
+    for (const id of ['sensor-names', 'area-wkt']) await filterControlsPage.locator(`#${id}`).fill('invalid-search');
+    for (const id of ['created-from', 'created-to', 'photo-from', 'photo-to']) await filterControlsPage.locator(`#${id}`).fill('2026-10-05T12:00');
+    await filterControlsPage.locator('#registration-quality').selectOption('Accurate');
+    await filterControlsPage.locator('#is-realtime').selectOption('true');
+    await filterControlsPage.locator('#sensor-types').getByRole('checkbox', { name: 'VIS', exact: true }).check();
+    await filterControlsPage.locator('#resolution-min').fill('0');
+    await filterControlsPage.locator('#resolution-max').fill('20');
+    await filterControlsPage.locator('#prepare-button').click();
+    await filterControlsPage.locator('#form-error').filter({ hasText: 'WKT' }).waitFor();
+    const beforeClear = requests.filter(request => request.path === '/auto-runs/preview').length;
+    await filterControlsPage.locator('#clear-filters').focus();
+    await filterControlsPage.keyboard.press('Enter');
+    assert.ok(await filterControlsPage.locator('#form-error').isHidden());
+    assert.equal(await filterControlsPage.locator('#sensor-types input:checked').count(), 0);
+    for (const id of ['sensor-names', 'registration-quality', 'is-realtime', 'resolution-min', 'resolution-max', 'area-wkt', 'created-from', 'created-to', 'photo-from', 'photo-to'])
+      assert.equal(await filterControlsPage.locator(`#${id}`).inputValue(), '', `${mode}: ${id} cleared`);
+    assert.equal(await filterControlsPage.locator('#batch-size').inputValue(), '7');
+    assert.equal(await filterControlsPage.locator('#delay-ms').inputValue(), '150');
+    assert.equal(await filterControlsPage.locator('#overall-max').inputValue(), '30');
+    assert.equal(await filterControlsPage.locator('#rule-search').inputValue(), 'Urban');
+    assert.equal(await filterControlsPage.locator('#overlay-ids').inputValue(), 'keep-this-id');
+    assert.equal(await filterControlsPage.locator('[data-target-field="maxOverlays"]').count(), 1);
+    assert.equal(requests.filter(request => request.path === '/auto-runs/preview').length, beforeClear, 'clear does not submit or change a frozen preview');
+    await filterControlsPage.locator('#resolution-min').fill('0');
+    await filterControlsPage.locator('#resolution-max').fill('0');
+    await filterControlsPage.locator('#prepare-button').click();
+    await filterControlsPage.locator('#form-error').filter({ hasText: 'maximum resolution must be positive' }).waitFor();
+    await filterControlsPage.locator('#resolution-max').fill('20');
+    await filterControlsPage.locator('#prepare-button').click();
+    await filterControlsPage.locator('#start-run:not([hidden])').waitFor();
+    const sent = requests.filter(request => request.path === '/auto-runs/preview').at(-1).body;
+    assert.deepEqual(sent.source.filters, { resolution: { min: 0, max: 20 } });
+    assert.equal(sent.source.mode, mode);
+    assert.equal(sent.targets.length, mode === 'Rules' ? 1 : 0);
+    await filterControlsPage.locator('.back-link').click();
+    await filterControlsPage.locator('#prepare-button:not(:disabled)').waitFor();
+  }
+  await filterControlsPage.close();
+
+  // Lightweight history supports simultaneous jobs and keeps queue positions fresh without loading frozen rules.
+  const queuedPreparation = makeRun(cleanupBody);
+  queuedPreparation.state = 'QueuedPreparation'; queuedPreparation.queuePosition = 3; queuedPreparation.waitReason = 'Waiting for memory headroom';
+  const queuedPublication = makeRun(cleanupBody); queuedPublication.state = 'Ready';
+  const workingPublication = makeRun(cleanupBody); workingPublication.state = 'Publishing';
+  const concurrentPage = await context.newPage();
+  concurrentPage.on('pageerror', error => pageErrors.push(error.message));
+  await concurrentPage.goto(`${origin}/ui/auto-run`);
+  const queuedCard = concurrentPage.locator(`.history-item:has([data-delete-run="${queuedPreparation.id}"])`);
+  await queuedCard.getByText('Queued for preparation', { exact: true }).waitFor();
+  assert.match(await queuedCard.textContent(), /Queue position 3.*Waiting for memory headroom/);
+  assert.match(await concurrentPage.locator('#server-limits').textContent(), /Preparing2 \/ 3/);
+  assert.ok(requests.filter(request => request.path === '/auto-runs' && request.method === 'GET').every(request => request.search === '?summaryOnly=true'));
+  queuedPreparation.queuePosition = 1;
+  await queuedCard.locator('.history-queue').filter({ hasText: 'Queue position 1' }).waitFor();
+  await concurrentPage.locator(`a[href="/ui/auto-run/runs/${queuedPublication.id}"]`).click();
+  await concurrentPage.locator('#start-run:not([hidden])').waitFor();
+  queueStart = true;
+  await concurrentPage.locator('#start-run').click();
+  await concurrentPage.locator('#run-state').getByText('Queued for publication', { exact: true }).waitFor();
+  assert.ok(await concurrentPage.locator('#start-run').isHidden());
+  assert.ok(await concurrentPage.locator('#rerun-run').isHidden());
+  assert.ok(await concurrentPage.locator('#cancel-run').isEnabled());
+  assert.ok(await concurrentPage.locator('#update-publication').isEnabled());
+  assert.match(await concurrentPage.locator('#run-queue-note').textContent(), /Queue position 2.*will not expire/);
+  await concurrentPage.reload();
+  await concurrentPage.locator('#run-state').getByText('Queued for publication', { exact: true }).waitFor();
+  assert.equal(requests.filter(request => request.path === `/auto-runs/${queuedPublication.id}/start`).length, 1);
+  await concurrentPage.locator('#cancel-run').click();
+  await concurrentPage.locator('#run-state').getByText('Cancelled', { exact: true }).waitFor();
+  assert.ok(await concurrentPage.locator('#run-queue-note').isHidden());
+  queueStart = false;
+  await concurrentPage.goto(`${origin}/ui/auto-run/runs/${queuedPreparation.id}`);
+  await concurrentPage.locator('#run-state').getByText('Queued for preparation', { exact: true }).waitFor();
+  await concurrentPage.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await concurrentPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+  await concurrentPage.screenshot({ path: path.join(screenshots, 'queued-run-mobile.png'), fullPage: true });
+  await concurrentPage.locator('#cancel-run').click();
+  await concurrentPage.locator('#run-state').getByText('Cancelled', { exact: true }).waitFor();
+  await concurrentPage.close();
+
+  // Countdown is updated locally, corrects server/browser clock skew, and never invents a capacity ETA.
+  const countdownPage = await context.newPage();
+  countdownPage.on('pageerror', error => pageErrors.push(error.message));
+  await countdownPage.addInitScript(() => {
+    const intervals = new Set(), create = window.setInterval.bind(window), remove = window.clearInterval.bind(window);
+    window.countdownIntervals = intervals;
+    window.setInterval = (callback, delay, ...args) => { const id = create(callback, delay, ...args); if (delay === 100) intervals.add(id); return id; };
+    window.clearInterval = id => { intervals.delete(id); remove(id); };
+  });
+  const countdownRun = makeRun(cleanupBody);
+  countdownRun.providerProgress = { phase: 'requestDelay', operation: 'initial search page', attempt: 1, maxAttempts: 3 };
+  let countdownDuration = 150;
+  runResponseOverrides.set(countdownRun.id, () => {
+    const serverTime = Date.now() + 3600000;
+    return { serverTime: new Date(serverTime).toISOString(), providerProgress: { ...countdownRun.providerProgress,
+      nextAttemptAt: countdownRun.providerProgress.phase === 'capacityWait' ? null : new Date(serverTime + countdownDuration).toISOString() } };
+  });
+  await countdownPage.goto(`${origin}/ui/auto-run/runs/${countdownRun.id}`);
+  await countdownPage.locator('#provider-progress').filter({ hasText: /next eligible request in \d+ ms/ }).waitFor();
+  assert.doesNotMatch(await countdownPage.locator('#provider-progress').textContent(), /in 1(?:\.0)? s/);
+  const beforeCountdown = reads.get(countdownRun.id);
+  await countdownPage.locator('#provider-progress').filter({ hasText: 'Delay elapsed' }).waitFor();
+  assert.equal(reads.get(countdownRun.id), beforeCountdown, 'countdown ticks do not make extra API calls');
+  assert.equal(await countdownPage.evaluate(() => window.countdownIntervals.size), 0, 'elapsed countdown stops ticking');
+  countdownDuration = 2500;
+  await countdownPage.locator('#provider-progress').filter({ hasText: /in 2\.\d s/ }).waitFor();
+  const countdownText = await countdownPage.locator('#provider-progress').textContent();
+  await countdownPage.waitForTimeout(250);
+  assert.notEqual(await countdownPage.locator('#provider-progress').textContent(), countdownText, 'remaining time moves between polls');
+  await countdownPage.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); });
+  assert.equal(await countdownPage.evaluate(() => window.countdownIntervals.size), 0, 'hidden page stops the timer');
+  await countdownPage.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
+  assert.equal(await countdownPage.evaluate(() => window.countdownIntervals.size), 1);
+  countdownRun.providerProgress.phase = 'capacityWait';
+  await countdownPage.locator('#provider-progress').filter({ hasText: 'No start time is available' }).waitFor();
+  assert.equal(await countdownPage.evaluate(() => window.countdownIntervals.size), 0);
+  countdownRun.providerProgress.phase = 'retryWait'; countdownDuration = 6000;
+  await countdownPage.locator('#provider-progress').filter({ hasText: 'Waiting for the shared Elastic Provider cooldown' }).waitFor();
+  countdownRun.providerProgress.phase = 'retryWait'; countdownRun.providerProgress.attempt = 2; countdownRun.providerProgress.lastStatusCode = 503; countdownDuration = 9000;
+  await countdownPage.locator('#provider-progress').filter({ hasText: /retry Elastic Provider in 9\.0 s/ }).waitFor();
+  await countdownPage.locator('.back-link').click();
+  assert.equal(await countdownPage.evaluate(() => window.countdownIntervals.size), 0, 'navigation stops countdown');
+  await countdownPage.goto(`${origin}/ui/auto-run/runs/${countdownRun.id}`);
+  await countdownPage.locator('#provider-progress').filter({ hasText: 'Waiting to retry' }).waitFor();
+  countdownRun.state = 'Failed';
+  await countdownPage.locator('#run-state').getByText('Failed', { exact: true }).waitFor();
+  assert.equal(await countdownPage.evaluate(() => window.countdownIntervals.size), 0, 'terminal state stops countdown');
+  await countdownPage.close();
+
   options.enabled = false;
   const disabledPage = await context.newPage();
   disabledPage.on('pageerror', error => pageErrors.push(error.message));
@@ -1287,7 +1448,10 @@ try {
     'configured sensor type multi-select preserves shared drafts, local names and exact frozen provider values',
     'provider request pacing and retry progress, partial provider failure and queued-only success wording',
     'bounded escaped JSON and plain-text diagnostics preserve expansion across polling and fit mobile',
-    'action errors retain validation fields, request status, trace identifiers and bounded non-JSON bodies'], screenshots }, null, 2));
+    'action errors retain validation fields, request status, trace identifiers and bounded non-JSON bodies',
+    'zero minimum resolution and clear filters in both modes preserve rules IDs quotas and publication settings',
+    'lightweight concurrent history, queued Start, refresh, cancellation and responsive queue details',
+    'monotonic countdown handles milliseconds seconds server clock skew capacity waits and timer cleanup'], screenshots }, null, 2));
 } finally {
   for (const release of pendingResponses) release();
   if (browser) await browser.close();

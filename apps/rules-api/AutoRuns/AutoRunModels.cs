@@ -6,7 +6,7 @@ using ImagingPipeline.Common.Dtos.Rules.Models;
 namespace ImagingPipeline.Rules.Api.AutoRuns;
 
 public enum AutoRunSourceMode { Rules, Filters, OverlayIds }
-public enum AutoRunState { Preparing, Ready, Publishing, Completed, CompletedWithErrors, Failed, Cancelled, Expired }
+public enum AutoRunState { Preparing, Ready, Publishing, Completed, CompletedWithErrors, Failed, Cancelled, Expired, QueuedPreparation, QueuedPublication }
 public enum AutoRunItemOutcome { Pending, InFlight, Confirmed, Failed, Uncertain }
 
 public sealed record AutoRunPublication
@@ -87,7 +87,26 @@ public sealed record AutoRunSummary(
     public IReadOnlyList<AutoRunDiagnostic> Diagnostics { get; init; } = [];
     public int DiagnosticsOmitted { get; init; }
     public ProviderProgress? ProviderProgress { get; init; }
+    public int? QueuePosition { get; init; }
+    public string? WaitReason { get; init; }
+    public DateTimeOffset? PreparationStartedAt { get; init; }
+    public DateTimeOffset? StartRequestedAt { get; init; }
+    public DateTimeOffset ServerTime { get; init; }
+    public bool IsDirect { get; init; }
 }
+
+public sealed record AutoRunListEntry(
+    string Id, AutoRunState State, AutoRunSourceMode SourceMode, bool IsDirect,
+    DateTimeOffset CreatedAt, DateTimeOffset? ReadyAt, DateTimeOffset? PreparationStartedAt,
+    DateTimeOffset? StartRequestedAt, DateTimeOffset? StartedAt, DateTimeOffset? FinishedAt, DateTimeOffset? ExpiresAt,
+    AutoRunCounters Counters, long RetainedBytes, bool DeletionRequested,
+    int? QueuePosition, string? WaitReason, DateTimeOffset ServerTime);
+
+public sealed record AutoRunExecutionSnapshot(
+    int MaxConcurrentPreparations, int MaxConcurrentPublications, int MaxQueuedJobs,
+    int ActivePreparations, int ActivePublications, int QueuedPreparations, int QueuedPublications,
+    int PublisherConcurrency, int ActivePublicationPermits, int WaitingPublicationPermits,
+    long PreparationReservationBytes, long ReservedPreparationBytes, long RetainedBytes);
 
 public sealed record AutoRunDeletionResult(
     IReadOnlyList<string> DeletedIds, IReadOnlyList<string> PendingIds, long ReleasedRetainedBytes);

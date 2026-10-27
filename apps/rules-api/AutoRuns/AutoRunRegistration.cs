@@ -27,15 +27,7 @@ public static class AutoRunRegistration
             .ValidateOnStart();
         services.AddOptions<ElasticProviderOptions>()
             .Bind(configuration.GetSection(ElasticProviderOptions.SectionName))
-            .PostConfigure(options =>
-            {
-                // A supplied catalog replaces the defaults, so deployments can close the list to a subset.
-                var section = configuration.GetSection("AutoRun:Provider:SensorTypeMappings");
-                var sectionDeclared = configuration is IConfigurationRoot root &&
-                    root.Providers.Any(provider => provider.TryGet(section.Path, out _));
-                if (section.Exists() || sectionDeclared)
-                    options.SensorTypeMappings = section.Get<Dictionary<string, string>>() ?? [];
-            })
+            .PostConfigure(options => ConfigureSensorTypeMappings(options, configuration))
             .Validate(options => ElasticProviderHeaders.IsValid(options.Headers) &&
                 ElasticProviderHeaders.HasValidConfigurationShape(configuration.GetSection("AutoRun:Provider:Headers")),
                 ElasticProviderHeaders.ValidationError)
@@ -43,6 +35,8 @@ public static class AutoRunRegistration
                 "Elastic Provider timeout must be positive.")
             .Validate(options => options.RequestDelayMs is >= 0 and <= 60_000,
                 "Elastic Provider RequestDelayMs must be between 0 and 60000.")
+            .Validate(options => options.MaxConcurrentRequests > 0,
+                "Elastic Provider MaxConcurrentRequests must be positive.")
             .Validate(options => options.MaxRetries is >= 0 and <= 5,
                 "Elastic Provider MaxRetries must be between 0 and 5.")
             .Validate(options => options.RetryDelayMs is >= 1 and <= 60_000,
@@ -59,6 +53,7 @@ public static class AutoRunRegistration
                 "Enabled auto-run requires an HTTP(S) Elastic Provider BaseUrl without credentials.")
             .ValidateOnStart();
         services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<ProviderRequestCoordinator>();
         services.TryAddSingleton<IAutoRunMemoryGuard>(provider =>
             new AutoRunMemoryGuard(provider.GetRequiredService<IOptions<AutoRunOptions>>()));
         services.AddRabbitMqDestinationPublisher(configuration);
@@ -70,9 +65,50 @@ public static class AutoRunRegistration
         services.AddSingleton<ProviderQueryBuilder>();
         services.AddSingleton<IAutoRunRuleResolver, AutoRunRuleResolver>();
         services.AddSingleton<IAutoRunPublisher, AutoRunPublisher>();
+        services.AddSingleton<AutoRunExecutionResources>();
         services.AddSingleton<AutoRunService>();
         services.AddHostedService(provider => provider.GetRequiredService<AutoRunService>());
         return services;
+    }
+
+    private static void ConfigureSensorTypeMappings(ElasticProviderOptions options, IConfiguration configuration)
+    {
+        const string path = "AutoRun:Provider:SensorTypeMappings";
+        if (configuration is not IConfigurationRoot root)
+        {
+            var section = configuration.GetSection(path);
+            if (section.Exists()) options.SensorTypeMappings = section.Get<Dictionary<string, string>>() ?? [];
+            return;
+        }
+
+        // This is a closed catalog, so the highest-priority source supplies the whole list.
+        // Reading the merged section would restore removed keys from lower-priority sources.
+        foreach (var provider in root.Providers.Reverse())
+        {
+            var keys = provider.GetChildKeys([], path).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var declared = provider.TryGet(path, out var scalar);
+            if (!declared && keys.Length == 0) continue;
+
+            var mappings = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (scalar is null)
+            {
+                foreach (var key in keys)
+                {
+                    var entryPath = ConfigurationPath.Combine(path, key);
+                    if (!provider.TryGet(entryPath, out var value) || value is null ||
+                        provider.GetChildKeys([], entryPath).Any())
+                    {
+                        mappings.Clear();
+                        break;
+                    }
+                    mappings.Add(key, value);
+                }
+            }
+
+            // Empty, null and malformed explicit catalogs fail the existing startup validation.
+            options.SensorTypeMappings = mappings;
+            return;
+        }
     }
 
     private static IReadOnlyDictionary<string, object?> Normalize(IReadOnlyDictionary<string, object?> arguments, string path)
