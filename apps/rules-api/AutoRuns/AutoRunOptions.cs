@@ -17,6 +17,9 @@ public sealed class AutoRunOptions
     public int SummaryLifetimeMinutes { get; set; } = 60;
     public int PublishTimeoutSeconds { get; set; } = 30;
     public int PublisherConcurrency { get; set; } = 4;
+    public int MaxConcurrentPreparations { get; set; } = 3;
+    public int MaxConcurrentPublications { get; set; } = 3;
+    public int MaxQueuedJobs { get; set; } = 20;
     public int MaxRetainedJobs { get; set; } = 100;
     public AutoRunPublication Publication { get; set; } = new();
     public RabbitMqDestination? Destination { get; set; }
@@ -29,6 +32,7 @@ public sealed class AutoRunOptions
         Ui is not null && Ui.IsValid() && ReadyLifetimeMinutes > 0 &&
         SummaryLifetimeMinutes > 0 && PublishTimeoutSeconds > 0 &&
         PublisherConcurrency is >= 1 and <= 100 && MaxRetainedJobs > 0 &&
+        MaxConcurrentPreparations > 0 && MaxConcurrentPublications > 0 && MaxQueuedJobs > 0 &&
         Publication is { BatchSize: >= 1 and <= 100, DelayMs: >= 0 and <= 60_000 } &&
         (!Enabled || Destination is
         {

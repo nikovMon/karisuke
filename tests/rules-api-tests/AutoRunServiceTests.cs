@@ -376,13 +376,15 @@ public sealed class AutoRunServiceTests
         fixture.Provider.Get = (_, token) => blocked.Task.WaitAsync(token);
         var preparing = await fixture.Service.PreviewAsync(Request(["one"], []), CancellationToken.None);
 
-        foreach (var id in new[] { ready.Id, preparing.Id })
-            Assert.Equal(409, (await Assert.ThrowsAsync<AutoRunRequestException>(() =>
-                fixture.Service.RerunAsync(id, CancellationToken.None))).StatusCode);
+        Assert.Equal(409, (await Assert.ThrowsAsync<AutoRunRequestException>(() =>
+            fixture.Service.RerunAsync(preparing.Id, CancellationToken.None))).StatusCode);
+        var independent = await fixture.Service.RerunAsync(ready.Id, CancellationToken.None);
+        Assert.NotEqual(ready.Id, independent.Id);
         Assert.Equal(404, (await Assert.ThrowsAsync<AutoRunRequestException>(() =>
             fixture.Service.RerunAsync("missing", CancellationToken.None))).StatusCode);
-        Assert.Equal(2, fixture.Service.List().Count);
+        Assert.Equal(3, fixture.Service.List().Count);
         Assert.Empty(fixture.Publisher.Calls);
+        fixture.Service.Cancel(independent.Id);
         fixture.Service.Cancel(preparing.Id);
         await fixture.WaitAsync(preparing.Id, AutoRunState.Cancelled);
     }
@@ -1172,15 +1174,16 @@ public sealed class AutoRunServiceTests
         var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         fixture.Provider.Get = async (_, token) =>
         {
-            requested.SetResult();
+            requested.TrySetResult();
             await Task.Delay(Timeout.InfiniteTimeSpan, token);
             return new(Overlay("one"), null);
         };
         var first = await fixture.Service.PreviewAsync(Request(["one"], direct ? [] : null), CancellationToken.None);
         await requested.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var concurrent = await Assert.ThrowsAsync<AutoRunRequestException>(() =>
-            fixture.Service.PreviewAsync(Request(["one"], direct ? [] : null), CancellationToken.None));
-        Assert.Equal(409, concurrent.StatusCode);
+        var concurrent = await fixture.Service.PreviewAsync(Request(["one"], direct ? [] : null), CancellationToken.None);
+        Assert.NotEqual(first.Id, concurrent.Id);
+        fixture.Service.Cancel(concurrent.Id);
+        await fixture.WaitAsync(concurrent.Id, AutoRunState.Cancelled);
         fixture.Service.Cancel(first.Id);
         await fixture.WaitAsync(first.Id, AutoRunState.Cancelled);
         fixture.Provider.Get = null;
@@ -1257,20 +1260,16 @@ public sealed class AutoRunServiceTests
     }
 
     [Fact]
-    public async Task DeletingQueuedPreparationWaitsForWorkerAndRejectsMutations()
+    public async Task DeletingQueuedPreparationImmediatelyReleasesMemoryWithoutProviderWork()
     {
         await using var fixture = new Fixture([Overlay("one")], EnabledOptions(), null, null, null);
         var preparing = await fixture.Service.PreviewAsync(Request(["one"], []), CancellationToken.None);
         var result = fixture.Service.Delete(preparing.Id);
-        Assert.Empty(result.DeletedIds);
-        Assert.Equal([preparing.Id], result.PendingIds);
-        Assert.Equal(0, result.ReleasedRetainedBytes);
-        Assert.True(fixture.Service.Get(preparing.Id).DeletionRequested);
-        Assert.Equal(409, Assert.Throws<AutoRunRequestException>(() => fixture.Service.Start(preparing.Id)).StatusCode);
-        Assert.Equal(409, Assert.Throws<AutoRunRequestException>(() => fixture.Service.UpdatePublication(preparing.Id, new())).StatusCode);
-        Assert.Equal(409, (await Assert.ThrowsAsync<AutoRunRequestException>(() =>
-            fixture.Service.RerunAsync(preparing.Id, CancellationToken.None))).StatusCode);
-        Assert.Equal([preparing.Id], fixture.Service.Delete(preparing.Id).PendingIds);
+        Assert.Equal([preparing.Id], result.DeletedIds);
+        Assert.Empty(result.PendingIds);
+        Assert.True(result.ReleasedRetainedBytes > 0);
+        Assert.Equal(404, Assert.Throws<AutoRunRequestException>(() => fixture.Service.Get(preparing.Id)).StatusCode);
+        Assert.Equal(404, Assert.Throws<AutoRunRequestException>(() => fixture.Service.Start(preparing.Id)).StatusCode);
 
         await fixture.Service.StartAsync(CancellationToken.None);
         await UntilAsync(() => fixture.Service.List().Count == 0);

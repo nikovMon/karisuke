@@ -12,7 +12,8 @@ using NetTopologySuite.IO;
 namespace ImagingPipeline.Rules.Api.AutoRuns.Provider;
 
 public sealed partial class ElasticOverlayProvider(HttpClient client, IOptions<ElasticProviderOptions> configured,
-    IAutoRunMemoryGuard? memory = null, TimeProvider? timeProvider = null, ILogger<ElasticOverlayProvider>? logger = null)
+    IAutoRunMemoryGuard? memory = null, TimeProvider? timeProvider = null, ILogger<ElasticOverlayProvider>? logger = null,
+    ProviderRequestCoordinator? coordinator = null)
     : IElasticOverlayProvider
 {
     private const string OffsetlessResponseTimeZone = "Asia/Jerusalem";

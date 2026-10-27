@@ -2,10 +2,10 @@ using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Text.Json;
-using System.Threading.Channels;
 using ImagingPipeline.GeometryUtils;
 using ImagingPipeline.Observability;
 using ImagingPipeline.PipelineContracts;
+using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.RuleEngine.Rules;
 using ImagingPipeline.Rules.Api.AutoRuns.Provider;
 using Microsoft.Extensions.Options;
@@ -16,7 +16,7 @@ namespace ImagingPipeline.Rules.Api.AutoRuns;
 /// One in-process coordinator owns admission, snapshots, payload accounting and job state.
 /// HTTP cancellation only cancels preview admission; accepted work belongs to its job.
 /// </summary>
-public sealed class AutoRunService(
+public sealed partial class AutoRunService(
     IAutoRunRuleResolver resolver,
     IElasticOverlayProvider provider,
     ProviderQueryBuilder queryBuilder,
@@ -24,15 +24,19 @@ public sealed class AutoRunService(
     IOptions<AutoRunOptions> configured,
     TimeProvider time,
     ILogger<AutoRunService> logger,
-    IAutoRunMemoryGuard? memory = null) : BackgroundService
+    IAutoRunMemoryGuard? memory = null,
+    AutoRunExecutionResources? resources = null) : BackgroundService
 {
     private static readonly Counter<long> SelectedMetric = TelemetryMeters.RulesApi.CreateCounter<long>("auto_run.selected.overlays");
     private static readonly Counter<long> PublicationsMetric = TelemetryMeters.RulesApi.CreateCounter<long>("auto_run.publications");
+    private static readonly Histogram<double> QueueWaitMetric = TelemetryMeters.RulesApi.CreateHistogram<double>("auto_run.queue.wait", "s");
+    private static readonly UpDownCounter<long> QueuedJobsMetric = TelemetryMeters.RulesApi.CreateUpDownCounter<long>("auto_run.queued.jobs");
+    private static readonly UpDownCounter<long> ActiveJobsMetric = TelemetryMeters.RulesApi.CreateUpDownCounter<long>("auto_run.active.jobs");
     private readonly AutoRunOptions _options = configured.Value;
     private readonly object _gate = new();
     private readonly Dictionary<string, Job> _jobs = new(StringComparer.Ordinal);
-    private readonly Channel<Job> _work = Channel.CreateUnbounded<Job>(new() { SingleReader = true });
-    private string? _active;
+    private readonly AutoRunExecutionResources _resources = resources ?? new(configured,
+        Options.Create(new ElasticProviderOptions()), Options.Create(new RabbitMqClientOptions()), null);
     private long _retainedBytes;
 
     public async Task<AutoRunSummary> PreviewAsync(AutoRunPreviewRequest request, CancellationToken cancellationToken)
@@ -43,7 +47,7 @@ public sealed class AutoRunService(
         Validate(request);
         cancellationToken.ThrowIfCancellationRequested();
         EnsureMemoryAvailable();
-        lock (_gate) EnsureAvailable();
+        lock (_gate) { Sweep(); EnsureAccepting(); }
         IReadOnlyList<AutoRunResolvedTarget> targets = request.Targets.Count == 0
             ? [] : await resolver.ResolveAsync(request.Targets, cancellationToken);
         var typeErrors = targets.SelectMany(t => queryBuilder.ValidateSensorTypes(null, [t.Rule])
@@ -60,7 +64,9 @@ public sealed class AutoRunService(
         AddWarning(job, "These overlays will be submitted as ordinary gateway input. The gateway evaluates all current active rules, including each rule's photo-age limit. Preview rule assignments and quotas describe selection only; they do not restrict downstream routing or guarantee processing.");
         lock (_gate)
         {
-            EnsureAvailable();
+            Sweep();
+            EnsureAccepting();
+            cancellationToken.ThrowIfCancellationRequested();
             EnsureMemoryAvailable(rulesBytes + 4096);
             if (_jobs.Count >= _options.MaxRetainedJobs)
                 throw new AutoRunRequestException(409, "The retained-job limit is reached. Delete an unused run or wait for previews/summaries to expire.");
@@ -69,8 +75,15 @@ public sealed class AutoRunService(
             job.RuleBytes = rulesBytes;
             _retainedBytes += rulesBytes;
             _jobs.Add(job.Id, job);
-            _active = job.Id;
-            Enqueue(job);
+            _preparations.AddLast(job);
+            DispatchAvailable();
+            if (IsQueued(job) && QueuedCount > _options.MaxQueuedJobs)
+            {
+                _preparations.Remove(job);
+                Remove(job);
+                ReportQueueMetrics();
+                throw QueueFull();
+            }
             logger.LogInformation("Auto-run {AutoRunId} preparation accepted: source {SourceMode}, {TargetCount} targets, maximum {Maximum} overlays.",
                 job.Id, job.Request.Source.Mode, job.Targets.Count, job.Maximum);
             return Summary(job);
@@ -91,7 +104,7 @@ public sealed class AutoRunService(
             Sweep();
             var job = Find(id);
             EnsureNotDeleting(job);
-            if (job.State is AutoRunState.Preparing or AutoRunState.Publishing)
+            if (IsActiveOrQueued(job))
                 throw new AutoRunRequestException(409, "Wait for the active run to finish or cancel it before preparing a rerun.");
             request = job.Request with { Publication = job.Publication with { } };
         }
@@ -132,19 +145,28 @@ public sealed class AutoRunService(
             Sweep();
             var job = Find(id);
             EnsureNotDeleting(job);
-            if (job.StartedAt is not null) return Summary(job);
+            if (job.StartRequestedAt is not null) return Summary(job);
             if (job.State != AutoRunState.Ready)
                 throw new AutoRunRequestException(409, "Only a ready, unexpired preview can be started.");
             if (job.Items.Count == 0)
                 throw new AutoRunRequestException(409, "This preview has no selected overlays to publish. Review the search notes and errors, adjust the criteria or provider settings, and prepare again.");
-            EnsureAvailable();
-            job.State = AutoRunState.Publishing;
-            job.StartedAt = time.GetUtcNow();
+            EnsureAccepting();
+            job.State = AutoRunState.QueuedPublication;
+            job.StartRequestedAt = time.GetUtcNow();
             job.ActivePublication = job.Publication;
-            _active = id;
-            Enqueue(job);
-            logger.LogInformation("Auto-run {AutoRunId} publication started: {SelectedCount} overlays, batch size {BatchSize}, delay {DelayMs} ms.",
-                job.Id, job.Items.Count, job.Publication.BatchSize, job.Publication.DelayMs);
+            _publications.AddLast(job);
+            DispatchAvailable();
+            if (IsQueued(job) && QueuedCount > _options.MaxQueuedJobs)
+            {
+                _publications.Remove(job);
+                job.State = AutoRunState.Ready;
+                job.StartRequestedAt = null;
+                job.WaitReason = null;
+                ReportQueueMetrics();
+                throw QueueFull();
+            }
+            logger.LogInformation("Auto-run {AutoRunId} publication accepted in {State}: {SelectedCount} overlays, batch size {BatchSize}, delay {DelayMs} ms.",
+                job.Id, job.State, job.Items.Count, job.Publication.BatchSize, job.Publication.DelayMs);
             return Summary(job);
         }
     }
@@ -157,7 +179,7 @@ public sealed class AutoRunService(
             Sweep();
             var job = Find(id);
             EnsureNotDeleting(job);
-            if (job.State is not (AutoRunState.Preparing or AutoRunState.Ready or AutoRunState.Publishing))
+            if (!IsActiveOrQueued(job) && job.State != AutoRunState.Ready)
                 throw new AutoRunRequestException(409, "Publication settings cannot change for a terminal job.");
             job.Publication = settings with { };
             if (job.State != AutoRunState.Publishing) job.ActivePublication = job.Publication;
@@ -180,13 +202,25 @@ public sealed class AutoRunService(
                 AddWarning(job, "Cancellation requested. Already submitted messages cannot be recalled.");
                 logger.LogInformation("Auto-run {AutoRunId} cancellation requested in {State}; {ConfirmedCount} submissions already confirmed.", job.Id, job.State, job.Confirmed);
             }
-            else if (job.State == AutoRunState.Ready) Finish(job, AutoRunState.Cancelled);
+            else if (job.State == AutoRunState.Ready || IsQueued(job))
+            {
+                _preparations.Remove(job);
+                _publications.Remove(job);
+                Finish(job, AutoRunState.Cancelled);
+                DispatchAvailable();
+            }
             return Summary(job);
         }
     }
 
+    public override Task StartAsync(CancellationToken cancellationToken)
+    {
+        resources?.ValidateConfiguration();
+        return base.StartAsync(cancellationToken);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken) =>
-        await Task.WhenAll(ProcessAsync(stoppingToken), SweepAsync(stoppingToken));
+        await Task.WhenAll(ScheduleAsync(stoppingToken), SweepAsync(stoppingToken));
 
     public AutoRunDeletionResult Delete(string id)
     {
@@ -206,14 +240,6 @@ public sealed class AutoRunService(
         }
     }
 
-    // Work includes both queued and executing entries. A preview can be started as soon as
-    // it becomes Ready, before its preparation worker finishes unwinding.
-    private void Enqueue(Job job)
-    {
-        job.OutstandingWork++;
-        _work.Writer.TryWrite(job);
-    }
-
     private AutoRunDeletionResult DeleteJobs(IReadOnlyList<Job> jobs)
     {
         var deleted = new List<string>();
@@ -222,6 +248,8 @@ public sealed class AutoRunService(
         foreach (var job in jobs)
         {
             job.DeletionRequested = true;
+            _preparations.Remove(job);
+            _publications.Remove(job);
             if (job.OutstandingWork > 0)
             {
                 job.Cancellation.Cancel();
@@ -234,6 +262,7 @@ public sealed class AutoRunService(
                 deleted.Add(job.Id);
             }
         }
+        DispatchAvailable();
         return new(deleted, pending, released);
     }
 
@@ -243,38 +272,18 @@ public sealed class AutoRunService(
             throw new AutoRunRequestException(409, "This run is being deleted. Wait for its in-flight work to finish.");
     }
 
-    private async Task ProcessAsync(CancellationToken stoppingToken)
-    {
-        try
-        {
-            await foreach (var job in _work.Reader.ReadAllAsync(stoppingToken))
-            {
-                try { await ProcessJobAsync(job, stoppingToken); }
-                finally
-                {
-                    lock (_gate)
-                    {
-                        job.OutstandingWork--;
-                        if (job.DeletionRequested && job.OutstandingWork == 0) Remove(job);
-                    }
-                }
-            }
-        }
-        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
-    }
-
-    private async Task ProcessJobAsync(Job job, CancellationToken stoppingToken)
+    private async Task ProcessJobAsync(Job job, bool preparation, CancellationToken stoppingToken)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, job.Cancellation.Token);
         using var scope = logger.BeginScope(new Dictionary<string, object?> { ["auto_run.id"] = job.Id, ["trace_id"] = job.TraceId });
         using var activity = TelemetrySources.RulesApi.StartActivity(
-            job.State == AutoRunState.Preparing ? "auto_run.prepare" : "auto_run.publish",
+            preparation ? "auto_run.prepare" : "auto_run.publish",
             ActivityKind.Internal, job.TraceContext);
         activity?.SetTag("auto_run.id", job.Id);
         try
         {
             linked.Token.ThrowIfCancellationRequested();
-            if (job.State == AutoRunState.Preparing) await PrepareAsync(job, linked.Token);
+            if (preparation) await PrepareAsync(job, linked.Token);
             else await PublishAsync(job, linked.Token);
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested)
@@ -426,7 +435,6 @@ public sealed class AutoRunService(
             job.ReadyAt = time.GetUtcNow();
             job.State = AutoRunState.Ready;
             job.ProviderProgress = null;
-            if (_active == job.Id) _active = null;
             SelectedMetric.Add(job.Items.Count);
             logger.LogInformation("Auto-run preview ready: scanned {Scanned}, invalid {Invalid}, duplicates {Duplicates}, eligible {Eligible}, selected {Selected}, source complete {SourceComplete}.",
                 job.Scanned, job.Invalid, job.Duplicates, job.ObservedMatches, job.Items.Count, job.SourceExhausted);
@@ -611,6 +619,7 @@ public sealed class AutoRunService(
                 CancellationToken = cancellationToken
             }, async (item, token) =>
             {
+                using var permit = await _resources.AcquirePublicationAsync(token);
                 token.ThrowIfCancellationRequested();
                 lock (_gate) { item.Outcome = AutoRunItemOutcome.InFlight; job.InFlight++; }
                 AutoRunPublishResult result;
@@ -662,7 +671,7 @@ public sealed class AutoRunService(
         {
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5), time);
             while (await timer.WaitForNextTickAsync(cancellationToken))
-                lock (_gate) Sweep();
+                lock (_gate) { Sweep(); DispatchAvailable(); }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }
@@ -686,7 +695,6 @@ public sealed class AutoRunService(
         _retainedBytes -= released;
         job.RuleBytes = job.PayloadBytes = job.DiagnosticBytes = 0;
         _jobs.Remove(job.Id);
-        if (_active == job.Id) _active = null;
         job.Cancellation.Dispose();
         // Channel enumerators may retain the last job while idle. Clear its heavy references
         // so deletion releases the data even before another run reaches the worker.
@@ -707,18 +715,11 @@ public sealed class AutoRunService(
     {
         job.State = state;
         job.ProviderProgress = null;
-        if (_active == job.Id) _active = null;
+        job.WaitReason = null;
         job.FinishedAt = time.GetUtcNow();
         foreach (var item in job.Items) item.Payload = null;
         _retainedBytes -= job.PayloadBytes;
         job.PayloadBytes = 0;
-    }
-
-    private void EnsureAvailable()
-    {
-        Sweep();
-        if (_active is not null)
-            throw new AutoRunRequestException(409, $"Auto-run '{_active}' is preparing or publishing. Only one active job is supported.");
     }
 
     private Job Find(string id) => _jobs.GetValueOrDefault(id) ??
@@ -744,7 +745,10 @@ public sealed class AutoRunService(
     {
         Diagnostics = job.Diagnostics.Select(d => d.Diagnostic).ToArray(),
         DiagnosticsOmitted = job.DiagnosticsOmitted,
-        ProviderProgress = job.ProviderProgress
+        ProviderProgress = job.ProviderProgress,
+        QueuePosition = QueuePosition(job), WaitReason = job.WaitReason,
+        PreparationStartedAt = job.PreparationStartedAt, StartRequestedAt = job.StartRequestedAt,
+        ServerTime = time.GetUtcNow(), IsDirect = job.IsDirect
     };
 
     private void Validate(AutoRunPreviewRequest request)
@@ -868,7 +872,10 @@ public sealed class AutoRunService(
         public DateTimeOffset CreatedAt { get; } = createdAt;
         public ActivityContext TraceContext { get; } = Activity.Current?.Context ?? default;
         public string TraceId { get; } = Activity.Current?.TraceId.ToString() ?? ActivityTraceId.CreateRandom().ToString();
-        public AutoRunState State { get; set; } = AutoRunState.Preparing;
+        public AutoRunState State { get; set; } = AutoRunState.QueuedPreparation;
+        public string? WaitReason { get; set; } = "preparationCapacity";
+        public DateTimeOffset? PreparationStartedAt { get; set; }
+        public DateTimeOffset? StartRequestedAt { get; set; }
         public DateTimeOffset? ReadyAt { get; set; }
         public DateTimeOffset? StartedAt { get; set; }
         public DateTimeOffset? FinishedAt { get; set; }

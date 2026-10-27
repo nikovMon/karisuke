@@ -26,6 +26,99 @@ public sealed class AutoRunApiTests
     private const string Area = "POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))";
 
     [Theory]
+    [InlineData(AutoRunSourceMode.Filters)]
+    [InlineData(AutoRunSourceMode.Rules)]
+    public async Task ZeroMinimumResolutionReachesProviderAndLightweightHistoryOmitsSnapshots(AutoRunSourceMode mode)
+    {
+        using var fixture = new Fixture();
+        if (mode == AutoRunSourceMode.Rules)
+            fixture.Store.Add(RulesIndex, "shared-rule", Rule("Zero minimum", "tenant"));
+        var request = Request() with
+        {
+            Source = new() { Mode = mode, Filters = new() { Resolution = new() { Min = 0, Max = 20 } } },
+            Targets = mode == AutoRunSourceMode.Rules ? Request().Targets : []
+        };
+        using var response = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", request, AutoRunJson.Options);
+        await AssertStatus(response, HttpStatusCode.Accepted);
+        var created = await Read<AutoRunSummary>(response);
+        var ready = await WaitForState(fixture.Client, created.Id, AutoRunState.Ready);
+        Assert.Equal(1, ready.Counters.Selected);
+        var calls = fixture.Provider.Calls.Where(c => c.Method == HttpMethod.Post).ToArray();
+        Assert.NotEmpty(calls);
+        foreach (var call in calls)
+        {
+            using var body = JsonDocument.Parse(call.Body!);
+            var condition = body.RootElement.GetProperty("filter").GetProperty("logical_operators").GetProperty("AND")
+                .EnumerateArray().Single(c => c.TryGetProperty("range", out var ranges) && ranges.TryGetProperty("RESOLUTION", out _));
+            var range = condition.GetProperty("range").GetProperty("RESOLUTION").GetProperty("values")[0];
+            Assert.Equal(0, range.GetProperty("gte").GetDouble());
+            Assert.Equal(20, range.GetProperty("lte").GetDouble());
+        }
+        using var historyResponse = await fixture.Client.GetAsync("/auto-runs?summaryOnly=true");
+        await AssertStatus(historyResponse, HttpStatusCode.OK);
+        using var history = JsonDocument.Parse(await historyResponse.Content.ReadAsStringAsync());
+        var entry = Assert.Single(history.RootElement.EnumerateArray());
+        Assert.Equal(created.Id, entry.GetProperty("id").GetString());
+        Assert.Equal(mode == AutoRunSourceMode.Filters, entry.GetProperty("isDirect").GetBoolean());
+        Assert.False(entry.TryGetProperty("targets", out _));
+        Assert.False(entry.TryGetProperty("queries", out _));
+        Assert.False(entry.TryGetProperty("diagnostics", out _));
+        Assert.True(entry.GetProperty("serverTime").GetDateTimeOffset() >= created.CreatedAt);
+        Assert.NotNull(ready.PreparationStartedAt);
+    }
+
+    [Fact]
+    public async Task StartQueuesWith202AndRemainsIdempotentUntilPublicationCapacityIsAvailable()
+    {
+        using var fixture = new Fixture(configurationOverrides: new Dictionary<string, string?>
+        {
+            ["AutoRun:MaxConcurrentPublications"] = "1", ["AutoRun:MaxQueuedJobs"] = "1"
+        });
+        var request = Request() with { Targets = [], Publication = new() { BatchSize = 1, DelayMs = 0 } };
+        async Task<AutoRunSummary> Preview()
+        {
+            using var response = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", request, AutoRunJson.Options);
+            await AssertStatus(response, HttpStatusCode.Accepted);
+            return await WaitForState(fixture.Client, (await Read<AutoRunSummary>(response)).Id, AutoRunState.Ready);
+        }
+        var first = await Preview();
+        var second = await Preview();
+        var third = await Preview();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Broker.BeforeConfirmation = async token => { entered.TrySetResult(); await release.Task.WaitAsync(token); };
+        using var firstStart = await fixture.Client.PostAsync($"/auto-runs/{first.Id}/start", null);
+        await AssertStatus(firstStart, HttpStatusCode.OK);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        for (var i = 0; i < 2; i++)
+        {
+            using var start = await fixture.Client.PostAsync($"/auto-runs/{second.Id}/start", null);
+            await AssertStatus(start, HttpStatusCode.Accepted);
+            var queued = await Read<AutoRunSummary>(start);
+            Assert.Equal(AutoRunState.QueuedPublication, queued.State);
+            Assert.Equal(1, queued.QueuePosition);
+            Assert.Null(queued.StartedAt);
+            Assert.Null(queued.ExpiresAt);
+            Assert.NotNull(queued.StartRequestedAt);
+        }
+        using var rejected = await fixture.Client.PostAsync($"/auto-runs/{third.Id}/start", null);
+        await AssertStatus(rejected, HttpStatusCode.Conflict);
+        var stillReady = await WaitForState(fixture.Client, third.Id, AutoRunState.Ready);
+        Assert.Null(stillReady.StartRequestedAt);
+        Assert.NotNull(stillReady.ExpiresAt);
+        using var optionsResponse = await fixture.Client.GetAsync("/auto-runs/options");
+        using var options = JsonDocument.Parse(await optionsResponse.Content.ReadAsStringAsync());
+        var execution = options.RootElement.GetProperty("execution");
+        Assert.Equal(1, execution.GetProperty("activePublications").GetInt32());
+        Assert.Equal(1, execution.GetProperty("queuedPublications").GetInt32());
+        Assert.Equal(3, execution.GetProperty("maxConcurrentPreparations").GetInt32());
+        Assert.Equal(2, execution.GetProperty("providerMaxConcurrentRequests").GetInt32());
+        release.TrySetResult();
+        await WaitForState(fixture.Client, second.Id, AutoRunState.Completed);
+        Assert.Equal(2, fixture.Broker.Messages.Count);
+    }
+
+    [Theory]
     [InlineData(AutoRunSourceMode.Rules, false)]
     [InlineData(AutoRunSourceMode.OverlayIds, false)]
     [InlineData(AutoRunSourceMode.Filters, true)]
@@ -516,8 +609,8 @@ public sealed class AutoRunApiTests
         using var originalResponse = await fixture.Client.GetAsync($"/auto-runs/{original.Id}");
         var retainedOriginal = await Read<AutoRunSummary>(originalResponse);
         // Memory is sampled per response; frozen run data must remain unchanged as the rerun progresses.
-        Assert.Equal(JsonSerializer.Serialize(originalCompleted with { Memory = null }, AutoRunJson.Options),
-            JsonSerializer.Serialize(retainedOriginal with { Memory = null }, AutoRunJson.Options));
+        Assert.Equal(JsonSerializer.Serialize(originalCompleted with { Memory = null, ServerTime = default }, AutoRunJson.Options),
+            JsonSerializer.Serialize(retainedOriginal with { Memory = null, ServerTime = default }, AutoRunJson.Options));
 
         using var startRerun = await fixture.Client.PostAsync($"/auto-runs/{rerun.Id}/start", null);
         await AssertStatus(startRerun, HttpStatusCode.OK);
@@ -745,7 +838,7 @@ public sealed class AutoRunApiTests
         const string mapUrl = "https://maps.example/viewer?mode=selection";
         const string secret = "options-provider-secret-canary";
         const int responseLimit = 96 * 1024 * 1024;
-        const long memoryLimit = 1024L * 1024 * 1024;
+        const long memoryLimit = 2L * 1024 * 1024 * 1024;
         using var fixture = new Fixture(providerHeaders: new Dictionary<string, string>
         {
             ["Authorization"] = "Bearer " + secret,
@@ -781,6 +874,54 @@ public sealed class AutoRunApiTests
         Assert.DoesNotContain("X-Private-Provider-Key", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(secret, json, StringComparison.Ordinal);
         Assert.False(options.GetProperty("provider").TryGetProperty("headers", out _));
+        Assert.Empty(fixture.Provider.Calls);
+        Assert.Empty(fixture.Broker.Messages);
+    }
+
+    [Fact]
+    public async Task OptionsExposeOnlyConfiguredSensorTypesWithoutBundledDefaults()
+    {
+        using var fixture = new Fixture(enabled: false, configurationOverrides: new Dictionary<string, string?>
+        {
+            ["AutoRun:Provider:SensorTypeMappings:VIS"] = "VIS",
+            ["AutoRun:Provider:SensorTypeMappings:PAN"] = "PAN"
+        });
+
+        using var response = await fixture.Client.GetAsync("/auto-runs/options");
+        await AssertStatus(response, HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var mappings = document.RootElement.GetProperty("provider").GetProperty("sensorTypeMappings");
+
+        Assert.Equal(new[] { "PAN", "VIS" }, mappings.EnumerateObject().Select(entry => entry.Name).Order(StringComparer.Ordinal));
+        Assert.Equal("VIS", mappings.GetProperty("VIS").GetString());
+        Assert.Equal("PAN", mappings.GetProperty("PAN").GetString());
+        Assert.False(mappings.TryGetProperty("EO", out _));
+    }
+
+    [Fact]
+    public async Task OptionsUseHighestPrioritySensorTypeCatalogAsACompleteList()
+    {
+        using var fixture = new Fixture(enabled: false,
+            lowerPriorityConfiguration: new Dictionary<string, string?>
+            {
+                ["AutoRun:Provider:SensorTypeMappings:EO"] = "EO",
+                ["AutoRun:Provider:SensorTypeMappings:VIS"] = "old-visible"
+            },
+            configurationOverrides: new Dictionary<string, string?>
+            {
+                ["AutoRun:Provider:SensorTypeMappings:VIS"] = "visible-provider",
+                ["AutoRun:Provider:SensorTypeMappings:newtype"] = "custom-provider"
+            });
+
+        using var response = await fixture.Client.GetAsync("/auto-runs/options");
+        await AssertStatus(response, HttpStatusCode.OK);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var mappings = document.RootElement.GetProperty("provider").GetProperty("sensorTypeMappings");
+
+        Assert.Equal(new[] { "VIS", "newtype" }, mappings.EnumerateObject().Select(entry => entry.Name).Order(StringComparer.Ordinal));
+        Assert.Equal("visible-provider", mappings.GetProperty("VIS").GetString());
+        Assert.Equal("custom-provider", mappings.GetProperty("newtype").GetString());
+        Assert.False(mappings.TryGetProperty("EO", out _));
         Assert.Empty(fixture.Provider.Calls);
         Assert.Empty(fixture.Broker.Messages);
     }
@@ -1084,7 +1225,8 @@ public sealed class AutoRunApiTests
         public HttpClient Client { get; }
 
         public Fixture(bool enabled = true, IReadOnlyDictionary<string, string>? providerHeaders = null, int maxSelectedOverlays = 100000,
-            IReadOnlyDictionary<string, string?>? configurationOverrides = null, TimeProvider? time = null)
+            IReadOnlyDictionary<string, string?>? configurationOverrides = null, TimeProvider? time = null,
+            IReadOnlyDictionary<string, string?>? lowerPriorityConfiguration = null)
         {
             _baseFactory = new(Store);
             _app = _baseFactory.WithWebHostBuilder(builder =>
@@ -1110,7 +1252,12 @@ public sealed class AutoRunApiTests
                 if (configurationOverrides is not null)
                     foreach (var (name, value) in configurationOverrides)
                         configuration[name] = value;
-                builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(configuration));
+                builder.ConfigureAppConfiguration((_, config) =>
+                {
+                    if (lowerPriorityConfiguration is not null)
+                        config.AddInMemoryCollection(lowerPriorityConfiguration);
+                    config.AddInMemoryCollection(configuration);
+                });
                 builder.ConfigureServices(services =>
                 {
                     if (time is not null)
@@ -1190,11 +1337,12 @@ public sealed class AutoRunApiTests
     private sealed class CapturingBroker : IRabbitMqDestinationPublisher
     {
         public ConcurrentQueue<PublishedMessage> Messages { get; } = new();
-        public Task PublishAsync(RabbitMqDestination destination, RabbitMqMessageEnvelope message, CancellationToken cancellationToken = default)
+        public Func<CancellationToken, Task>? BeforeConfirmation { get; set; }
+        public async Task PublishAsync(RabbitMqDestination destination, RabbitMqMessageEnvelope message, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             Messages.Enqueue(new(destination, message with { Body = message.Body.ToArray() }));
-            return Task.CompletedTask;
+            if (BeforeConfirmation is { } wait) await wait(cancellationToken);
         }
     }
 }

@@ -11,12 +11,15 @@ public sealed class AutoRunsController(
     AutoRunService service,
     IOptions<AutoRunOptions> configured,
     IAutoRunMemoryGuard memory,
-    IOptions<AutoRuns.Provider.ElasticProviderOptions> providerOptions) : ControllerBase
+    IOptions<AutoRuns.Provider.ElasticProviderOptions> providerOptions,
+    AutoRuns.Provider.ProviderRequestCoordinator requests) : ControllerBase
 {
     [HttpGet("options")]
     public IActionResult Options()
     {
         var options = configured.Value;
+        var execution = service.Execution();
+        var provider = requests.Snapshot();
         return Ok(new
         {
             options.Enabled,
@@ -34,13 +37,32 @@ public sealed class AutoRunsController(
                 MaxTargets = 100
             },
             SingleInstance = true,
+            Execution = new
+            {
+                execution.MaxConcurrentPreparations,
+                execution.MaxConcurrentPublications,
+                execution.MaxQueuedJobs,
+                execution.ActivePreparations,
+                execution.ActivePublications,
+                execution.QueuedPreparations,
+                execution.QueuedPublications,
+                execution.PublisherConcurrency,
+                execution.ActivePublicationPermits,
+                execution.WaitingPublicationPermits,
+                execution.PreparationReservationBytes,
+                execution.ReservedPreparationBytes,
+                execution.RetainedBytes,
+                ProviderMaxConcurrentRequests = provider.MaxConcurrentRequests,
+                ProviderActiveRequests = provider.ActiveRequests, ProviderWaitingRequests = provider.WaitingRequests,
+                ProviderCooldownUntil = provider.CooldownUntil
+            },
             Ui = options.Ui,
             Memory = memory.Snapshot(),
             Provider = new
             {
                 providerOptions.Value.MaxResponseBytes, providerOptions.Value.TimeoutSeconds, providerOptions.Value.To,
                 providerOptions.Value.RequestDelayMs, providerOptions.Value.MaxRetries, providerOptions.Value.RetryDelayMs,
-                providerOptions.Value.SensorTypeMappings
+                providerOptions.Value.SensorTypeMappings, providerOptions.Value.MaxConcurrentRequests
             }
         });
     }
@@ -54,7 +76,8 @@ public sealed class AutoRunsController(
     }
 
     [HttpGet]
-    public IReadOnlyList<AutoRunSummary> List() => service.List();
+    public IActionResult List([FromQuery] bool summaryOnly = false) =>
+        Ok(summaryOnly ? (object)service.ListSummaries() : service.List());
 
     [HttpGet("{id}")]
     public AutoRunSummary Get(string id) => service.Get(id);
@@ -64,7 +87,13 @@ public sealed class AutoRunsController(
         [FromQuery] AutoRunItemOutcome? outcome = null) => service.Items(id, from, size, outcome);
 
     [HttpPost("{id}/start")]
-    public AutoRunSummary Start(string id) => service.Start(id);
+    [ProducesResponseType(typeof(AutoRunSummary), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AutoRunSummary), StatusCodes.Status202Accepted)]
+    public IActionResult Start(string id)
+    {
+        var job = service.Start(id);
+        return StatusCode(job.State == AutoRunState.QueuedPublication ? StatusCodes.Status202Accepted : StatusCodes.Status200OK, job);
+    }
 
     [HttpPost("{id}/rerun")]
     [ProducesResponseType(typeof(AutoRunSummary), StatusCodes.Status202Accepted)]

@@ -9,6 +9,7 @@ public sealed class ElasticProviderOptions
     public int To { get; set; } = 1000;
     public int TimeoutSeconds { get; set; } = 30;
     public int RequestDelayMs { get; set; } = 1000;
+    public int MaxConcurrentRequests { get; set; } = 2;
     public int MaxRetries { get; set; } = 2;
     public int RetryDelayMs { get; set; } = 2000;
     public int MaxResponseBytes { get; set; } = 64 * 1024 * 1024;

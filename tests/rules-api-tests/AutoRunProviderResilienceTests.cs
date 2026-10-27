@@ -11,6 +11,165 @@ namespace ImagingPipeline.Rules.Api.Tests;
 
 public sealed class AutoRunProviderResilienceTests
 {
+    [Fact]
+    public async Task Shared_clients_obey_capacity_and_fifo_and_cancelled_waiters_do_not_leak_slots()
+    {
+        var options = Config(); options.RequestDelayMs = 0;
+        var coordinator = new ProviderRequestCoordinator(Options.Create(options), TimeProvider.System);
+        var entered = Channel.CreateUnbounded<string>();
+        var release = new Dictionary<string, TaskCompletionSource>
+        {
+            ["one"] = NewSignal(), ["two"] = NewSignal(), ["three"] = NewSignal(), ["four"] = NewSignal()
+        };
+        using var client = new HttpClient(new Handler(async (request, token) =>
+        {
+            var id = request.RequestUri!.Segments[^1];
+            entered.Writer.TryWrite(id);
+            await release[id].Task.WaitAsync(token);
+            return new(HttpStatusCode.NotFound);
+        }));
+        var firstProvider = new ElasticOverlayProvider(client, Options.Create(options), coordinator: coordinator);
+        var secondProvider = new ElasticOverlayProvider(client, Options.Create(options), coordinator: coordinator);
+        var one = firstProvider.GetAsync("one", CancellationToken.None);
+        var two = secondProvider.GetAsync("two", CancellationToken.None);
+        Assert.Equal("one", await entered.Reader.ReadAsync());
+        Assert.Equal("two", await entered.Reader.ReadAsync());
+        using var cancelled = new CancellationTokenSource();
+        var three = firstProvider.GetAsync("three", cancelled.Token);
+        var progress = new List<ProviderProgress>();
+        var four = secondProvider.GetAsync("four", CancellationToken.None, progress.Add);
+        Assert.Equal(2, coordinator.Snapshot().ActiveRequests);
+        Assert.Equal(2, coordinator.Snapshot().WaitingRequests);
+        Assert.Equal("capacityWait", progress[^1].Phase);
+        Assert.Null(progress[^1].NextAttemptAt);
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => three);
+        release["one"].TrySetResult();
+        await one.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("four", await entered.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+        release["two"].TrySetResult(); release["four"].TrySetResult();
+        await Task.WhenAll(two, four).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(0, coordinator.Snapshot().ActiveRequests);
+        Assert.Equal(0, coordinator.Snapshot().WaitingRequests);
+    }
+
+    [Fact]
+    public async Task Shared_pacing_spaces_overlapping_starts_and_waits_again_after_completion()
+    {
+        var time = new TestClock();
+        var options = Config();
+        var coordinator = new ProviderRequestCoordinator(Options.Create(options), time);
+        var entered = Channel.CreateUnbounded<string>();
+        var releaseOne = NewSignal();
+        var releaseTwo = NewSignal();
+        using var client = new HttpClient(new Handler(async (request, token) =>
+        {
+            var id = request.RequestUri!.Segments[^1];
+            entered.Writer.TryWrite(id);
+            if (id == "one") await releaseOne.Task.WaitAsync(token);
+            if (id == "two") await releaseTwo.Task.WaitAsync(token);
+            return new(HttpStatusCode.NotFound);
+        }));
+        var first = new ElasticOverlayProvider(client, Options.Create(options), timeProvider: time, coordinator: coordinator);
+        var second = new ElasticOverlayProvider(client, Options.Create(options), timeProvider: time, coordinator: coordinator);
+        var one = first.GetAsync("one", CancellationToken.None);
+        Assert.Equal("one", await entered.Reader.ReadAsync());
+        var two = second.GetAsync("two", CancellationToken.None);
+        await time.WaitForTimerAsync(TimeSpan.FromSeconds(1));
+        Assert.False(entered.Reader.TryRead(out _));
+        time.Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal("two", await entered.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(2, coordinator.Snapshot().ActiveRequests);
+        time.Advance(TimeSpan.FromMilliseconds(500));
+        releaseOne.TrySetResult(); await one.WaitAsync(TimeSpan.FromSeconds(5));
+        var three = first.GetAsync("three", CancellationToken.None);
+        await time.WaitForTimerAsync(TimeSpan.FromSeconds(1));
+        time.Advance(TimeSpan.FromMilliseconds(500));
+        Assert.False(entered.Reader.TryRead(out _));
+        time.Advance(TimeSpan.FromMilliseconds(500));
+        Assert.Equal("three", await entered.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+        await three.WaitAsync(TimeSpan.FromSeconds(5));
+        releaseTwo.TrySetResult(); await two.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Exhausted_retry_after_sets_shared_cooldown_without_holding_capacity()
+    {
+        var time = new TestClock();
+        var options = Config(); options.MaxRetries = 0;
+        var coordinator = new ProviderRequestCoordinator(Options.Create(options), time);
+        var calls = 0;
+        using var client = new HttpClient(new Handler((_, _) =>
+        {
+            var response = new HttpResponseMessage(++calls == 1 ? HttpStatusCode.ServiceUnavailable : HttpStatusCode.NotFound);
+            if (calls == 1) response.Headers.RetryAfter = new(TimeSpan.FromSeconds(5));
+            return Task.FromResult(response);
+        }));
+        var first = new ElasticOverlayProvider(client, Options.Create(options), timeProvider: time, coordinator: coordinator);
+        var second = new ElasticOverlayProvider(client, Options.Create(options), timeProvider: time, coordinator: coordinator);
+        await Assert.ThrowsAsync<ProviderUnavailableException>(() => first.GetAsync("one", CancellationToken.None));
+        var progress = new List<ProviderProgress>();
+        var pending = second.GetAsync("two", CancellationToken.None, progress.Add);
+        await time.WaitForTimerAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(0, coordinator.Snapshot().ActiveRequests);
+        Assert.Equal(1, coordinator.Snapshot().WaitingRequests);
+        Assert.Equal("retryWait", progress[^1].Phase);
+        Assert.Equal(time.GetUtcNow().AddSeconds(5), progress[^1].NextAttemptAt);
+        time.Advance(TimeSpan.FromSeconds(5));
+        await pending.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public async Task Capacity_wait_does_not_spend_the_request_timeout()
+    {
+        var time = new TestClock();
+        var options = Config(); options.MaxConcurrentRequests = 1; options.RequestDelayMs = 0;
+        var coordinator = new ProviderRequestCoordinator(Options.Create(options), time);
+        var releaseOne = NewSignal();
+        var enteredTwo = NewSignal();
+        using var client = new HttpClient(new Handler(async (request, token) =>
+        {
+            if (request.RequestUri!.Segments[^1] == "one") await releaseOne.Task.WaitAsync(token);
+            else { enteredTwo.TrySetResult(); await Task.Delay(Timeout.InfiniteTimeSpan, token); }
+            return new(HttpStatusCode.NotFound);
+        }));
+        var first = new ElasticOverlayProvider(client, Options.Create(options), timeProvider: time, coordinator: coordinator);
+        var shortOptions = Config(); shortOptions.TimeoutSeconds = 1; shortOptions.RequestDelayMs = 0;
+        var second = new ElasticOverlayProvider(client, Options.Create(shortOptions), timeProvider: time, coordinator: coordinator);
+        var one = first.GetAsync("one", CancellationToken.None);
+        var two = second.GetAsync("two", CancellationToken.None);
+        time.Advance(TimeSpan.FromSeconds(10));
+        Assert.False(two.IsCompleted);
+        Assert.False(enteredTwo.Task.IsCompleted);
+        releaseOne.TrySetResult(); await one.WaitAsync(TimeSpan.FromSeconds(5));
+        await enteredTwo.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        time.Advance(TimeSpan.FromSeconds(1));
+        var error = await Assert.ThrowsAsync<ElasticProviderException>(() => two.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal("providerTimeout", error.Diagnostic!.Code);
+        Assert.Equal(0, coordinator.Snapshot().ActiveRequests);
+    }
+
+    [Fact]
+    public async Task Extended_shared_cooldown_refreshes_wait_deadline()
+    {
+        var time = new TestClock();
+        var coordinator = new ProviderRequestCoordinator(Options.Create(Config()), time);
+        using (await coordinator.AcquireAsync("first", 1, 1, null, null, CancellationToken.None)) { }
+        var progress = Channel.CreateUnbounded<ProviderProgress>();
+        var pending = coordinator.AcquireAsync("second", 1, 1, null, value => progress.Writer.TryWrite(value), CancellationToken.None);
+        Assert.Equal("requestDelay", (await progress.Reader.ReadAsync()).Phase);
+        coordinator.ExtendCooldown(TimeSpan.FromSeconds(5));
+        var waiting = await progress.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("retryWait", waiting.Phase);
+        Assert.Equal(time.GetUtcNow().AddSeconds(5), waiting.NextAttemptAt);
+        await time.WaitForTimerAsync(TimeSpan.FromSeconds(5));
+        time.Advance(TimeSpan.FromSeconds(5));
+        using var lease = await pending.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     [Theory]
     [InlineData(429)]
     [InlineData(503)]

@@ -11,6 +11,9 @@ const bytes = value => {
 };
 const splitValues = value => [...new Set(value.split(/[\n,]+/).map(v => v.trim()).filter(Boolean))];
 const terminal = state => ['Completed', 'CompletedWithErrors', 'Failed', 'Cancelled', 'Expired'].includes(state);
+const active = state => ['QueuedPreparation', 'Preparing', 'QueuedPublication', 'Publishing'].includes(state);
+const queued = state => ['QueuedPreparation', 'QueuedPublication'].includes(state);
+const stateLabel = value => ({ QueuedPreparation: 'Queued for preparation', QueuedPublication: 'Queued for publication' })[value] ?? value;
 const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const state = {
   initialized: false, options: null, targets: [], rules: [], rulesFrom: 0, rulesSize: 10,
@@ -18,15 +21,16 @@ const state = {
   itemsOutcome: '', publicationDirty: false, refreshVersion: 0, rulesVersion: 0,
   rulesLoading: false, rulesPipeline: '', rulesSearch: '', rulesStatus: '', rulesTimer: null, rulesController: null, resumeRules: false,
   selectionOperation: null, setupReady: false, preparing: false, rerunPending: false,
-  history: [], historyVersion: 0, historyTimer: null, historyDeleting: false, historyPendingIds: new Set()
+  history: [], historyVersion: 0, historyTimer: null, historyDeleting: false, historyPendingIds: new Set(),
+  progressTimer: null, progressClock: null
 };
 const $ = id => document.getElementById(id);
 const pendingRunActions = new Map();
 const directSource = () => document.querySelector('[name="source-mode"]:checked')?.value === 'Filters'
   || (document.querySelector('[name="source-mode"]:checked')?.value === 'OverlayIds'
     && document.querySelector('[name="id-processing"]:checked')?.value === 'direct');
-const directRun = run => ['OverlayIds', 'Filters'].includes(run?.sourceMode) && run.targets?.length === 0;
-const badge = value => `<span class="tag ${['Ready', 'Completed', 'Confirmed'].includes(value) ? 'good' : ['Failed', 'Expired'].includes(value) ? 'bad' : ['CompletedWithErrors', 'Uncertain', 'Cancelled'].includes(value) ? 'warn' : ''}">${escape(value)}</span>`;
+const directRun = run => run?.isDirect ?? (['OverlayIds', 'Filters'].includes(run?.sourceMode) && run.targets?.length === 0);
+const badge = value => `<span class="tag ${['Ready', 'Completed', 'Confirmed'].includes(value) ? 'good' : ['Failed', 'Expired'].includes(value) ? 'bad' : ['CompletedWithErrors', 'Uncertain', 'Cancelled'].includes(value) ? 'warn' : ''}">${escape(stateLabel(value))}</span>`;
 const formatTime = value => value ? new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 const field = (id, label, placeholder = '', type = 'text', extra = '') =>
   `<label class="field" for="${id}"><span>${label}</span><input id="${id}" name="${id}" type="${type}" placeholder="${placeholder}" ${extra}></label>`;
@@ -59,6 +63,7 @@ function syncPublicationPresets(prefix = '', disabled = false) {
 }
 
 export async function showAutoRun(id = null) {
+  stopProviderCountdown();
   cancelRuleSelection();
   if ($('area-map-dialog')?.open) $('area-map-dialog').close();
   if (!state.initialized || !$('configuration')) {
@@ -95,6 +100,7 @@ export async function showAutoRun(id = null) {
 }
 
 export function stopAutoRun() {
+  stopProviderCountdown();
   clearTimeout(state.timer);
   clearTimeout(state.historyTimer);
   clearTimeout(state.rulesTimer);
@@ -125,6 +131,7 @@ function configurationMarkup() {
         </fieldset>
       </div>
       <details id="filter-details" class="filter-details"><summary>Overlay filters <span id="filters-description" class="muted">Optional for rule-derived searches</span></summary><div>
+        <div class="filter-actions"><button id="clear-filters" type="button" class="button compact ghost">Clear all filters</button><span id="filter-status" class="hint" role="status"></span></div>
         <div class="field-row">${field('sensor-names', 'Sensor names', 'e.g. SENSOR_A, SENSOR_B')}<fieldset id="sensor-types" class="sensor-type-selector" aria-describedby="sensor-types-help"><legend>Sensor types</legend><div id="sensor-type-options" class="sensor-type-options"></div><p id="sensor-types-help" class="hint">Loading sensor types…</p></fieldset></div>
         <div class="field-row"><label class="field" for="registration-quality"><span>Registration quality</span><select id="registration-quality"><option value="">Any quality</option><option value="Accurate">Accurate</option><option value="Sensor">Sensor</option><option value="Accurate,Sensor">Accurate or Sensor</option></select></label><label class="field" for="is-realtime"><span>Realtime overlay</span><select id="is-realtime"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label></div>
         <div class="field-row">${field('resolution-min', 'Minimum resolution', 'No lower bound', 'number', 'min="0" step="any"')}${field('resolution-max', 'Maximum resolution', 'No upper bound', 'number', 'min="0" step="any"')}</div>
@@ -172,6 +179,8 @@ function configurationMarkup() {
 
 function attachConfiguration() {
   $('preview-form').addEventListener('submit', submitPreview);
+  $('clear-filters').addEventListener('click', clearFilters);
+  $('filter-details').addEventListener('input', () => { $('filter-status').textContent = ''; });
   $('open-area-map').addEventListener('click', openAreaMap);
   $('close-area-map').addEventListener('click', () => $('area-map-dialog').close());
   $('area-map-dialog').addEventListener('keydown', event => {
@@ -245,11 +254,7 @@ async function loadOptions() {
     $('overall-max').max = limits.maxSelectedOverlays;
     $('overall-min').max = limits.maxSelectedOverlays;
     updateSource();
-    $('server-limits').innerHTML = [
-      ['Selected overlays', number(limits.maxSelectedOverlays)], ['Records scanned', number(limits.maxScannedRecords)],
-      ['Ready preview', `${limits.readyLifetimeMinutes} min`], ['Active operation', '1 at a time'],
-      ...(options.memory ? [['Process memory', `${bytes(options.memory.processBytes)} / ${bytes(options.memory.limitBytes)}`]] : [])
-    ].map(([key, value]) => `<div class="limit-line"><span>${key}</span><strong>${value}</strong></div>`).join('');
+    renderWorkspaceLimits(options);
     $('connection-state').textContent = options.enabled ? 'API connected' : 'Auto-run disabled';
     if (!options.enabled) showError('global-notice', new Error('Auto-run is disabled on this instance. Enable it in the service configuration to prepare runs.'));
   } catch (error) {
@@ -257,6 +262,25 @@ async function loadOptions() {
     $('area-map-hint').textContent = 'Map settings are unavailable. Reload when the API connection is restored.';
     showError('global-notice', error);
   } finally { syncSelectionControls(); }
+}
+
+function renderWorkspaceLimits(options) {
+  if (!$('server-limits')) return;
+  const { limits, execution } = options;
+  $('server-limits').innerHTML = [
+    ['Selected overlays', number(limits.maxSelectedOverlays)], ['Records scanned', number(limits.maxScannedRecords)],
+    ['Ready preview', `${limits.readyLifetimeMinutes} min`],
+    ...(execution ? [
+      ['Preparing', `${number(execution.activePreparations)} / ${number(execution.maxConcurrentPreparations)}`],
+      ['Publishing', `${number(execution.activePublications)} / ${number(execution.maxConcurrentPublications)}`],
+      ['Waiting jobs', `${number(execution.queuedPreparations + execution.queuedPublications)} / ${number(execution.maxQueuedJobs)}`],
+      ['Provider requests at once', number(execution.providerMaxConcurrentRequests)],
+      ['Publications at once', number(execution.publisherConcurrency)],
+      ['Reserved preparation memory', bytes(execution.reservedPreparationBytes)]
+    ] : []),
+    ['Provider request pause', `${number(options.provider?.requestDelayMs)} ms`],
+    ...(options.memory ? [['Process memory', `${bytes(options.memory.processBytes)} / ${bytes(options.memory.limitBytes)}`]] : [])
+  ].map(([key, value]) => `<div class="limit-line"><span>${key}</span><strong>${escape(value)}</strong></div>`).join('');
 }
 
 function configureSensorTypes() {
@@ -589,6 +613,18 @@ function timeValue(id) {
   return date.toISOString();
 }
 
+function clearFilters() {
+  for (const id of ['sensor-names', 'registration-quality', 'is-realtime', 'resolution-min', 'resolution-max',
+    'area-wkt', 'created-from', 'created-to', 'photo-from', 'photo-to']) {
+    $(id).value = '';
+    $(id).setCustomValidity('');
+  }
+  for (const input of document.querySelectorAll('#sensor-types input')) input.checked = false;
+  updateSensorTypeHint();
+  hideError('form-error');
+  $('filter-status').textContent = 'Filters cleared. Selected rules and publication settings are unchanged.';
+}
+
 function collectFilters() {
   const result = {};
   const sensorNames = splitValues($('sensor-names').value);
@@ -599,8 +635,8 @@ function collectFilters() {
   if ($('is-realtime').value !== '') result.isRealtime = $('is-realtime').value === 'true';
   const min = optionalNumber('resolution-min'), max = optionalNumber('resolution-max');
   if (min !== undefined || max !== undefined) {
-    if ((min !== undefined && min <= 0) || (max !== undefined && max <= 0) || (min !== undefined && max !== undefined && min > max))
-      throw new Error('Resolution bounds must be positive, with the minimum no greater than the maximum.');
+    if ((min !== undefined && min < 0) || (max !== undefined && max <= 0) || (min !== undefined && max !== undefined && min > max))
+      throw new Error('Minimum resolution must be zero or greater; maximum resolution must be positive and at least the minimum.');
     result.resolution = { min, max };
   }
   const wkt = $('area-wkt').value.trim();
@@ -661,18 +697,20 @@ async function loadHistory() {
   clearTimeout(state.historyTimer);
   const version = ++state.historyVersion;
   try {
-    const runs = await api.list();
+    const [runs, options] = await Promise.all([api.list(), api.options().catch(() => null)]);
     if (version !== state.historyVersion || !$('history-list')) return;
+    if (options) { state.options = options; renderWorkspaceLimits(options); }
     const hadPending = state.historyPendingIds.size > 0;
     state.history = [...runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     state.historyPendingIds = new Set(runs.filter(run => run.deletionRequested || state.historyPendingIds.has(run.id)).map(run => run.id));
     if (hadPending && !state.historyPendingIds.size) $('history-status').textContent = 'Pending deletions finished. Their retained data has been released.';
+    if ($('history-error').dataset.source === 'poll') hideError('history-error');
     renderHistory();
   } catch (error) {
     if (version !== state.historyVersion || !$('history-list')) return;
-    showError('history-error', error);
+    showError('history-error', error, 'poll');
   } finally {
-    if (version === state.historyVersion && state.historyPendingIds.size && $('configuration') && !$('configuration').hidden && !$('app').hidden)
+    if (version === state.historyVersion && (state.historyPendingIds.size || state.history.some(run => active(run.state))) && $('configuration') && !$('configuration').hidden && !$('app').hidden)
       state.historyTimer = setTimeout(loadHistory, 2000);
   }
 }
@@ -684,10 +722,10 @@ function renderHistory() {
   const scrollTop = $('history-list').scrollTop;
   $('delete-all-runs').disabled = !runs.length || state.historyDeleting || runs.every(run => state.historyPendingIds.has(run.id));
   $('refresh-history').disabled = state.historyDeleting;
-  $('history-summary').textContent = `${number(runs.length)} retained run${runs.length === 1 ? '' : 's'} · ${bytes(runs.reduce((total, run) => total + (run.retainedBytes ?? 0), 0))} retained data`;
+  $('history-summary').textContent = `${number(runs.length)} retained run${runs.length === 1 ? '' : 's'} · ${bytes(runs.reduce((total, run) => total + (run.retainedBytes ?? 0), 0))} retained data · ${number(runs.filter(run => ['Preparing', 'Publishing'].includes(run.state)).length)} working · ${number(runs.filter(run => queued(run.state)).length)} waiting`;
   $('history-list').innerHTML = runs.length ? runs.map(run => {
     const pending = state.historyPendingIds.has(run.id);
-    return `<article class="history-item"><a href="/ui/auto-run/runs/${encodeURIComponent(run.id)}" data-route class="history-link" aria-label="Open run ${escape(run.id)}"><div class="history-top"><span class="history-id">${escape(run.id)}</span>${badge(pending ? 'Deleting' : run.state)}</div>${directRun(run) ? '<div class="history-mode">Direct to gateway</div>' : ''}<div class="history-meta"><span>${number(run.counters.selected)} overlays</span><span>${escape(formatTime(run.createdAt))}</span></div></a><div class="history-storage"><span>${bytes(run.retainedBytes ?? 0)} retained</span><button type="button" class="button compact ghost" data-delete-run="${escape(run.id)}" aria-label="Delete run ${escape(run.id)}" ${state.historyDeleting || pending ? 'disabled' : ''}>${pending ? 'Deleting…' : 'Delete'}</button></div>${pending ? '<p class="hint">Stopping work before releasing retained data…</p>' : ''}</article>`;
+    return `<article class="history-item"><a href="/ui/auto-run/runs/${encodeURIComponent(run.id)}" data-route class="history-link" aria-label="Open run ${escape(run.id)}"><div class="history-top"><span class="history-id">${escape(run.id)}</span>${badge(pending ? 'Deleting' : run.state)}</div>${directRun(run) ? '<div class="history-mode">Direct to gateway</div>' : ''}${queued(run.state) ? `<p class="hint history-queue">${escape(queueMessage(run))}</p>` : ''}<div class="history-meta"><span>${number(run.counters.selected)} overlays</span><span>${escape(formatTime(run.createdAt))}</span></div></a><div class="history-storage"><span>${bytes(run.retainedBytes ?? 0)} retained</span><button type="button" class="button compact ghost" data-delete-run="${escape(run.id)}" aria-label="Delete run ${escape(run.id)}" ${state.historyDeleting || pending ? 'disabled' : ''}>${pending ? 'Deleting…' : 'Delete'}</button></div>${pending ? '<p class="hint">Stopping work before releasing retained data…</p>' : ''}</article>`;
   }).join('') : '<p class="hint">No retained runs yet. Your first preview will appear here.</p>';
   $('history-list').scrollTop = scrollTop;
   if (focusedDelete || focusedLink) {
@@ -698,6 +736,12 @@ function renderHistory() {
     fallback.tabIndex = -1;
     (replacement ?? fallback).focus({ preventScroll: true });
   }
+}
+
+function queueMessage(run) {
+  const reason = ({ memory: 'Waiting for memory headroom', preparationCapacity: 'Waiting for a preparation worker',
+    publicationCapacity: 'Waiting for a publication worker' })[run.waitReason] || run.waitReason;
+  return [run.queuePosition ? `Queue position ${number(run.queuePosition)}` : 'Waiting in queue', reason].filter(Boolean).join(' · ');
 }
 
 async function deleteRuns(id = null) {
@@ -727,6 +771,7 @@ function detailMarkup(id) {
   <div class="page-heading run-heading"><div><div class="eyebrow">RUN WORKSPACE</div><h1>Review. Launch. Follow through.</h1><div class="run-id mono">${escape(id)}</div></div><div class="run-heading-actions"><span id="run-state">${badge('Loading')}</span><button id="cancel-run" type="button" class="button danger" hidden>Cancel</button><button id="rerun-run" type="button" class="button" title="Prepare a fresh preview using the original configuration and saved publication settings. Rules are read again; publication requires Start." hidden>Rerun</button><button id="start-run" type="button" class="button primary" hidden>Start run ↗</button></div></div>
   <div id="run-error" class="notice error" role="alert" hidden></div>
   <div id="run-start-note" class="notice warning" role="status" hidden></div>
+  <div id="run-queue-note" class="notice" role="status" hidden></div>
   <div id="run-outcome-note" class="notice success" role="status" hidden></div>
   <div id="run-notices" hidden></div>
   <div id="run-content" hidden>
@@ -773,9 +818,10 @@ async function refreshRun(manual = false) {
     if (id !== state.runId || version !== state.refreshVersion) return;
     $('run-loading').hidden = true;
     if (error.status === 404) {
+      stopProviderCountdown();
       state.run = null;
       $('run-content').hidden = true;
-      for (const control of ['start-run', 'cancel-run', 'rerun-run', 'run-start-note', 'run-outcome-note', 'run-notices']) $(control).hidden = true;
+      for (const control of ['start-run', 'cancel-run', 'rerun-run', 'run-start-note', 'run-queue-note', 'run-outcome-note', 'run-notices']) $(control).hidden = true;
     }
     showError('run-error', error.status === 404 ? Object.assign(new Error(), error, { message: 'This run is no longer available. It may have been deleted, expired, or lost when the service restarted. Return to configuration to prepare a new preview.' }) : error, 'poll');
     if (error.status !== 404 && (!state.run || !terminal(state.run.state))) state.timer = setTimeout(() => refreshRun(), 5000);
@@ -788,7 +834,7 @@ function renderRunActions(run) {
   $('start-run').hidden = run.state !== 'Ready';
   $('start-run').disabled = run.state !== 'Ready' || run.counters.selected === 0 || Boolean(pending) || run.deletionRequested;
   $('start-run').textContent = pending === 'start' ? 'Starting…' : 'Start run ↗';
-  $('rerun-run').hidden = ['Preparing', 'Publishing'].includes(run.state);
+  $('rerun-run').hidden = active(run.state);
   $('rerun-run').disabled = state.rerunPending || Boolean(pending) || run.deletionRequested;
   $('cancel-run').hidden = terminal(run.state);
   $('cancel-run').disabled = Boolean(pending) || run.deletionRequested;
@@ -810,6 +856,8 @@ function renderRunActions(run) {
 function renderRun(run) {
   const direct = directRun(run);
   $('run-state').innerHTML = badge(run.deletionRequested ? 'Deleting' : run.state);
+  $('run-queue-note').hidden = !queued(run.state) || run.deletionRequested;
+  $('run-queue-note').textContent = `${queueMessage(run)}. Queued jobs wait until capacity is available or you cancel them.${run.state === 'QueuedPublication' ? ' Start has been accepted; this preview will not expire while waiting.' : ''}`;
   renderRunActions(run);
   for (const key of ['selected', 'confirmed', 'failed', 'uncertain', 'remaining']) $(`count-${key}`).textContent = number(run.counters[key]);
   const complete = run.counters.confirmed + run.counters.failed + run.counters.uncertain;
@@ -818,9 +866,11 @@ function renderRun(run) {
   $('run-progress').setAttribute('aria-valuenow', String(percent));
   $('progress-value').textContent = run.state === 'Preparing' ? `${number(run.counters.scanned)} scanned` : `${percent}%`;
   $('progress-label').textContent = {
+    QueuedPreparation: 'Preparation queued · your configuration is saved',
     Preparing: direct ? 'Fetching overlays…' : 'Fetching and matching overlays…',
     Ready: run.counters.selected > 0 ? 'Preview ready · review the selection, then start' : 'Preparation finished · no overlays selected',
     Publishing: `Publishing · ${Number(run.confirmedPerSecond || 0).toFixed(1)} confirmed/s`,
+    QueuedPublication: 'Publication queued · no messages sent yet',
     Completed: 'Publication complete · submissions confirmed by RabbitMQ',
     CompletedWithErrors: 'Publication finished · inspect failed and uncertain items',
     Failed: 'Run failed · inspect the errors below', Cancelled: 'Cancelled · queued messages remain queued',
@@ -844,6 +894,9 @@ function renderRun(run) {
     `Duplicates ${number(run.counters.duplicates)}`, `Invalid ${number(run.counters.invalid)}`,
     `In flight ${number(run.counters.inFlight)}`, `Source ${run.sourceExhausted ? 'exhausted' : 'not exhausted'}`,
     `Created ${formatTime(run.createdAt)}`, ...(run.expiresAt ? [`Expires ${formatTime(run.expiresAt)}`] : []),
+    ...(run.preparationStartedAt ? [`Preparation started ${formatTime(run.preparationStartedAt)}`] : []),
+    ...(run.startRequestedAt ? [`Start requested ${formatTime(run.startRequestedAt)}`] : []),
+    ...(run.startedAt ? [`Publication started ${formatTime(run.startedAt)}`] : []),
     `Retained data ${bytes(run.retainedBytes ?? 0)}`
   ].map(value => `<span>${escape(value)}</span>`).join('');
   $('run-memory').hidden = !run.memory;
@@ -886,7 +939,7 @@ function renderRun(run) {
     $('run-batch-size').value = run.publication.batchSize;
     $('run-delay-ms').value = run.publication.delayMs;
   }
-  const canUpdate = !run.deletionRequested && ['Preparing', 'Ready', 'Publishing'].includes(run.state);
+  const canUpdate = !run.deletionRequested && (active(run.state) || run.state === 'Ready');
   $('update-publication').disabled = !canUpdate;
   $('run-batch-size').disabled = !canUpdate;
   $('run-delay-ms').disabled = !canUpdate;
@@ -929,7 +982,7 @@ async function runAction(action) {
     const run = await api[action](id);
     if (id !== state.runId) return;
     state.run = run; renderRun(run);
-    toast(action === 'start' ? 'Publication started.' : 'Cancellation requested. Already queued messages remain queued.');
+    toast(action === 'start' ? run.state === 'QueuedPublication' ? 'Start accepted. Publication is waiting for capacity.' : 'Publication started.' : 'Cancellation requested. Already queued messages remain queued.');
     await refreshRun();
   } catch (error) { if (id === state.runId) showError('run-error', error); }
   finally {
@@ -940,7 +993,7 @@ async function runAction(action) {
 
 async function rerun() {
   const id = state.runId;
-  if (!id || !state.run || state.run.deletionRequested || state.rerunPending || pendingRunActions.has(id) || ['Preparing', 'Publishing'].includes(state.run.state)) return;
+  if (!id || !state.run || state.run.deletionRequested || state.rerunPending || pendingRunActions.has(id) || active(state.run.state)) return;
   state.rerunPending = true;
   $('rerun-run').disabled = true;
   $('rerun-run').textContent = 'Preparing…';
@@ -985,24 +1038,55 @@ async function updatePublication(event) {
   }
 }
 
+function stopProviderCountdown(reset = true) {
+  clearInterval(state.progressTimer);
+  state.progressTimer = null;
+  if (reset) state.progressClock = null;
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) stopProviderCountdown(false);
+  else if (state.runId && state.run && $('provider-progress')) renderProviderProgress(state.run);
+});
+
 function renderProviderProgress(run) {
+  stopProviderCountdown(false);
   const progress = run.state === 'Preparing' ? run.providerProgress : null;
   const element = $('provider-progress');
   element.hidden = !progress;
-  if (!progress) return;
+  if (!progress) { state.progressClock = null; return; }
   const context = [progress.operation,
     progress.queryIndex != null ? `query ${number(progress.queryIndex)}${progress.queryCount ? ` of ${number(progress.queryCount)}` : ''}` : '',
     progress.page != null ? `page ${number(progress.page)}` : '',
     progress.attempt ? `attempt ${number(progress.attempt)} of ${number(progress.maxAttempts || progress.attempt)}` : '',
     progress.lastStatusCode != null ? `last response HTTP ${progress.lastStatusCode}` : ''].filter(Boolean).join(' · ');
-  const remaining = progress.nextAttemptAt ? Math.max(0, new Date(progress.nextAttemptAt).getTime() - Date.now()) : null;
-  const remainingLabel = remaining < 1000 ? `${remaining} ms` : `${Math.ceil(remaining / 1000)} s`;
-  const waiting = progress.phase === 'retryWait'
-    ? `Waiting to retry Elastic Provider${remaining !== null && Number.isFinite(remaining) ? remaining > 0 ? ` in ${remainingLabel}` : '; retry is due' : ''}.`
-    : progress.phase === 'requestDelay'
-      ? `Waiting between provider requests${remaining !== null && Number.isFinite(remaining) && remaining > 0 ? ` · next request in ${remainingLabel}` : ''}.`
-      : 'Waiting for Elastic Provider to respond.';
-  element.textContent = `${waiting} ${context}. Already scanned ${number(run.counters.scanned)} records.`;
+  const deadline = Date.parse(progress.nextAttemptAt);
+  const serverTime = Date.parse(run.serverTime);
+  const clockKey = `${run.id}|${run.serverTime ?? ''}|${progress.nextAttemptAt ?? ''}|${progress.phase}`;
+  if (state.progressClock?.key !== clockKey) {
+    state.progressClock = { key: clockKey, receivedAt: performance.now(),
+      remainingMs: Number.isFinite(deadline) ? Math.max(0, deadline - (Number.isFinite(serverTime) ? serverTime : Date.now())) : null };
+  }
+  const paint = () => {
+    const clock = state.progressClock;
+    const remaining = clock.remainingMs === null ? null : Math.max(0, clock.remainingMs - (performance.now() - clock.receivedAt));
+    const label = remaining < 1000 ? `${Math.ceil(remaining)} ms` : `${(remaining / 1000).toFixed(1)} s`;
+    const isDelay = ['retryWait', 'requestDelay'].includes(progress.phase);
+    const waiting = isDelay && remaining === 0
+      ? 'Delay elapsed · waiting for provider capacity or the next status update.'
+      : progress.phase === 'retryWait'
+        ? `${progress.attempt > 1 || progress.lastStatusCode != null ? 'Waiting to retry Elastic Provider' : 'Waiting for the shared Elastic Provider cooldown'}${remaining !== null ? ` in ${label}` : ''}.`
+        : progress.phase === 'requestDelay'
+          ? `Waiting between provider requests${remaining !== null ? ` · next eligible request in ${label}` : ''}.`
+          : ['capacityWait', 'requestCapacity', 'waitingCapacity'].includes(progress.phase)
+            ? 'Waiting for a shared provider request slot. No start time is available yet.'
+            : 'Waiting for Elastic Provider to respond.';
+    element.textContent = `${waiting} ${context}. Already scanned ${number(run.counters.scanned)} records.${state.options?.provider?.requestDelayMs != null ? ` Configured request pause: ${number(state.options.provider.requestDelayMs)} ms.` : ''}`;
+    if (!isDelay || remaining === null || remaining === 0) stopProviderCountdown(false);
+  };
+  if (!document.hidden && ['retryWait', 'requestDelay'].includes(progress.phase) && state.progressClock.remainingMs > 0)
+    state.progressTimer = setInterval(paint, 100);
+  paint();
 }
 
 function contextMarkup(entries) {

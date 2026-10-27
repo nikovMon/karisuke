@@ -1,3 +1,4 @@
+using System.Text;
 using ImagingPipeline.Rules.Api.AutoRuns;
 using ImagingPipeline.Rules.Api.AutoRuns.Provider;
 using Microsoft.Extensions.Configuration;
@@ -44,12 +45,154 @@ public sealed class AutoRunSensorTypeConfigurationTests
     }
 
     [Fact]
+    public void Shipped_configuration_without_a_catalog_override_keeps_default_types()
+    {
+        using var configuration = (ConfigurationRoot)ShippedConfiguration().Build();
+        using var services = Services(configuration);
+        services.GetRequiredService<IStartupValidator>().Validate();
+        var mappings = services.GetRequiredService<IOptions<ElasticProviderOptions>>().Value.SensorTypeMappings;
+
+        Assert.Equal(11, mappings.Count);
+        Assert.Contains("EO", mappings.Keys);
+        Assert.All(mappings, entry => Assert.Equal(entry.Key, entry.Value));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Catalog_override_on_shipped_configuration_does_not_keep_unselected_default_types(bool useJson)
+    {
+        var configurationBuilder = ShippedConfiguration();
+        if (useJson)
+        {
+            configurationBuilder.AddJsonStream(new MemoryStream(Encoding.UTF8.GetBytes("""
+                { "AutoRun": { "Provider": { "SensorTypeMappings": { "VIS": "visible-provider", "PAN": "PAN" } } } }
+                """)));
+        }
+        else
+        {
+            configurationBuilder.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AutoRun:Provider:SensorTypeMappings:VIS"] = "visible-provider",
+                ["AutoRun:Provider:SensorTypeMappings:PAN"] = "PAN"
+            });
+        }
+        using var configuration = (ConfigurationRoot)configurationBuilder.Build();
+        using var services = Services(configuration);
+        services.GetRequiredService<IStartupValidator>().Validate();
+        var mappings = services.GetRequiredService<IOptions<ElasticProviderOptions>>().Value.SensorTypeMappings;
+        var builder = services.GetRequiredService<ProviderQueryBuilder>();
+
+        Assert.Equal(new[] { "PAN", "VIS" }, mappings.Keys.Order(StringComparer.Ordinal));
+        Assert.NotEmpty(builder.ValidateSensorTypes(new() { SensorTypes = ["EO"] }));
+        Assert.Throws<ArgumentException>(() => builder.Build(new()
+        {
+            Mode = AutoRunSourceMode.Filters, Filters = new() { SensorTypes = ["EO"] }
+        }, []));
+
+        var query = Assert.Single(builder.Build(new()
+        {
+            Mode = AutoRunSourceMode.Filters, Filters = new() { SensorTypes = ["VIS", "PAN"] }
+        }, []));
+        var condition = Assert.Single(query.GetProperty("filter").GetProperty("logical_operators")
+            .GetProperty("AND").EnumerateArray()).GetProperty("match").GetProperty("sensorType.keyword");
+        Assert.Equal(new[] { "visible-provider", "PAN" }, condition.GetProperty("values").EnumerateArray()
+            .Select(value => value.GetString()));
+    }
+
+    [Fact]
     public void Explicitly_empty_catalog_fails_startup_instead_of_restoring_defaults()
     {
         using var configuration = (ConfigurationRoot)new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["AutoRun:Provider:SensorTypeMappings"] = null
         }).Build();
+        using var services = Services(configuration);
+
+        var error = Assert.Throws<OptionsValidationException>(() => services.GetRequiredService<IStartupValidator>().Validate());
+
+        Assert.Contains("SensorTypeMappings", error.Message);
+    }
+
+    [Fact]
+    public void Higher_priority_catalog_replaces_lower_priority_keys_instead_of_merging()
+    {
+        using var configuration = (ConfigurationRoot)new ConfigurationBuilder()
+            .AddJsonStream(Json("""
+                { "AutoRun": { "Provider": { "SensorTypeMappings": { "EO": "EO", "VIS": "VIS", "PAN": "PAN" } } } }
+                """))
+            .AddJsonStream(Json("""
+                { "AutoRun": { "Provider": { "SensorTypeMappings": { "VIS": "visible", "new-type": "new-provider-type" } } } }
+                """))
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AutoRun:Provider:RequestDelayMs"] = "150"
+            }).Build();
+        using var services = Services(configuration);
+        services.GetRequiredService<IStartupValidator>().Validate();
+        var options = services.GetRequiredService<IOptions<ElasticProviderOptions>>().Value;
+
+        Assert.Equal(new[] { "VIS", "new-type" }, options.SensorTypeMappings.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal("visible", options.SensorTypeMappings["VIS"]);
+        Assert.Equal("new-provider-type", options.SensorTypeMappings["new-type"]);
+        Assert.Equal(150, options.RequestDelayMs);
+        Assert.NotEmpty(services.GetRequiredService<ProviderQueryBuilder>()
+            .ValidateSensorTypes(new() { SensorTypes = ["EO"] }));
+    }
+
+    [Fact]
+    public void Configuration_manager_uses_only_the_highest_priority_catalog()
+    {
+        using var configuration = new ConfigurationManager();
+        configuration.AddJsonStream(Json("""
+            { "AutoRun": { "Provider": { "SensorTypeMappings": { "EO": "EO", "VIS": "VIS" } } } }
+            """));
+        configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["AutoRun:Provider:SensorTypeMappings:SAR"] = "radar"
+        });
+        using var services = Services(configuration);
+        services.GetRequiredService<IStartupValidator>().Validate();
+        var mappings = services.GetRequiredService<IOptions<ElasticProviderOptions>>().Value.SensorTypeMappings;
+
+        Assert.Equal(new KeyValuePair<string, string>("SAR", "radar"), Assert.Single(mappings));
+    }
+
+    [Fact]
+    public void Environment_catalog_replaces_the_complete_json_catalog()
+    {
+        var prefix = $"AutoRunSensorTypesTest_{Guid.NewGuid():N}_";
+        var variable = prefix + "AutoRun__Provider__SensorTypeMappings__custom-visible";
+        Environment.SetEnvironmentVariable(variable, "VIS");
+        try
+        {
+            using var configuration = (ConfigurationRoot)new ConfigurationBuilder()
+                .AddJsonStream(Json("""
+                    { "AutoRun": { "Provider": { "SensorTypeMappings": { "EO": "EO", "VIS": "VIS" } } } }
+                    """))
+                .AddEnvironmentVariables(prefix).Build();
+            using var services = Services(configuration);
+            services.GetRequiredService<IStartupValidator>().Validate();
+            var mappings = services.GetRequiredService<IOptions<ElasticProviderOptions>>().Value.SensorTypeMappings;
+
+            Assert.Equal(new KeyValuePair<string, string>("custom-visible", "VIS"), Assert.Single(mappings));
+        }
+        finally { Environment.SetEnvironmentVariable(variable, null); }
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("null")]
+    [InlineData("\"VIS\"")]
+    [InlineData("{\"VIS\": {\"nested\": \"VIS\"}}")]
+    public void Invalid_higher_priority_catalog_does_not_fall_back_to_lower_priority_catalog(string catalog)
+    {
+        using var configuration = (ConfigurationRoot)new ConfigurationBuilder()
+            .AddJsonStream(Json("""
+                { "AutoRun": { "Provider": { "SensorTypeMappings": { "EO": "EO" } } } }
+                """))
+            .AddJsonStream(Json("{\"AutoRun\":{\"Provider\":{\"SensorTypeMappings\":" + catalog + "}}}"))
+            .Build();
         using var services = Services(configuration);
 
         var error = Assert.Throws<OptionsValidationException>(() => services.GetRequiredService<IStartupValidator>().Validate());
@@ -136,6 +279,12 @@ public sealed class AutoRunSensorTypeConfigurationTests
         Assert.Equal(valid, SensorTypeCatalog.IsValid(new Dictionary<string, string> { [text] = "VIS" }));
         Assert.Equal(valid, SensorTypeCatalog.IsValid(new Dictionary<string, string> { ["VIS"] = text }));
     }
+
+    private static MemoryStream Json(string json) => new(Encoding.UTF8.GetBytes(json));
+
+    private static IConfigurationBuilder ShippedConfiguration() => new ConfigurationBuilder()
+        .SetBasePath(AppContext.BaseDirectory)
+        .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false);
 
     private static ServiceProvider Services(IConfiguration configuration, Action<ElasticProviderOptions>? configure = null)
     {
