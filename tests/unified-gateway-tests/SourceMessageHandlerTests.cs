@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -67,6 +68,42 @@ public sealed class SourceMessageHandlerTests
         Assert.Equal("no_matching_rules", skipped.Fields[TelemetryAttributeNames.FilterReason]);
         Assert.Equal("asd", skipped.Fields[TelemetryAttributeNames.PipelineId]);
         Assert.Equal("image-a", skipped.Fields[TelemetryAttributeNames.PipelineImageId]);
+    }
+
+    [Fact]
+    public async Task EachPipelineMatchesItsRulesInItsOwnSpan()
+    {
+        await using var gateway = await Gateway.StartAsync(new Dictionary<string, IReadOnlyList<PipelineRuleDocument>>
+        {
+            ["asd"] = [Rule("asd-rule"), Rule("elsewhere", "POLYGON ((50 50, 51 50, 51 51, 50 51, 50 50))")],
+            ["algo"] = [AlgoRule()]
+        });
+        // A parent of its own separates this test's spans from those of tests running in parallel.
+        using var parent = new Activity("test").Start();
+        var spans = new ConcurrentQueue<Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == TelemetrySourceNames.UnifiedGateway,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = activity =>
+            {
+                if (activity.TraceId == parent.TraceId && activity.OperationName == "unified_gateway.match_rules")
+                {
+                    spans.Enqueue(activity);
+                }
+            }
+        };
+        ActivitySource.AddActivityListener(listener);
+
+        await gateway.Handler.HandleAsync(Message());
+
+        var asd = Assert.Single(spans, span => Equals(span.GetTagItem(TelemetryAttributeNames.PipelineId), "asd"));
+        Assert.Equal(ActivityStatusCode.Ok, asd.Status);
+        Assert.Equal(2, asd.GetTagItem(TelemetryAttributeNames.RulesEvaluatedCount));
+        Assert.Equal(1, asd.GetTagItem(TelemetryAttributeNames.RulesMatchedCount));
+        Assert.Equal(["asd-rule"], (string[])asd.GetTagItem(TelemetryAttributeNames.RulesMatchedIds)!);
+        var algo = Assert.Single(spans, span => Equals(span.GetTagItem(TelemetryAttributeNames.PipelineId), "algo"));
+        Assert.Equal(["algo-rule"], (string[])algo.GetTagItem(TelemetryAttributeNames.RulesMatchedIds)!);
     }
 
     [Fact]

@@ -74,7 +74,13 @@ public sealed class SourceMessageHandler(
         {
             var pipelineId = pipelineRules.Pipeline.PipelineId;
             using var pipelineScope = logger.BeginScope(new KeyValuePair<string, object?>[] { new(TelemetryAttributeNames.PipelineId, pipelineId) });
-            var evaluation = matcher.Match(image, pipelineRules.Rules);
+            RuleEvaluation evaluation;
+            using (var matchTelemetry = RuleMatchTelemetry.Begin(pipelineId, pipelineRules.Rules.Count))
+            {
+                evaluation = matcher.Match(image, pipelineRules.Rules);
+                matchTelemetry.Matched(evaluation);
+            }
+
             logger.LogRulesEvaluated(evaluation);
             if (evaluation.Matches.Count == 0)
             {
