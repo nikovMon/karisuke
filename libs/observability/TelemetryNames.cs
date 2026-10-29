@@ -140,6 +140,8 @@ public static class TelemetryAttributeNames
     // Rule evaluation of one image for one pipeline. Rule IDs are listed for every reason except
     // geometry, which usually covers most rules; counts show when a list was cut short in logs.
     public const string RulesMatchedIds = "unified_gateway.rules.matched.ids";
+    public const string RulesMatchedCount = "unified_gateway.rules.matched.count";
+    public const string RulesEvaluatedCount = "unified_gateway.rules.evaluated.count";
     public const string RulesMissedPhotoAgeIds = "unified_gateway.rules.missed.photo_age.ids";
     public const string RulesMissedPhotoAgeCount = "unified_gateway.rules.missed.photo_age.count";
     public const string RulesMissedSensorIds = "unified_gateway.rules.missed.sensor.ids";
