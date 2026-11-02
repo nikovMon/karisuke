@@ -163,7 +163,7 @@ public sealed partial class ElasticOverlayProvider(HttpClient client, IOptions<E
                 if (!properties.TryGetProperty(fields.Resolution, out var resolution) ||
                     resolution.ValueKind != JsonValueKind.Number || !resolution.TryGetDouble(out var number))
                     throw new FormatException("Overlay resolution must be a number.");
-                writer.WriteNumber("bestResolution", number);
+                writer.WriteNumber("bestResolution", number * 100);
                 writer.WriteString("photoTime", photoTime);
                 writer.WritePropertyName("roiFootprint");
                 GeometryUtilities.WriteGeoJson(writer, geometry);

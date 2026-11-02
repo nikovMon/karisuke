@@ -426,7 +426,7 @@ The response contract is separate from request aliases. The ordinary GET and eac
 | `properties_list.ImagingTechnique` | Initial coarse `sensorType`; replaced by the raw lookup before matching/selection. |
 | `properties_list.SolutionType` | `gridType` |
 | `properties_list.Sortie` | `sortieId` |
-| `properties_list.Resolution` | `bestResolution` |
+| `properties_list.Resolution` | `bestResolution` = provider resolution × 100 |
 | `properties_list.RegistrationQuality` | `registrationQuality` |
 | `properties_list.PhotoTime` | `photoTime` |
 | `properties_list.Created` | `createdTime` |
