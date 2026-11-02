@@ -35,7 +35,7 @@ public sealed class AutoRunApiTests
             fixture.Store.Add(RulesIndex, "shared-rule", Rule("Zero minimum", "tenant"));
         var request = Request() with
         {
-            Source = new() { Mode = mode, Filters = new() { Resolution = new() { Min = 0, Max = 20 } } },
+            Source = new() { Mode = mode, Filters = new() { Resolution = new() { Min = 0, Max = 100 } } },
             Targets = mode == AutoRunSourceMode.Rules ? Request().Targets : []
         };
         using var response = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", request, AutoRunJson.Options);
@@ -52,7 +52,7 @@ public sealed class AutoRunApiTests
                 .EnumerateArray().Single(c => c.TryGetProperty("range", out var ranges) && ranges.TryGetProperty("RESOLUTION", out _));
             var range = condition.GetProperty("range").GetProperty("RESOLUTION").GetProperty("values")[0];
             Assert.Equal(0, range.GetProperty("gte").GetDouble());
-            Assert.Equal(20, range.GetProperty("lte").GetDouble());
+            Assert.Equal(100, range.GetProperty("lte").GetDouble());
         }
         using var historyResponse = await fixture.Client.GetAsync("/auto-runs?summaryOnly=true");
         await AssertStatus(historyResponse, HttpStatusCode.OK);
@@ -172,7 +172,7 @@ public sealed class AutoRunApiTests
             Source = new()
             {
                 Mode = mode,
-                Filters = new() { IsRealtime = false, Resolution = new() { Min = 0.5, Max = 0.5 } }
+                Filters = new() { IsRealtime = false, Resolution = new() { Min = 50, Max = 50 } }
             },
             Publication = new() { BatchSize = 1, DelayMs = 0 }
         };
@@ -255,7 +255,7 @@ public sealed class AutoRunApiTests
         Assert.Equal("EO", overlay.GetProperty("sensorType").GetString());
         Assert.Equal("grid", overlay.GetProperty("gridType").GetString());
         Assert.Equal("sortie-1", overlay.GetProperty("sortieId").GetString());
-        Assert.Equal(0.5, overlay.GetProperty("bestResolution").GetDouble());
+        Assert.Equal(50, overlay.GetProperty("bestResolution").GetDouble());
         Assert.Equal("Accurate", overlay.GetProperty("registrationQuality").GetString());
         Assert.Equal(100, overlay.GetProperty("width").GetInt32());
         Assert.Equal(50, overlay.GetProperty("height").GetInt32());
@@ -486,7 +486,7 @@ public sealed class AutoRunApiTests
             ["source"] = new
             {
                 mode = "Filters",
-                filters = new { sensorNames = new[] { "camera" }, isRealtime = false, resolution = new { min = 0.5, max = 0.5 } }
+                filters = new { sensorNames = new[] { "camera" }, isRealtime = false, resolution = new { min = 50, max = 50 } }
             },
             ["publication"] = new { batchSize = 1, delayMs = 0 }
         };
@@ -571,7 +571,7 @@ public sealed class AutoRunApiTests
         var originalMessage = Assert.Single(fixture.Broker.Messages).Message;
 
         var currentRule = Rule("Updated rule", "updated-tenant");
-        currentRule.Match!.Resolution = new() { Min = 0.4, Max = 0.6 };
+        currentRule.Match!.Resolution = new() { Min = 40, Max = 60 };
         fixture.Store.Add(RulesIndex, "shared-rule", currentRule);
         fixture.Provider.ImageUrl = "https://images.invalid/rerun";
         using var rerunResponse = await fixture.Client.PostAsync($"/auto-runs/{original.Id}/rerun", null);
@@ -593,7 +593,7 @@ public sealed class AutoRunApiTests
         Assert.Equal("Updated rule", target.RuleName);
         Assert.Equal(1, target.MinOverlays);
         Assert.Equal(1, target.MaxOverlays);
-        Assert.Equal(0.4, target.Rule.Match!.Resolution!.Min);
+        Assert.Equal(40, target.Rule.Match!.Resolution!.Min);
         Assert.Equal("updated-tenant", target.Rule.RunParams![0].GetProperty("tenantId").GetString());
         var query = Assert.Single(ready.Queries);
         var clauses = query.GetProperty("filter").GetProperty("logical_operators").GetProperty("AND")
@@ -602,8 +602,8 @@ public sealed class AutoRunApiTests
             .GetProperty("match").GetProperty("ISREALTIME").GetProperty("values")[0].GetBoolean());
         var range = clauses.Single(c => c.TryGetProperty("range", out _)).GetProperty("range")
             .GetProperty("RESOLUTION").GetProperty("values")[0];
-        Assert.Equal(0.4, range.GetProperty("gte").GetDouble());
-        Assert.Equal(0.6, range.GetProperty("lte").GetDouble());
+        Assert.Equal(40, range.GetProperty("gte").GetDouble());
+        Assert.Equal(60, range.GetProperty("lte").GetDouble());
         Assert.Equal(6, fixture.Provider.Calls.Count);
         Assert.Single(fixture.Broker.Messages);
         using var originalResponse = await fixture.Client.GetAsync($"/auto-runs/{original.Id}");

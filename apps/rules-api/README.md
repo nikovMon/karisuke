@@ -426,13 +426,15 @@ The response contract is separate from request aliases. The ordinary GET and eac
 | `properties_list.ImagingTechnique` | Initial coarse `sensorType`; replaced by the raw lookup before matching/selection. |
 | `properties_list.SolutionType` | `gridType` |
 | `properties_list.Sortie` | `sortieId` |
-| `properties_list.Resolution` | `bestResolution` |
+| `properties_list.Resolution` | `bestResolution` = provider resolution × 100 |
 | `properties_list.RegistrationQuality` | `registrationQuality` |
 | `properties_list.PhotoTime` | `photoTime` |
 | `properties_list.Created` | `createdTime` |
 | `properties_list.IsRealTime` | `isRealtime` |
 | `properties_list.ImageWidth`, `properties_list.ImageHeight` | `width`, `height` |
 | `geo.wkt` | Polygon/MultiPolygon GeoJSON `roiFootprint` |
+
+Elastic Provider returns `properties_list.Resolution` in meters per pixel (m/px): the resolution in centimeters per pixel divided by 100. The pipeline's `bestResolution` uses centimeters per pixel (cm/px), so Auto Run multiplies the provider value by 100 before local matching and publication. For example, `50 cm/px` is returned as `0.5 m/px` and normalized back to `bestResolution: 50`.
 
 Response aliases can be changed under `AutoRun:Provider:ResponseFields` using the option names in [ElasticProviderOptions.cs](AutoRuns/Provider/ElasticProviderOptions.cs). The GET result's mapped `GlobalId` must equal the requested ID. Response resolution must be a JSON number, and `IsRealTime`, when present, must be a JSON boolean.
 

@@ -179,6 +179,7 @@ public sealed class AutoRunProviderTests
         Assert.Equal("SAR", overlay.Input.SensorType);
         Assert.Equal("grid", overlay.Input.GridType);
         Assert.Equal("strip", overlay.Input.ModeSar);
+        Assert.Equal(50, overlay.Input.BestResolution);
         Assert.Equal("https://images.example/1", overlay.Input.ImageUrl);
         Assert.Equal(100, overlay.Input.ImageWidth);
         Assert.Equal(50, overlay.Input.ImageHeight);
@@ -187,6 +188,7 @@ public sealed class AutoRunProviderTests
         Assert.Equal(DateTimeOffset.Parse("2026-10-19T07:00:00Z"), overlay.Input.PhotoTime);
         Assert.Equal(DateTimeOffset.Parse("2026-10-19T08:00:00Z"), overlay.CreatedTime);
         using var document = JsonDocument.Parse(overlay.Payload);
+        Assert.Equal(50, document.RootElement.GetProperty("bestResolution").GetDouble());
         Assert.Equal("Polygon", document.RootElement.GetProperty("roiFootprint").GetProperty("type").GetString());
         Assert.Equal("leg-7", document.RootElement.GetProperty("legId").GetString());
         Assert.Equal("previous", document.RootElement.GetProperty("prevOverlayId").GetString());
@@ -343,7 +345,7 @@ public sealed class AutoRunProviderTests
         {
             SensorNames = ["arc"], SensorTypes = ["SAR"], GridTypes = ["grid"],
             RegistrationQualities = ["Accurate"], SortieIds = ["sortie-1"], IsRealtime = false,
-            Resolution = new() { Min = 0.5, Max = 0.5 },
+            Resolution = new() { Min = 50, Max = 50 },
             PhotoTime = new() { From = "2026-10-19T07:00:00Z", To = "2026-10-19T07:00:00Z" },
             CreatedTime = new() { From = "2026-10-19T08:00:00Z", To = "2026-10-19T08:00:00Z" },
             Wkt = "MULTIPOLYGON (((34.5 31.5, 36 31.5, 36 33, 34.5 33, 34.5 31.5)))"
@@ -355,7 +357,7 @@ public sealed class AutoRunProviderTests
         Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { GridTypes = ["other"] }));
         Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { RegistrationQualities = ["Sensor"] }));
         Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { SortieIds = ["different"] }));
-        Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { Resolution = new() { Min = 0.6 } }));
+        Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { Resolution = new() { Min = 60 } }));
         Assert.False(ProviderQueryBuilder.Matches(overlay with { CreatedTime = null }, filters));
         Assert.False(ProviderQueryBuilder.Matches(overlay with { IsRealtime = null }, filters));
         Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { Wkt = "POLYGON ((1 1, 2 1, 2 2, 1 2, 1 1))" }));
