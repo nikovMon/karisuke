@@ -434,6 +434,8 @@ The response contract is separate from request aliases. The ordinary GET and eac
 | `properties_list.ImageWidth`, `properties_list.ImageHeight` | `width`, `height` |
 | `geo.wkt` | Polygon/MultiPolygon GeoJSON `roiFootprint` |
 
+Elastic Provider returns `properties_list.Resolution` in meters per pixel (m/px): the resolution in centimeters per pixel divided by 100. The pipeline's `bestResolution` uses centimeters per pixel (cm/px), so Auto Run multiplies the provider value by 100 before local matching and publication. For example, `50 cm/px` is returned as `0.5 m/px` and normalized back to `bestResolution: 50`.
+
 Response aliases can be changed under `AutoRun:Provider:ResponseFields` using the option names in [ElasticProviderOptions.cs](AutoRuns/Provider/ElasticProviderOptions.cs). The GET result's mapped `GlobalId` must equal the requested ID. Response resolution must be a JSON number, and `IsRealTime`, when present, must be a JSON boolean.
 
 The search projection can collapse VIS, PAN, and other optical types into a coarse `ImagingTechnique: "EO"`. AutoRun therefore deduplicates and checks the non-type criteria first, then performs a raw `result_type=4` GET for each remaining candidate before evaluating sensor-type conditions, pipeline validation, quota assignment, or direct selection. This also applies to Overlay IDs, where the ordinary overlay GET is followed by the raw lookup. A query branch or selected rule is never used to infer the actual type.
