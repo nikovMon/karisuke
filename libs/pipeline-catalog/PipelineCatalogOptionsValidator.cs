@@ -201,6 +201,12 @@ public sealed class PipelineCatalogOptionsValidator(IPipelineContractRegistry co
                     errors.Add($"{prefix}:Http:TimeoutSeconds must be between 1 and {HttpTransportOptions.MaximumTimerSeconds}.");
                 }
                 HttpTransportValidation.ValidateHeaders(transport.Http.Headers, $"{prefix}:Http:Headers", errors);
+
+                if (transport.Http.DeliveredStatusCodes is null ||
+                    transport.Http.DeliveredStatusCodes.Any(code => code is < 400 or > 499 or 408 or 429))
+                {
+                    errors.Add($"{prefix}:Http:DeliveredStatusCodes may only contain 4xx codes other than the retryable 408 and 429.");
+                }
                 break;
 
             default:

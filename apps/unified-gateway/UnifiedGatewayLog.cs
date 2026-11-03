@@ -6,7 +6,7 @@ namespace ImagingPipeline.UnifiedGateway;
 /// </summary>
 internal static partial class UnifiedGatewayLog
 {
-    [LoggerMessage(6001, LogLevel.Debug, "Pipeline dispatch delivered.")]
+    [LoggerMessage(6001, LogLevel.Information, "Pipeline dispatch delivered.")]
     public static partial void DispatchDelivered(this ILogger logger);
 
     [LoggerMessage(6002, LogLevel.Warning, "Pipeline dispatch failed.")]

@@ -115,6 +115,25 @@ public sealed class HttpDispatchTransportTests
     }
 
     [Fact]
+    public async Task ConfiguredDeliveredStatusCodeIsDeliveredOnlyForItsPipeline()
+    {
+        var deepWisdom = HttpPipeline("deep-wisdom", new HttpTransportOptions
+        {
+            Endpoint = "https://deep-wisdom.invalid/mission/upsert/",
+            DeliveredStatusCodes = [409]
+        });
+        var other = HttpPipeline("other");
+        var transport = CreateTransport(new StubHandler(HttpStatusCode.Conflict), deepWisdom, other);
+
+        var delivered = await transport.SendAsync(Unit(deepWisdom), CancellationToken.None);
+        var rejected = await transport.SendAsync(Unit(other), CancellationToken.None);
+
+        Assert.Equal(DispatchStatus.Delivered, delivered.Status);
+        Assert.Equal(409, delivered.StatusCode);
+        Assert.Equal(DispatchStatus.Rejected, rejected.Status);
+    }
+
+    [Fact]
     public async Task ConnectionFailureIsRetryable()
     {
         var pipeline = HttpPipeline("algo");

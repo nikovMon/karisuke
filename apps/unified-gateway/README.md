@@ -60,7 +60,7 @@ Dispatch IDs are 64 hexadecimal characters from a SHA-256 hash of the structured
 
 RabbitMQ sets `MessageId` to the dispatch ID and `CorrelationId` to the source message ID, publishes persistently, and waits for publisher confirmation. It forwards contract attributes and the pipeline start timestamp; trace context comes from the current span.
 
-HTTP sends the prepared JSON bytes with the configured method, endpoint and timeout. Catalog headers are applied to the appropriate request or content header collection, followed by payload attributes and `Idempotency-Key`. Unsupported headers fail explicitly. Redirects are not followed. Responses classify as delivered for 2xx, retryable for 408/429/5xx, and rejected otherwise. Connection failures and timeouts are retryable.
+HTTP sends the prepared JSON bytes with the configured method, endpoint and timeout. Catalog headers are applied to the appropriate request or content header collection, followed by payload attributes and `Idempotency-Key`. Unsupported headers fail explicitly. Redirects are not followed. Responses classify as delivered for 2xx and the pipeline's `DeliveredStatusCodes`, retryable for 408/429/5xx, and rejected otherwise. DeepWisdom lists 409, which it returns for an image it already has. Connection failures and timeouts are retryable.
 
 A retryable unit retries the whole original source message, which is matched again. Successful siblings can be delivered again with the same dispatch ID; downstream receivers must deduplicate. Otherwise, any rejected/invalid unit dead-letters the source. Delivery listeners do not change successful delivery outcomes. Retry topology remains unchanged under the planned cutover that removes the legacy gateway and its broker topology.
 

@@ -65,7 +65,11 @@ internal sealed class DispatchTelemetry : IDisposable
         RecordMetrics(telemetryOutcome, outcome.Error);
         if (outcome.Status == DispatchStatus.Delivered)
         {
-            _logger.DispatchDelivered();
+            // A configured 4xx can count as delivered, so the code tells it apart from a 2xx.
+            using (_logger.BeginScope(new KeyValuePair<string, object?>[] { new("StatusCode", outcome.StatusCode) }))
+            {
+                _logger.DispatchDelivered();
+            }
             return;
         }
 
