@@ -61,7 +61,8 @@
             "Endpoint": "https://example.invalid/mission/upsert/",
             "Method": "PUT",
             "TimeoutSeconds": 20,
-            "Headers": {}
+            "Headers": {},
+            "DeliveredStatusCodes": [409]
           }
         }
       },

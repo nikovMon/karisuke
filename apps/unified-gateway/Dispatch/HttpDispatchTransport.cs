@@ -44,7 +44,7 @@ public sealed class HttpDispatchTransport : IDispatchTransport
             using var request = CreateRequest(unit, endpoint);
             using var response = await _clients.CreateClient(HttpClientName)
                 .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
-            return Classify(unit, response.StatusCode);
+            return Classify(unit, response.StatusCode, endpoint.DeliveredStatusCodes);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -103,12 +103,13 @@ public sealed class HttpDispatchTransport : IDispatchTransport
     {
     }
 
-    internal static DispatchOutcome Classify(DispatchUnit unit, HttpStatusCode statusCode)
+    internal static DispatchOutcome Classify(DispatchUnit unit, HttpStatusCode statusCode, IReadOnlyCollection<int> deliveredStatusCodes)
     {
         var code = (int)statusCode;
         return code switch
         {
             >= 200 and < 300 => DispatchOutcome.Delivered(unit, code),
+            _ when deliveredStatusCodes.Contains(code) => DispatchOutcome.Delivered(unit, code),
             408 => DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Timeout, statusCode: code),
             429 or 503 => DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Unavailable, statusCode: code),
             >= 500 => DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Dependency, statusCode: code),

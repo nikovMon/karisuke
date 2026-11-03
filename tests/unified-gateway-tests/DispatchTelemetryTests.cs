@@ -12,7 +12,7 @@ namespace ImagingPipeline.UnifiedGateway.Tests;
 public sealed class DispatchTelemetryTests
 {
     [Fact]
-    public async Task DeliveredUnitHasOkSpanSuccessMetricAndStaticDebugLog()
+    public async Task DeliveredUnitHasOkSpanSuccessMetricAndStaticInformationLog()
     {
         var unit = Unit(RabbitMqPipeline("asd"), $"delivered-{Guid.NewGuid():N}");
         using var capture = new TelemetryCapture(unit.DispatchId);
@@ -33,11 +33,26 @@ public sealed class DispatchTelemetryTests
 
         var log = Assert.Single(capture.Logs);
         Assert.Equal(6001, log.EventId);
+        Assert.Equal(LogLevel.Information, log.Level);
         Assert.Equal("Pipeline dispatch delivered.", log.Message);
+        Assert.Null(log.Fields["StatusCode"]);
         Assert.Equal(unit.DispatchId, log.Fields["messaging.message.id"]);
         Assert.Equal("source-1", log.Fields["messaging.message.conversation_id"]);
         Assert.Equal("asd", log.Fields[TelemetryAttributeNames.PipelineId]);
         Assert.Equal("rabbitmq", log.Fields[TelemetryAttributeNames.PipelineTransport]);
+    }
+
+    [Fact]
+    public async Task DeliveredHttpUnitLogsItsStatusCode()
+    {
+        var unit = Unit(HttpPipeline("deep-wisdom"), $"delivered-http-{Guid.NewGuid():N}");
+        using var capture = new TelemetryCapture(unit.DispatchId);
+
+        await Dispatcher(capture.Logger, unit => DispatchOutcome.Delivered(unit, 409)).DispatchAsync([unit], CancellationToken.None);
+
+        var log = Assert.Single(capture.Logs);
+        Assert.Equal(6001, log.EventId);
+        Assert.Equal(409, log.Fields["StatusCode"]);
     }
 
     [Fact]

@@ -118,6 +118,9 @@ public sealed class PipelineCatalogTests
     [InlineData("http-credentials")]
     [InlineData("http-method")]
     [InlineData("http-timeout")]
+    [InlineData("http-delivered-2xx")]
+    [InlineData("http-delivered-5xx")]
+    [InlineData("http-delivered-retryable")]
     public void InvalidDisabledPipelineIsRejected(string invalidField)
     {
         var definition = ValidPipeline() with { Enabled = false };
@@ -138,6 +141,9 @@ public sealed class PipelineCatalogTests
             "http-credentials" => WithHttp(definition, new() { Endpoint = "https://user:secret@example.test/missions" }),
             "http-method" => WithHttp(definition, new() { Endpoint = "https://example.test/missions", Method = "POST\r\n" }),
             "http-timeout" => WithHttp(definition, new() { Endpoint = "https://example.test/missions", TimeoutSeconds = 0 }),
+            "http-delivered-2xx" => WithHttp(definition, new() { Endpoint = "https://example.test/missions", DeliveredStatusCodes = [200] }),
+            "http-delivered-5xx" => WithHttp(definition, new() { Endpoint = "https://example.test/missions", DeliveredStatusCodes = [500] }),
+            "http-delivered-retryable" => WithHttp(definition, new() { Endpoint = "https://example.test/missions", DeliveredStatusCodes = [429] }),
             _ => throw new InvalidOperationException()
         };
 

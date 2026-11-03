@@ -96,4 +96,10 @@ public sealed record HttpTransportOptions
     public string Method { get; init; } = "POST";
     public int TimeoutSeconds { get; init; } = 20;
     public Dictionary<string, string> Headers { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 4xx responses that count as delivered, for endpoints that answer a repeated request with an
+    /// error, such as 409 for a work item they already have.
+    /// </summary>
+    public List<int> DeliveredStatusCodes { get; init; } = [];
 }
