@@ -6,7 +6,7 @@ The unified gateway uses **FindAir** (`FindAirPipelineContract`), **DeepWisdom**
 
 The registered contract IDs are `FindAir`, `DeepWisdom` and `SarAtc`, with exact casing. Custom catalogs must use these names.
 
-Projection records type errors for pipeline-specific metadata in `PipelineDispatchContext.InputFieldErrors`. `ValidateContext(context, runParams)` checks only fields consumed by that run: FindAir checks its image metadata, while DeepWisdom checks relationship fields when `runEveryOtherImage` is true. The common input parser validates the fields required for rule matching.
+Projection records type errors for pipeline-specific metadata in `PipelineDispatchContext.InputFieldErrors`. `ValidateContext(context, runParams)` checks only fields consumed by that run: FindAir checks its image metadata, DeepWisdom checks relationship fields when `runEveryOtherImage` is true, and SarAtc checks only the task and image IDs. The common input parser validates the fields required for rule matching.
 
 `PipelineContractRegistry` resolves explicitly registered contract IDs using ordinal comparison. Unknown IDs fail resolution. The gateway registers `FindAirPipelineContract` as `FindAir`, `DeepWisdomPipelineContract` as `DeepWisdom` and `SarAtcPipelineContract` as `SarAtc`. Pipeline contracts use unversioned IDs.
 
@@ -37,7 +37,7 @@ The FindAir payload preserves the existing gateway's ordered JSON body, includin
 
 `PipelinePayload` also has optional typed `RabbitMqAttributes`. FindAir supplies `findair-contract-version` as an **integer** with value `1` in this dictionary to preserve the existing downstream wire contract. This marker is independent of unversioned pipeline and contract IDs. These attributes are contract output only; the library does not execute transport mapping or delivery.
 
-`BuildPayload` accepts per-pipeline `extraData` as an arbitrary JSON object. Both contracts include nonempty data under the body's `extraData` property, preserving names and JSON types. It cannot override existing body fields or headers. Omitting the object or supplying `{}` adds no `extraData` property.
+`BuildPayload` accepts per-pipeline `extraData` as an arbitrary JSON object. All three contracts include nonempty data under the body's `extraData` property, preserving names and JSON types. It cannot override existing body fields or headers. Omitting the object or supplying `{}` adds no `extraData` property.
 
 ## DeepWisdom
 
