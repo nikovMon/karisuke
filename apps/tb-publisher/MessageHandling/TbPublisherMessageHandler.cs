@@ -63,7 +63,8 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                 outcome = TelemetryOutcome.Rejected;
                 error = TelemetryErrorCategory.Validation;
                 _logger.MessageRejected(validationError);
-                return RabbitMqMessageProcessingResult.Failure(validationError);
+                return RabbitMqMessageProcessingResult.NonRetryableFailure(new RabbitMqFailure(
+                    RabbitMqFailureKind.InvalidData, "invalid_input", "Input message validation failed."));
             }
 
             var inputMessage = validation.Message!;
@@ -117,7 +118,8 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                     error = TelemetryErrorCategory.Validation;
                     geometryActivity.SetTelemetryError(error, ex);
                     _logger.InvalidRoiGeometry(ex);
-                    return RabbitMqMessageProcessingResult.Failure(ex.Message);
+                    return RabbitMqMessageProcessingResult.NonRetryableFailure(new RabbitMqFailure(
+                        RabbitMqFailureKind.InvalidData, "invalid_roi", "Input ROI geometry is invalid."));
                 }
                 catch (OperationCanceledException ex)
                 {
@@ -161,20 +163,24 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                 }
                 catch (ProjectionMapperClientException ex)
                 {
-                    outcome = TelemetryOutcome.Failure;
+                    outcome = ex.Kind == ProjectionMapperFailureKind.Transient ? TelemetryOutcome.Retry : TelemetryOutcome.Rejected;
                     error = TelemetryErrorCategory.Dependency;
                     projectionActivity.SetTelemetryError(error, ex, recordException: false);
-                    _logger.ProjectionFailed(ex);
-                    return RabbitMqMessageProcessingResult.RetryableFailure(
-                        $"projection mapping failed: {ex.Message}");
+                    _logger.ProjectionFailed(ex.Kind.ToString(), ex.Code, ex.HttpStatus);
+                    return ProjectionFailure(ex);
                 }
                 catch (TbPublisherValidationException ex)
                 {
                     outcome = TelemetryOutcome.Rejected;
-                    error = TelemetryErrorCategory.Validation;
-                    projectionActivity.SetTelemetryError(error, ex);
-                    _logger.InvalidProjectedGeometry(ex);
-                    return RabbitMqMessageProcessingResult.Failure(ex.Message);
+                    error = TelemetryErrorCategory.Dependency;
+                    projectionActivity.SetTelemetryError(error, ex, recordException: false);
+                    _logger.InvalidProjectedGeometry();
+                    return RabbitMqMessageProcessingResult.NonRetryableFailure(new RabbitMqFailure(
+                        RabbitMqFailureKind.DependencyResponse,
+                        "projection_mapper_invalid_geometry",
+                        "Projection mapper returned invalid pixel geometry.",
+                        "projection_mapper",
+                        ProjectionMapperEndpointKeys.G2IMultiPoints));
                 }
                 catch (OperationCanceledException ex)
                 {
@@ -322,6 +328,22 @@ public sealed class TbPublisherMessageHandler : IRabbitMqMessageHandler
                 outcome,
                 error);
         }
+    }
+
+    private static RabbitMqMessageProcessingResult ProjectionFailure(ProjectionMapperClientException exception)
+    {
+        var kind = exception.Kind switch
+        {
+            ProjectionMapperFailureKind.Transient => RabbitMqFailureKind.Transient,
+            ProjectionMapperFailureKind.DependencyResponse => RabbitMqFailureKind.DependencyResponse,
+            ProjectionMapperFailureKind.Configuration => RabbitMqFailureKind.Configuration,
+            _ => RabbitMqFailureKind.Unknown
+        };
+        var failure = new RabbitMqFailure(kind, exception.Code, exception.Message,
+            "projection_mapper", exception.Operation, exception.HttpStatus);
+        return kind == RabbitMqFailureKind.Transient
+            ? RabbitMqMessageProcessingResult.RetryableFailure(failure)
+            : RabbitMqMessageProcessingResult.NonRetryableFailure(failure);
     }
 
     private static Activity? StartStageActivity(string operation)

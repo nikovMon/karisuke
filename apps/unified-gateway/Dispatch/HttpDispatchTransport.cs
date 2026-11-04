@@ -1,8 +1,10 @@
 using System.Collections.Frozen;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using ImagingPipeline.Observability;
 using ImagingPipeline.PipelineCatalog;
+using ImagingPipeline.RabbitMqClient;
 
 namespace ImagingPipeline.UnifiedGateway.Dispatch;
 
@@ -34,7 +36,8 @@ public sealed class HttpDispatchTransport : IDispatchTransport
         if (!_endpoints.TryGetValue(unit.PipelineId, out var endpoint))
         {
             // Only an enabled pipeline whose catalog transport is http has an endpoint.
-            return DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Handler);
+            return DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Handler, failureDetails:
+                Failure(unit, RabbitMqFailureKind.Configuration, "gateway.http.endpoint_missing", "No enabled HTTP endpoint is configured."));
         }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -52,15 +55,27 @@ public sealed class HttpDispatchTransport : IDispatchTransport
         }
         catch (OperationCanceledException ex)
         {
-            return DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Timeout, ex);
+            return DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Timeout, ex, failureDetails:
+                Failure(unit, RabbitMqFailureKind.Transient, "gateway.http.timeout", "HTTP dispatch timed out."));
         }
         catch (HttpRequestException ex)
         {
-            return DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Connection, ex);
+            var failure = ex.HttpRequestError switch
+            {
+                HttpRequestError.NameResolutionError or HttpRequestError.ConnectionError =>
+                    Failure(unit, RabbitMqFailureKind.Transient, "gateway.http.connection", "HTTP connection failed."),
+                HttpRequestError.SecureConnectionError or HttpRequestError.UserAuthenticationError =>
+                    Failure(unit, RabbitMqFailureKind.Configuration, "gateway.http.authentication", "HTTP authentication or TLS setup failed."),
+                _ when ex.InnerException is SocketException =>
+                    Failure(unit, RabbitMqFailureKind.Transient, "gateway.http.connection", "HTTP connection failed."),
+                _ => Failure(unit, RabbitMqFailureKind.Unknown, "gateway.http.unclassified", "HTTP dispatch failed without a recognized cause.")
+            };
+            return DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Connection, ex, failureDetails: failure);
         }
         catch (InvalidDispatchHeaderException ex)
         {
-            return DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Validation, exception: ex);
+            return DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Validation, exception: ex, failureDetails:
+                Failure(unit, RabbitMqFailureKind.Configuration, "gateway.http.invalid_header", "An HTTP dispatch header is invalid."));
         }
     }
 
@@ -110,12 +125,23 @@ public sealed class HttpDispatchTransport : IDispatchTransport
         {
             >= 200 and < 300 => DispatchOutcome.Delivered(unit, code),
             _ when deliveredStatusCodes.Contains(code) => DispatchOutcome.Delivered(unit, code),
-            408 => DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Timeout, statusCode: code),
-            429 or 503 => DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Unavailable, statusCode: code),
-            >= 500 => DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Dependency, statusCode: code),
-            // The endpoint refused the request as sent. Redirects are not followed, so a 3xx means
-            // the configured endpoint is wrong.
-            _ => DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Validation, statusCode: code)
+            408 => DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Timeout, statusCode: code, failureDetails:
+                Failure(unit, RabbitMqFailureKind.Transient, "gateway.http.timeout", "HTTP dependency reported a timeout.", code)),
+            429 or 503 => DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Unavailable, statusCode: code, failureDetails:
+                Failure(unit, RabbitMqFailureKind.Transient, "gateway.http.unavailable", "HTTP dependency is unavailable or rate limited.", code)),
+            >= 500 and <= 599 => DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Dependency, statusCode: code, failureDetails:
+                Failure(unit, RabbitMqFailureKind.Transient, "gateway.http.retryable_status", "HTTP dependency returned a retryable status.", code)),
+            >= 300 and <= 399 or 401 or 403 or 404 or 405 or 407 =>
+                DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Validation, statusCode: code, failureDetails:
+                    Failure(unit, RabbitMqFailureKind.Configuration, "gateway.http.configuration", "HTTP dependency rejected the configured request.", code)),
+            // A dependency rejection alone does not prove that the original source data is invalid.
+            >= 400 and <= 499 => DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Validation, statusCode: code, failureDetails:
+                Failure(unit, RabbitMqFailureKind.DependencyResponse, "gateway.http.rejected_response", "HTTP dependency rejected the dispatch.", code)),
+            _ => DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Validation, statusCode: code, failureDetails:
+                Failure(unit, RabbitMqFailureKind.Unknown, "gateway.http.unknown_status", "HTTP dependency returned an unrecognized status.", code))
         };
     }
+
+    private static RabbitMqFailure Failure(DispatchUnit unit, RabbitMqFailureKind kind, string code, string message, int? statusCode = null) =>
+        new(kind, code, message, unit.PipelineId, "dispatch_http", statusCode);
 }

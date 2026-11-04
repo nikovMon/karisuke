@@ -27,11 +27,11 @@ internal static partial class TbPublisherLog
     [LoggerMessage(3011, LogLevel.Warning, "TB Publisher rejected an input message because its ROI geometry is invalid.")]
     public static partial void InvalidRoiGeometry(this ILogger logger, Exception exception);
 
-    [LoggerMessage(3012, LogLevel.Warning, "TB Publisher could not map the input geometry through Projection Mapper; RabbitMQ will retry the message.")]
-    public static partial void ProjectionFailed(this ILogger logger, Exception exception);
+    [LoggerMessage(3012, LogLevel.Warning, "TB Publisher Projection Mapper processing failed with kind {FailureKind}, code {FailureCode}, and HTTP status {HttpStatus}.")]
+    public static partial void ProjectionFailed(this ILogger logger, string failureKind, string failureCode, int? httpStatus);
 
     [LoggerMessage(3013, LogLevel.Warning, "TB Publisher rejected the Projection Mapper response because its pixel geometry is invalid.")]
-    public static partial void InvalidProjectedGeometry(this ILogger logger, Exception exception);
+    public static partial void InvalidProjectedGeometry(this ILogger logger);
 
     [LoggerMessage(3014, LogLevel.Warning, "TB Publisher output publication failed after {PublishedCount} of {TotalCount} messages; successfully published outputs may be duplicated when RabbitMQ retries the input.")]
     public static partial void OutputPublishScheduledForRetry(

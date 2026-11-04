@@ -22,7 +22,8 @@ public abstract class RabbitMqJsonMessageHandler<TMessage> : IRabbitMqMessageHan
         }
         catch (JsonException ex)
         {
-            return RabbitMqMessageProcessingResult.Failure($"Json deserialization failed: {ex.Message}");
+            return RabbitMqMessageProcessingResult.NonRetryableFailure(
+                new RabbitMqFailure(RabbitMqFailureKind.InvalidData, "invalid-json", $"Json deserialization failed: {ex.Message}"));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -31,7 +32,8 @@ public abstract class RabbitMqJsonMessageHandler<TMessage> : IRabbitMqMessageHan
 
         if (input is null)
         {
-            return RabbitMqMessageProcessingResult.Failure("Deserialization produced null.");
+            return RabbitMqMessageProcessingResult.NonRetryableFailure(
+                new RabbitMqFailure(RabbitMqFailureKind.InvalidData, "null-input", "Deserialization produced null."));
         }
 
         return await HandleMessageAsync(input, message, cancellationToken);

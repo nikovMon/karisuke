@@ -39,6 +39,9 @@ internal static partial class TbConsumerLog
         this ILogger logger,
         int tileCount);
 
+    [LoggerMessage(4018, LogLevel.Warning, "TB Consumer Projection Mapper processing failed for {TileCount} tiles with kind {FailureKind}, code {FailureCode}, and HTTP status {HttpStatus}.")]
+    public static partial void ProjectionFailed(this ILogger logger, int tileCount, string failureKind, string failureCode, int? httpStatus);
+
     [LoggerMessage(4014, LogLevel.Warning, "TB Consumer output publication failed after {PublishedCount} of {TotalCount} tiles; successfully published outputs may be duplicated when RabbitMQ retries the input.")]
     public static partial void OutputPublishScheduledForRetry(
         this ILogger logger,

@@ -119,6 +119,8 @@ public sealed class SourceMessageHandlerTests
         Assert.Equal(6020, log.EventId);
         Assert.Equal("Source message is invalid; it will be dead-lettered.", log.Message);
         Assert.Equal("gateway.invalid_json", log.Fields[TelemetryAttributeNames.ErrorCode]);
+        Assert.Equal(RabbitMqFailureKind.InvalidData, result.FailureDetails?.Kind);
+        Assert.Equal("gateway.invalid_json", result.FailureDetails?.Code);
     }
 
     [Fact]
@@ -168,6 +170,58 @@ public sealed class SourceMessageHandlerTests
 
         Assert.Equal(RabbitMqMessageFailureAction.Retry, result.FailureAction);
         Assert.Contains("asd", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SourceRetryPreservesActualDispatchFailureInsteadOfReplacingItWithPipelineNames()
+    {
+        var failure = new RabbitMqFailure(RabbitMqFailureKind.Transient, "gateway.http.retryable_status",
+            "HTTP dependency returned a retryable status.", "asd", "dispatch_http", 503);
+        await using var gateway = await Gateway.StartAsync([Rule("rule-a")],
+            unit => DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Unavailable, statusCode: 503, failureDetails: failure));
+
+        var result = await gateway.Handler.HandleAsync(Message());
+
+        Assert.Equal(RabbitMqMessageFailureAction.Retry, result.FailureAction);
+        Assert.Equal(failure.Kind, result.FailureDetails?.Kind);
+        Assert.Equal(failure.Code, result.FailureDetails?.Code);
+        Assert.Equal(failure.Dependency, result.FailureDetails?.Dependency);
+        Assert.Equal(failure.Operation, result.FailureDetails?.Operation);
+        Assert.Equal(failure.HttpStatus, result.FailureDetails?.HttpStatus);
+        Assert.Contains(failure.Message, result.FailureDetails!.Message, StringComparison.Ordinal);
+        Assert.Contains("asd", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UnknownRetryableSiblingIsNotRelabeledAsTransient()
+    {
+        await using var gateway = await Gateway.StartAsync(BothPipelineRules(), unit => unit.PipelineId == "asd"
+            ? DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Timeout, failureDetails:
+                new(RabbitMqFailureKind.Transient, "gateway.http.timeout", "Request timed out.", "asd", "dispatch_http"))
+            : DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Handler));
+
+        var result = await gateway.Handler.HandleAsync(Message());
+
+        Assert.Equal(RabbitMqMessageFailureAction.Retry, result.FailureAction);
+        Assert.Equal(RabbitMqFailureKind.Unknown, result.FailureDetails?.Kind);
+        Assert.Equal("algo", result.FailureDetails?.Dependency);
+        Assert.Contains("algo", result.Error, StringComparison.Ordinal);
+        Assert.Contains("asd", result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConfigurationFailureIsPreservedOnSourceRejection()
+    {
+        var failure = new RabbitMqFailure(RabbitMqFailureKind.Configuration, "gateway.http.configuration",
+            "HTTP dependency rejected the configured request.", "asd", "dispatch_http", 401);
+        await using var gateway = await Gateway.StartAsync([Rule("rule-a")],
+            unit => DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Validation, statusCode: 401, failureDetails: failure));
+
+        var result = await gateway.Handler.HandleAsync(Message());
+
+        Assert.Equal(RabbitMqMessageFailureAction.DeadLetter, result.FailureAction);
+        Assert.Equal(RabbitMqFailureKind.Configuration, result.FailureDetails?.Kind);
+        Assert.Equal(401, result.FailureDetails?.HttpStatus);
     }
 
     [Theory]
@@ -259,6 +313,8 @@ public sealed class SourceMessageHandlerTests
         Assert.Contains("asd", result.Error, StringComparison.Ordinal);
         Assert.DoesNotContain("algo", result.Error, StringComparison.Ordinal);
         Assert.Equal("algo", Assert.Single(gateway.Transport.Sent).PipelineId);
+        Assert.Equal(RabbitMqFailureKind.InvalidData, result.FailureDetails?.Kind);
+        Assert.Equal("gateway.contract.invalid", result.FailureDetails?.Code);
     }
 
     [Theory]
@@ -423,7 +479,10 @@ public sealed class SourceMessageHandlerTests
                         ContractId = id == "algo" ? "DeepWisdom" : "FindAir",
                         ExtraData = id == "algo" ? new PipelineExtraData(JsonSerializer.SerializeToElement(new
                         {
-                            XUserName = "user", Origin = "origin", QueueType = "queue", SaveDetections = false
+                            XUserName = "user",
+                            Origin = "origin",
+                            QueueType = "queue",
+                            SaveDetections = false
                         })) : PipelineExtraData.Empty
                     }), StringComparer.Ordinal)
                 }), contracts, NullLogger<ImagingPipeline.PipelineCatalog.PipelineCatalog>.Instance);

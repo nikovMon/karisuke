@@ -12,6 +12,10 @@ public sealed class RabbitMqClientOptions
     public string Password { get; set; } = "admin";
     public string VirtualHost { get; set; } = "/";
     public RabbitMqRemoteClusterOptions? InputCluster { get; set; }
+    public bool EnrichedDeadLetterEnabled { get; set; }
+    public string FailureServiceName { get; set; } = "unknown";
+    public RabbitMqFailureDestinationOptions? FailureDestination { get; set; }
+    public RabbitMqFailureLogOptions FailureLogging { get; set; } = new();
     public string InputQueue { get; set; } = string.Empty;
     public string OutputQueue { get; set; } = string.Empty;
     public string DeadLetterQueue { get; set; } = string.Empty;
@@ -151,6 +155,16 @@ public sealed class RabbitMqClientOptions
             return false;
         }
 
+        if (EnrichedDeadLetterEnabled &&
+            (string.IsNullOrWhiteSpace(FailureServiceName) ||
+             FailureDestination is { Queue: var failureQueue } && string.IsNullOrWhiteSpace(failureQueue) ||
+             FailureDestination?.Connection is { } failureConnection &&
+             (string.IsNullOrWhiteSpace(failureConnection.Host) || failureConnection.Port is < 1 or > 65535)))
+        {
+            error = "RabbitMq enriched failure service and destination must be valid.";
+            return false;
+        }
+
         error = string.Empty;
         return true;
     }
@@ -245,6 +259,12 @@ public sealed class RabbitMqRemoteClusterOptions
     public string Username { get; set; } = "guest";
     public string Password { get; set; } = "guest";
     public string VirtualHost { get; set; } = "/";
+}
+
+public sealed class RabbitMqFailureDestinationOptions
+{
+    public string Queue { get; set; } = string.Empty;
+    public RabbitMqRemoteClusterOptions? Connection { get; set; }
 }
 
 public sealed class RabbitMqRetryQueueOptions

@@ -11,20 +11,20 @@ public sealed class FakeProjectionMapperServer : IAsyncDisposable
     private readonly Task _loop;
     private int _requestCount;
 
-    public FakeProjectionMapperServer(Func<string, string> respond)
+    public FakeProjectionMapperServer(Func<string, string> respond, HttpStatusCode statusCode = HttpStatusCode.OK)
     {
         var port = GetFreeTcpPort();
         BaseUrl = $"http://localhost:{port}/";
         _listener = new HttpListener();
         _listener.Prefixes.Add(BaseUrl);
         _listener.Start();
-        _loop = Task.Run(() => LoopAsync(respond));
+        _loop = Task.Run(() => LoopAsync(respond, statusCode));
     }
 
     public string BaseUrl { get; }
     public int RequestCount => Volatile.Read(ref _requestCount);
 
-    private async Task LoopAsync(Func<string, string> respond)
+    private async Task LoopAsync(Func<string, string> respond, HttpStatusCode statusCode)
     {
         while (!_cts.IsCancellationRequested)
         {
@@ -43,6 +43,7 @@ public sealed class FakeProjectionMapperServer : IAsyncDisposable
             var body = await reader.ReadToEndAsync();
             var responseBody = respond(body);
             var bytes = Encoding.UTF8.GetBytes(responseBody);
+            context.Response.StatusCode = (int)statusCode;
             context.Response.ContentType = "application/json";
             context.Response.ContentLength64 = bytes.Length;
             await context.Response.OutputStream.WriteAsync(bytes);

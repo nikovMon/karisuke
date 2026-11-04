@@ -11,6 +11,7 @@ Consumes image updates, matches independently refreshed pipeline rules, prepares
 | `RabbitMq` | `Host` `localhost`, `Port` `5672`, `VirtualHost` `/`, `Username`/`Password` | Source broker for the input queue. Output destinations use catalog connections instead. |
 | `RabbitMq` | `InputQueue` `unified-gateway.input.q`, `DeadLetterQueue` `unified-gateway.dlq.q` | Source queue and its dead-letter queue. |
 | `RabbitMq` | `RetryExchange` `pipeline.retry.x` (`headers`), `RetryRoutingKey` `unified-gateway.retry`, `MaxRetryAttempts` `3`, `RetryQueues` (three queues, `DelayMilliseconds` `10000`, bound on `retry-count`) | Delayed retry of the whole source message; see [Delivery and retry](#delivery-and-retry). |
+| `RabbitMq` | `EnrichedDeadLetterEnabled` `true`, `FailureServiceName` `unified-gateway` | Preserve typed failure metadata on confirmed final-failure publications for scheduled DLQ recovery. |
 | `RabbitMq` | `PrefetchCount` `2`, `ConsumerConcurrency` `4`, `PublisherChannelPoolSize` `8`, `ReconnectDelaySeconds` `5` | Consumer throughput; the pool size also applies to each output broker connection. |
 | `Elasticsearch` | `Uri` `http://localhost:9200`, `Username`/`Password` empty, `TimeoutSeconds` `30` | Rule store. Set both credentials or neither. Each pipeline's index comes from its catalog `RulesIndex`. |
 | `RuleRefresh` | `IntervalSeconds` `60`, `JitterSeconds` `5` | Per-pipeline background reload interval plus random jitter. `IntervalSeconds` must be > 0 and `JitterSeconds` >= 0, or startup fails. |
@@ -82,6 +83,10 @@ HTTP sends the prepared JSON bytes with the configured method, endpoint and time
 A retryable unit retries the whole original source message, which is matched again. Successful siblings can be delivered again with the same dispatch ID; downstream receivers must deduplicate. Otherwise, any rejected/invalid unit dead-letters the source. Delivery listeners do not change successful delivery outcomes.
 
 A retryable source message is published to `RetryExchange` with an incremented `retry-count` header. The matching retry queue holds it for its `DelayMilliseconds` and dead-letters it back to the input queue. After `MaxRetryAttempts` retries, or on any non-retryable result, the message goes to `DeadLetterQueue`.
+
+With `EnrichedDeadLetterEnabled`, final failure is a persistent, mandatory, confirmed publication before the source is acknowledged. Its original body and required headers are retained with structured failure metadata. HTTP timeouts, recognized network failures and 408/429/5xx responses are classified as transient; authentication, missing destinations and broker topology errors are configuration failures. Locally invalid source/contract fields are invalid data. Other HTTP rejections are dependency-response failures, and unrecognized exceptions remain unknown. These classifications control later recovery eligibility without changing the existing short retries or whole-source fanout semantics.
+
+Source aggregation retains an actual dispatch failure's code, dependency, operation and HTTP status alongside a bounded pipeline summary. If retryable siblings contain both a known transient failure and an unclassified/configuration failure, the latter takes precedence for recovery eligibility. This prevents an unknown defect from becoming automatically replayable merely because another unit timed out. See [scheduled recovery](../dlq-recovery/README.md) and the [deployment examples](../../deploy/dlq-recovery/README.md).
 
 ## Observability
 

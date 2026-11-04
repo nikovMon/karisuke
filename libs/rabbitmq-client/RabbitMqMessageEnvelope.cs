@@ -18,17 +18,23 @@ public sealed record RabbitMqMessageProcessingResult(
     byte[]? OutputBody,
     string? Error,
     IReadOnlyList<RabbitMqMessageEnvelope>? OutputMessages = null,
-    RabbitMqMessageFailureAction FailureAction = RabbitMqMessageFailureAction.DeadLetter)
+    RabbitMqMessageFailureAction FailureAction = RabbitMqMessageFailureAction.DeadLetter,
+    RabbitMqFailure? FailureDetails = null)
 {
     public static RabbitMqMessageProcessingResult Success() => new(true, null, null);
     public static RabbitMqMessageProcessingResult Success(byte[] outputBody) => new(true, outputBody, null);
     public static RabbitMqMessageProcessingResult Success(IReadOnlyList<RabbitMqMessageEnvelope> outputMessages) =>
         new(true, null, null, outputMessages);
 
-    public static RabbitMqMessageProcessingResult Failure(string error) => new(false, null, error);
+    public static RabbitMqMessageProcessingResult Failure(string error) =>
+        NonRetryableFailure(new RabbitMqFailure(RabbitMqFailureKind.Unknown, "unclassified", error));
     public static RabbitMqMessageProcessingResult NonRetryableFailure(string error) => Failure(error);
     public static RabbitMqMessageProcessingResult RetryableFailure(string error) =>
-        new(false, null, error, null, RabbitMqMessageFailureAction.Retry);
+        RetryableFailure(new RabbitMqFailure(RabbitMqFailureKind.Unknown, "unclassified", error));
+    public static RabbitMqMessageProcessingResult RetryableFailure(RabbitMqFailure failure) =>
+        new(false, null, failure.Message, null, RabbitMqMessageFailureAction.Retry, failure);
+    public static RabbitMqMessageProcessingResult NonRetryableFailure(RabbitMqFailure failure) =>
+        new(false, null, failure.Message, null, RabbitMqMessageFailureAction.DeadLetter, failure);
 }
 
 public enum RabbitMqMessageFailureAction

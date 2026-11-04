@@ -13,6 +13,31 @@ namespace ImagingPipeline.Observability.Tests;
 public sealed class EcsHttpLoggingTests
 {
     [Fact]
+    public async Task RetainedDiagnosticChunksSurviveGeneralAttributeAndStringLimits()
+    {
+        var options = CreateOptions() with { MaxAttributeCount = 1, MaxCollectionCount = 1, MaxStringLength = 256 };
+        var buffer = new EcsLogBuffer(options);
+        using var provider = new EcsHttpLoggerProvider(buffer, options);
+        provider.SetScopeProvider(new LoggerExternalScopeProvider());
+        var logger = provider.CreateLogger("ImagingPipeline.Tests.Retention");
+        using var scope = logger.BeginScope(new Dictionary<string, object?> { ["first"] = "scope" });
+        var text = new string('x', LosslessJsonLogChunk.MaximumChunkLength);
+        var chunk = new LosslessJsonLogChunk(new string('a', 32), 0, 1, text, new string('b', 64), text.Length);
+
+        logger.Log(LogLevel.Warning, new EventId(117), chunk, null, static (state, _) => state.ToString());
+
+        var logEvent = await buffer.ReadAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
+        Assert.NotNull(logEvent);
+        using var json = JsonDocument.Parse(EcsLogDocumentSerializer.SerializeBatch(
+            [logEvent], CreateResource(), new EcsLogDataStreamOptions("findair", "integration")));
+        var labels = json.RootElement[0].GetProperty("labels");
+        Assert.Equal(text, labels.GetProperty("failure_log_json_chunk").GetString());
+        Assert.Equal(1, labels.GetProperty("failure_log_chunk_count").GetInt32());
+        Assert.Equal(2048, labels.GetProperty("failure_log_document_length").GetInt32());
+        Assert.Equal(new string('b', 64), labels.GetProperty("failure_log_sha256").GetString());
+    }
+
+    [Fact]
     public async Task ProviderAndSerializer_FlattenScopesAndProduceReadableEcsJson()
     {
         var options = CreateOptions();

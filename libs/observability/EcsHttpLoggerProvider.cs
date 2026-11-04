@@ -88,7 +88,7 @@ internal sealed class EcsHttpLoggerProvider : ILoggerProvider, ISupportExternalS
             activity is null ? null : activity.TraceId.ToHexString(),
             activity is null ? null : activity.SpanId.ToHexString(),
             Environment.CurrentManagedThreadId,
-            attributes.Values);
+            state is LosslessJsonLogChunk chunk ? chunk.Attributes : attributes.Values);
         _buffer.TryWrite(logEvent);
     }
 

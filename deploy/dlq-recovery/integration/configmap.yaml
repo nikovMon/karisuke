@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dlq-recovery-config
+data:
+  appsettings.Production.json: |
+    {
+      "Recovery": {
+        "Enabled": true,
+        "DryRun": true,
+        "MaxMessagesPerQueue": 50,
+        "MessagesPerSecond": 1,
+        "MaxRedrives": 3,
+        "MaxRunSeconds": 210,
+        "OperationTimeoutSeconds": 10,
+        "ShutdownReserveSeconds": 15,
+        "InputQueueBacklogLimit": 1000,
+        "Connections": {
+          "findair": {
+            "Host": "",
+            "Port": 5672,
+            "VirtualHost": "",
+            "Username": "",
+            "Password": "",
+            "TlsEnabled": false
+          },
+          "gatewaySource": {
+            "Host": "",
+            "Port": 5672,
+            "VirtualHost": "",
+            "Username": "",
+            "Password": "",
+            "TlsEnabled": false
+          }
+        },
+        "Queues": {
+          "publisher": {
+            "Enabled": true,
+            "SourceConnection": "findair",
+            "SourceQueue": "findair.publisher.dlq",
+            "ReplayConnection": "findair",
+            "ReplayQueue": "findair.publisher",
+            "ManualQueue": "findair.publisher.dlq.manual",
+            "RetryCountHeader": "retry-count"
+          },
+          "consumer": {
+            "Enabled": true,
+            "SourceConnection": "findair",
+            "SourceQueue": "findair.consumer.dlq",
+            "ReplayConnection": "findair",
+            "ReplayQueue": "findair.consumer",
+            "ManualQueue": "findair.consumer.dlq.manual",
+            "RetryCountHeader": "retry-count"
+          },
+          "gateway": {
+            "Enabled": true,
+            "SourceConnection": "gatewaySource",
+            "SourceQueue": "ug.dlq",
+            "ReplayConnection": "gatewaySource",
+            "ReplayQueue": "ug.from.hoshen.prod",
+            "ManualQueue": "ug.dlq.manual",
+            "RetryCountHeader": "retry-count"
+          }
+        }
+      },
+      "Observability": {
+        "DeploymentEnvironment": "integration",
+        "Logs": {
+          "DataStream": {
+            "Dataset": "findair",
+            "Namespace": "integration"
+          }
+        }
+      }
+    }

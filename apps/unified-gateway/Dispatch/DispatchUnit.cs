@@ -1,5 +1,6 @@
 using ImagingPipeline.Observability;
 using ImagingPipeline.PipelineCatalog;
+using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.UnifiedGateway.Processing;
 
 namespace ImagingPipeline.UnifiedGateway.Dispatch;
@@ -37,7 +38,8 @@ public sealed record DispatchOutcome(
     DispatchStatus Status,
     TelemetryErrorCategory Error = TelemetryErrorCategory.None,
     int? StatusCode = null,
-    Exception? Exception = null)
+    Exception? Exception = null,
+    RabbitMqFailure? FailureDetails = null)
 {
     public static DispatchOutcome Delivered(DispatchUnit unit, int? statusCode = null) =>
         new(unit, DispatchStatus.Delivered, StatusCode: statusCode);
@@ -46,13 +48,15 @@ public sealed record DispatchOutcome(
         DispatchUnit unit,
         TelemetryErrorCategory error,
         Exception? exception = null,
-        int? statusCode = null) =>
-        new(unit, DispatchStatus.Retryable, error, statusCode, exception);
+        int? statusCode = null,
+        RabbitMqFailure? failureDetails = null) =>
+        new(unit, DispatchStatus.Retryable, error, statusCode, exception, failureDetails);
 
     public static DispatchOutcome Rejected(
         DispatchUnit unit,
         TelemetryErrorCategory error,
         Exception? exception = null,
-        int? statusCode = null) =>
-        new(unit, DispatchStatus.Rejected, error, statusCode, exception);
+        int? statusCode = null,
+        RabbitMqFailure? failureDetails = null) =>
+        new(unit, DispatchStatus.Rejected, error, statusCode, exception, failureDetails);
 }

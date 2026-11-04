@@ -1,0 +1,71 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dlq-recovery
+  labels:
+    app.kubernetes.io/name: dlq-recovery
+spec:
+  schedule: "*/5 * * * *"
+  suspend: true
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 60
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 240
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: dlq-recovery
+        spec:
+          serviceAccountName: dlq-recovery
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          terminationGracePeriodSeconds: 20
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: recovery
+              image: registry.example.invalid/karisuke/dlq-recovery:replace-with-tested-tag
+              imagePullPolicy: IfNotPresent
+              env:
+                # Both deployed hosts use production runtime defaults. The mounted
+                # configuration identifies the integration or production deployment.
+                - name: DOTNET_ENVIRONMENT
+                  value: Production
+                - name: DOTNET_EnableDiagnostics
+                  value: "0"
+              envFrom:
+                - secretRef:
+                    name: dlq-recovery-connections
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: configuration
+                  mountPath: /app/appsettings.Production.json
+                  subPath: appsettings.Production.json
+                  readOnly: true
+                - name: temporary
+                  mountPath: /tmp
+          volumes:
+            - name: configuration
+              configMap:
+                name: dlq-recovery-config
+            - name: temporary
+              emptyDir:
+                sizeLimit: 64Mi

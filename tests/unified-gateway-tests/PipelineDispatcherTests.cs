@@ -1,5 +1,6 @@
 using ImagingPipeline.PipelineCatalog;
 using ImagingPipeline.Observability;
+using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.UnifiedGateway.Dispatch;
 using Microsoft.Extensions.Logging.Abstractions;
 using static ImagingPipeline.UnifiedGateway.Tests.DispatchTestData;
@@ -43,6 +44,7 @@ public sealed class PipelineDispatcherTests
 
         Assert.Equal(DispatchStatus.Rejected, outcome.Status);
         Assert.Equal(TelemetryErrorCategory.Handler, outcome.Error);
+        Assert.Equal(RabbitMqFailureKind.Configuration, outcome.FailureDetails?.Kind);
     }
 
     [Fact]
@@ -57,6 +59,7 @@ public sealed class PipelineDispatcherTests
 
         Assert.Equal(DispatchStatus.Retryable, outcomes[0].Status);
         Assert.Same(failure, outcomes[0].Exception);
+        Assert.Equal(RabbitMqFailureKind.Unknown, outcomes[0].FailureDetails?.Kind);
         Assert.Equal(DispatchStatus.Delivered, outcomes[1].Status);
     }
 

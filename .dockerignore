@@ -1,7 +1,11 @@
 bin/
+**/bin/
 /sites/
 obj/
+**/obj/
 TestResults/
+**/TestResults/
+/artifacts/
 coverage/
 coverage.*
 node_modules/

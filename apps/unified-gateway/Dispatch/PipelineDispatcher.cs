@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using ImagingPipeline.Observability;
 using ImagingPipeline.PipelineCatalog;
+using ImagingPipeline.RabbitMqClient;
 
 namespace ImagingPipeline.UnifiedGateway.Dispatch;
 
@@ -66,7 +67,9 @@ public sealed class PipelineDispatcher
     {
         if (!_transports.TryGetValue(unit.TransportKind, out var transport))
         {
-            return DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Handler);
+            return DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Handler, failureDetails:
+                new(RabbitMqFailureKind.Configuration, "gateway.transport.missing", "No dispatch transport is registered.",
+                    unit.PipelineId, "dispatch"));
         }
 
         try
@@ -81,7 +84,9 @@ public sealed class PipelineDispatcher
         {
             // Transports report failures as outcomes; an escaping exception is unexpected but must
             // not lose the other units' outcomes.
-            return DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Handler, ex);
+            return DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Handler, ex, failureDetails:
+                new(RabbitMqFailureKind.Unknown, "gateway.dispatch.unexpected", "Dispatch failed unexpectedly.",
+                    unit.PipelineId, "dispatch"));
         }
     }
 
