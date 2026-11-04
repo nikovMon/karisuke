@@ -13,6 +13,25 @@ namespace ImagingPipeline.Observability.Tests;
 public sealed class ConsoleFormattingTests
 {
     [Fact]
+    public void StructuredConsoleFormatter_PreservesCompleteDiagnosticChunk()
+    {
+        using var host = CreateHost();
+        var formatter = host.Services.GetServices<ConsoleFormatter>()
+            .Single(item => item.Name == StructuredJsonConsoleFormatter.FormatterName);
+        var text = new string('x', LosslessJsonLogChunk.MaximumChunkLength);
+        var chunk = new LosslessJsonLogChunk(new string('a', 32), 0, 1, text, new string('b', 64), text.Length);
+        var entry = new LogEntry<LosslessJsonLogChunk>(LogLevel.Warning, "Retention", new EventId(117),
+            chunk, null, static (state, _) => state.ToString());
+        using var writer = new StringWriter();
+
+        formatter.Write(in entry, null, writer);
+
+        using var json = JsonDocument.Parse(writer.ToString());
+        Assert.Equal(text, json.RootElement.GetProperty("State").GetProperty("failure_log_json_chunk").GetString());
+        Assert.Equal(1, json.RootElement.GetProperty("State").GetProperty("failure_log_chunk_count").GetInt32());
+    }
+
+    [Fact]
     public void StructuredConsoleFormatter_PreservesRuleIdArraysUtf8HeadersAndNumbers()
     {
         using var host = CreateHost();

@@ -2,6 +2,9 @@ using ImagingPipeline.Observability;
 using ImagingPipeline.PipelineCatalog;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.UnifiedGateway.Dispatch;
+using RabbitMQ.Client;
+using RabbitMQ.Client.Events;
+using RabbitMQ.Client.Exceptions;
 using static ImagingPipeline.UnifiedGateway.Tests.DispatchTestData;
 
 namespace ImagingPipeline.UnifiedGateway.Tests;
@@ -151,6 +154,66 @@ public sealed class RabbitMqDispatchTransportTests
         Assert.Equal(DispatchStatus.Retryable, outcome.Status);
         Assert.Same(failure, outcome.Exception);
         Assert.Equal(TelemetryErrorCategory.Publish, outcome.Error);
+        Assert.Equal(RabbitMqFailureKind.Unknown, outcome.FailureDetails?.Kind);
+    }
+
+    [Theory]
+    [InlineData(false, RabbitMqFailureKind.Transient)]
+    [InlineData(true, RabbitMqFailureKind.Configuration)]
+    public async Task PublishFailureRetainsNetworkOrConfigurationClassification(bool configuration, RabbitMqFailureKind kind)
+    {
+        var pipeline = RabbitMqPipeline("asd");
+        Exception failure = configuration
+            ? new OperationInterruptedException(new ShutdownEventArgs(ShutdownInitiator.Peer, 406, "queue mismatch"))
+            : new IOException("connection lost");
+        var publisher = new RecordingPublisher { Failure = failure };
+
+        var outcome = await CreateTransport(publisher, pipeline).SendAsync(Unit(pipeline), CancellationToken.None);
+
+        Assert.Equal(DispatchStatus.Retryable, outcome.Status);
+        Assert.Equal(kind, outcome.FailureDetails?.Kind);
+        Assert.Equal("asd", outcome.FailureDetails?.Dependency);
+        Assert.Equal("dispatch_rabbitmq", outcome.FailureDetails?.Operation);
+    }
+
+    [Fact]
+    public async Task AuthenticationInsideAnUnreachableBrokerFailureRemainsConfiguration()
+    {
+        var pipeline = RabbitMqPipeline("asd");
+        var publisher = new RecordingPublisher
+        {
+            Failure = new BrokerUnreachableException(new AggregateException(
+                new IOException("unreachable host"), new AuthenticationFailureException("access refused")))
+        };
+
+        var outcome = await CreateTransport(publisher, pipeline).SendAsync(Unit(pipeline), CancellationToken.None);
+
+        Assert.Equal(DispatchStatus.Retryable, outcome.Status);
+        Assert.Equal(RabbitMqFailureKind.Configuration, outcome.FailureDetails?.Kind);
+    }
+
+    [Theory]
+    [InlineData(false, RabbitMqFailureKind.Transient)]
+    [InlineData(true, RabbitMqFailureKind.Configuration)]
+    public async Task UnroutablePublicationIsConfigurationWhileBrokerNackIsTransient(bool returned, RabbitMqFailureKind kind)
+    {
+        var pipeline = RabbitMqPipeline("asd");
+        var publisher = new RecordingPublisher { Failure = new PublishException(1, returned) };
+
+        var outcome = await CreateTransport(publisher, pipeline).SendAsync(Unit(pipeline), CancellationToken.None);
+
+        Assert.Equal(kind, outcome.FailureDetails?.Kind);
+    }
+
+    [Fact]
+    public async Task PublicationTimeoutWithoutCallerCancellationIsTransient()
+    {
+        var pipeline = RabbitMqPipeline("asd");
+        var publisher = new RecordingPublisher { Failure = new OperationCanceledException() };
+
+        var outcome = await CreateTransport(publisher, pipeline).SendAsync(Unit(pipeline), CancellationToken.None);
+
+        Assert.Equal(RabbitMqFailureKind.Transient, outcome.FailureDetails?.Kind);
     }
 
     [Fact]

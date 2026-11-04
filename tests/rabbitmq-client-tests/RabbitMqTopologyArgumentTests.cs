@@ -5,6 +5,37 @@ namespace ImagingPipeline.RabbitMqClient.Tests;
 
 public sealed class RabbitMqTopologyArgumentTests
 {
+    [Theory]
+    [InlineData("retry-count", null, "any")]
+    [InlineData("x-retry-count", null, "any-with-x")]
+    [InlineData("x-retry-count", "all-with-x", "all-with-x")]
+    public async Task RetryHeaderBindingIncludesReservedPrefixAndPreservesExplicitMatchMode(
+        string retryHeader, string? configuredMatch, string expectedMatch)
+    {
+        var options = new RabbitMqClientOptions
+        {
+            InputQueue = "in",
+            DeadLetterQueue = "dead",
+            RetryExchange = "retry-x",
+            RetryExchangeType = ExchangeType.Headers,
+            RetryCountHeader = retryHeader,
+            RetryQueues = [new RabbitMqRetryQueueOptions { Queue = "retry-one", RetryCount = 1 }]
+        };
+        if (configuredMatch is not null)
+        {
+            options.RetryBindingArguments["x-match"] = configuredMatch;
+        }
+        var channel = DispatchProxy.Create<IChannel, RecordingChannel>();
+
+        await RabbitMqTopology.DeclareInputAsync(channel, options, CancellationToken.None);
+
+        var call = ((RecordingChannel)channel).Calls.Single(call =>
+            call.Method == nameof(IChannel.QueueBindAsync) && Equals(call.Values["queue"], "retry-one"));
+        var arguments = Assert.IsType<Dictionary<string, object?>>(call.Values["arguments"]);
+        Assert.Equal(expectedMatch, arguments["x-match"]);
+        Assert.Equal(1, arguments[retryHeader]);
+    }
+
     [Fact]
     public async Task QueueExchangeAndBindingCallsUseKeyAwareLegacyConversion()
     {
@@ -12,15 +43,27 @@ public sealed class RabbitMqTopologyArgumentTests
         var nested = new Dictionary<string, object?> { ["nested-value"] = "123" };
         Dictionary<string, object?> Arguments() => new()
         {
-            ["x-dead-letter-exchange"] = "123", ["x-dead-letter-routing-key"] = "true",
-            ["alternate-exchange"] = "456", ["x-match"] = "all", ["x-message-ttl"] = "1000",
-            ["custom-boolean"] = "true", ["custom-large"] = "2147483648", ["custom-fraction"] = "1.5",
-            ["bytes"] = bytes, ["nested"] = nested, ["null"] = null, ["typed-large"] = 2147483648L
+            ["x-dead-letter-exchange"] = "123",
+            ["x-dead-letter-routing-key"] = "true",
+            ["alternate-exchange"] = "456",
+            ["x-match"] = "all",
+            ["x-message-ttl"] = "1000",
+            ["custom-boolean"] = "true",
+            ["custom-large"] = "2147483648",
+            ["custom-fraction"] = "1.5",
+            ["bytes"] = bytes,
+            ["nested"] = nested,
+            ["null"] = null,
+            ["typed-large"] = 2147483648L
         };
         var options = new RabbitMqClientOptions
         {
-            OutputQueue = "out", OutputExchange = "out-x", OutputExchangeType = "headers",
-            OutputQueueHeaders = Arguments(), OutputExchangeHeaders = Arguments(), OutputBindingArguments = Arguments()
+            OutputQueue = "out",
+            OutputExchange = "out-x",
+            OutputExchangeType = "headers",
+            OutputQueueHeaders = Arguments(),
+            OutputExchangeHeaders = Arguments(),
+            OutputBindingArguments = Arguments()
         };
         var channel = DispatchProxy.Create<IChannel, RecordingChannel>();
         var recorder = (RecordingChannel)channel;
@@ -59,9 +102,15 @@ public sealed class RabbitMqTopologyArgumentTests
     {
         var options = new RabbitMqClientOptions
         {
-            InputQueue = "in", InputExchange = "123", InputRoutingKey = "true",
-            DeadLetterQueue = "dead", DeadLetterExchange = "456", DeadLetterRoutingKey = "false",
-            RetryQueue = "retry", RetryExchange = "retry-x", RetryDelayMilliseconds = 2500
+            InputQueue = "in",
+            InputExchange = "123",
+            InputRoutingKey = "true",
+            DeadLetterQueue = "dead",
+            DeadLetterExchange = "456",
+            DeadLetterRoutingKey = "false",
+            RetryQueue = "retry",
+            RetryExchange = "retry-x",
+            RetryDelayMilliseconds = 2500
         };
         var channel = DispatchProxy.Create<IChannel, RecordingChannel>();
         var recorder = (RecordingChannel)channel;

@@ -22,15 +22,18 @@ internal sealed class RabbitMqOutcomeRouter
     private readonly IRabbitMqPublisher _publisher;
     private readonly RabbitMqClientOptions _options;
     private readonly ILogger<RabbitMqOutcomeRouter> _logger;
+    private readonly IRabbitMqFailurePublisher? _failurePublisher;
 
     public RabbitMqOutcomeRouter(
         IRabbitMqPublisher publisher,
         IOptions<RabbitMqClientOptions> options,
-        ILogger<RabbitMqOutcomeRouter> logger)
+        ILogger<RabbitMqOutcomeRouter> logger,
+        IRabbitMqFailurePublisher? failurePublisher = null)
     {
         _publisher = publisher;
         _options = options.Value;
         _logger = logger;
+        _failurePublisher = failurePublisher;
     }
 
     public async Task<RabbitMqCompletionResult> CompleteAsync(
@@ -57,9 +60,19 @@ internal sealed class RabbitMqOutcomeRouter
                 return new RabbitMqCompletionResult(TelemetryOutcome.Success, TelemetryErrorCategory.None);
             }
 
+            var failure = result.FailureDetails ?? new RabbitMqFailure(
+                RabbitMqFailureKind.Unknown, "unclassified", result.Error ?? "Unclassified handler failure.");
+            if (_options.EnrichedDeadLetterEnabled)
+            {
+                delivery = delivery with
+                {
+                    Message = RabbitMqFailureHeaders.Enrich(delivery.Message, failure, _options.FailureServiceName)
+                };
+            }
+
             if (result.FailureAction == RabbitMqMessageFailureAction.Retry)
             {
-                return await RetryOrDeadLetterAsync(channel, delivery, cancellationToken);
+                return await RetryOrDeadLetterAsync(channel, delivery, failure, cancellationToken);
             }
 
             return await DeadLetterAsync(
@@ -67,6 +80,7 @@ internal sealed class RabbitMqOutcomeRouter
                 delivery,
                 "non-retryable failure",
                 TelemetryErrorCategory.Handler,
+                failure,
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -87,6 +101,7 @@ internal sealed class RabbitMqOutcomeRouter
     private async Task<RabbitMqCompletionResult> RetryOrDeadLetterAsync(
         IChannel channel,
         RabbitMqDelivery delivery,
+        RabbitMqFailure failure,
         CancellationToken cancellationToken)
     {
         if (_options.MaxRetryAttempts == 0)
@@ -96,6 +111,7 @@ internal sealed class RabbitMqOutcomeRouter
                 delivery,
                 "retry disabled",
                 TelemetryErrorCategory.Handler,
+                failure,
                 cancellationToken);
         }
 
@@ -111,6 +127,7 @@ internal sealed class RabbitMqOutcomeRouter
                 delivery,
                 retry.Error ?? "retry count header could not be updated",
                 TelemetryErrorCategory.Validation,
+                new RabbitMqFailure(RabbitMqFailureKind.InvalidData, "invalid-retry-count", retry.Error ?? "Invalid retry count."),
                 cancellationToken);
         }
 
@@ -126,6 +143,7 @@ internal sealed class RabbitMqOutcomeRouter
                 delivery,
                 "retry attempts exhausted",
                 TelemetryErrorCategory.Handler,
+                failure,
                 cancellationToken);
         }
 
@@ -159,22 +177,47 @@ internal sealed class RabbitMqOutcomeRouter
         RabbitMqDelivery delivery,
         string reason,
         TelemetryErrorCategory error,
+        RabbitMqFailure failure,
         CancellationToken cancellationToken)
     {
-        await NackAsync(
-            channel,
-            delivery.DeliveryTag,
-            requeue: false,
-            TelemetryOutcome.DeadLetter,
-            cancellationToken);
+        var destination = _options.FailureDestination?.Queue ?? _options.EffectiveDeadLetterQueue;
+        if (_options.EnrichedDeadLetterEnabled)
+        {
+            var retained = RabbitMqFailureHeaders.Enrich(delivery.Message, failure, _options.FailureServiceName);
+            var publisher = _failurePublisher ?? throw new InvalidOperationException("Enriched failure publisher is not registered.");
+            await publisher.PublishAsync(retained, cancellationToken);
+            await AckAsync(channel, delivery.DeliveryTag, TelemetryOutcome.DeadLetter, cancellationToken);
+            RabbitMqFailureLog.Log(_logger, retained, failure, _options.FailureServiceName,
+                _options.InputQueue, destination, new RabbitMqFailureLogOptions
+                {
+                    RetryCountHeader = _options.RetryCountHeader,
+                    ExcludedPaths = _options.FailureLogging.ExcludedPaths
+                });
+        }
+        else
+        {
+            await NackAsync(
+                channel,
+                delivery.DeliveryTag,
+                requeue: false,
+                TelemetryOutcome.DeadLetter,
+                cancellationToken);
+        }
         using (BeginMessageScope(delivery))
         using (_logger.BeginScope(new KeyValuePair<string, object?>[]
                {
-                   new(TelemetryAttributeNames.MessagingDestinationName, _options.EffectiveDeadLetterQueue),
+                   new(TelemetryAttributeNames.MessagingDestinationName, destination),
                    new(TelemetryAttributeNames.DeadLetterReason, reason)
                }))
         {
-            RabbitMqLog.DeadLettered(_logger);
+            if (_options.EnrichedDeadLetterEnabled)
+            {
+                RabbitMqLog.FailureRetained(_logger);
+            }
+            else
+            {
+                RabbitMqLog.DeadLettered(_logger);
+            }
         }
 
         return new RabbitMqCompletionResult(TelemetryOutcome.DeadLetter, error);

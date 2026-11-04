@@ -62,7 +62,10 @@ internal sealed class RabbitMqDestinationPublisher : IRabbitMqDestinationPublish
         };
 
         await using var lease = await route.Channels.LeaseAsync(cancellationToken);
-        await EnsureDeclaredAsync(lease.Channel, destination, cancellationToken);
+        if (destination.DeclareTopology)
+        {
+            await EnsureDeclaredAsync(lease.Channel, destination, cancellationToken);
+        }
         MessagingTimingHeaders.StampPublished(headers);
         await lease.Channel.BasicPublishAsync(
             exchange: destination.ExchangeName,

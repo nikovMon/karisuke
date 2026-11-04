@@ -295,8 +295,21 @@ logs/traces and never Prometheus labels.
 - Use source-generated `[LoggerMessage]` methods and structured fields.
 - Use metrics for aggregate accounting; the current user-selected confirmed-tile Information event is the explicit high-volume exception.
 - Never serialize a payload only to calculate a telemetry size.
-- Never place message bodies, URLs, credentials, WKT, coordinate arrays, or unconstrained customer metadata in logs, baggage, span attributes, or metric labels.
+- Never place message bodies, URLs, credentials, WKT, coordinate arrays, or unconstrained customer metadata in logs, baggage, span attributes, or metric labels, except for the explicitly sanitized retention diagnostic below.
 - Keep Logstash queues bounded. Increasing pod resources does not make an unbounded telemetry queue safe.
 - Alert on dropped logs, Logstash export failures, Collector export failures, and missing Prometheus scrape targets.
 
 Package versions are managed centrally. Keep the OpenTelemetry API, SDK, instrumentation, OTLP trace exporter, and Prometheus exporter on the repository's aligned version line.
+
+## Retained input diagnostics
+
+The RabbitMQ retention logger filters configured heavy/geometry paths before
+logging original input and failure metadata. `LosslessJsonLogChunk` carries at
+most 2048 characters with six fixed fields: `failure_log_id`,
+`failure_log_chunk_index`, `failure_log_chunk_count`, `failure_log_json_chunk`,
+`failure_log_sha256`, and `failure_log_document_length`. ECS HTTP logging and
+structured console formatting preserve these fields independently of general
+attribute/string/collection limits. Normal log events retain their existing
+limits. Reconstruct chunks in index order and verify count, length and hash before
+parsing; chunks may be missing when the bounded logger/exporter drops events.
+This is diagnostic logging, not a durable archive; the queue retains the original.

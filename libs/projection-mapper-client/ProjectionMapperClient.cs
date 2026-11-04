@@ -111,6 +111,7 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
         var started = TelemetryTiming.StartTimestamp();
         var outcome = TelemetryOutcome.Success;
         var error = TelemetryErrorCategory.None;
+        int? httpStatus = null;
 
         try
         {
@@ -119,10 +120,22 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
             {
                 error = TelemetryErrorCategory.Validation;
                 throw new ProjectionMapperClientException(
-                    $"ProjectionMapper endpoint '{endpointKey}' is not configured.");
+                    ProjectionMapperFailureKind.Configuration,
+                    "projection_mapper_endpoint_missing",
+                    "Projection mapper endpoint is not configured.",
+                    endpointKey);
             }
 
             var safeEndpoint = ResolveEndpoint(endpoint);
+            if (safeEndpoint is null || safeEndpoint.Scheme is not ("http" or "https"))
+            {
+                error = TelemetryErrorCategory.Validation;
+                throw new ProjectionMapperClientException(
+                    ProjectionMapperFailureKind.Configuration,
+                    "projection_mapper_endpoint_invalid",
+                    "Projection mapper endpoint must be an HTTP or HTTPS URL.",
+                    endpointKey);
+            }
             AddHttpRequestTags(activity, safeEndpoint);
 
             var requestUri = includeQueryParams
@@ -138,19 +151,30 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
             };
             RecordKnownContentLength(operation, PipelineDirection.Egress, requestMessage.Content);
             using var response = await _httpClient.SendAsync(requestMessage, cancellationToken);
+            httpStatus = (int)response.StatusCode;
             RecordKnownContentLength(operation, PipelineDirection.Ingress, response.Content);
             if (!response.IsSuccessStatusCode)
             {
                 error = ClassifyStatusCode(response.StatusCode);
                 throw new ProjectionMapperClientException(
-                    $"Projection mapper returned HTTP {(int)response.StatusCode} for endpoint '{endpointKey}'.");
+                    ClassifyFailure(response.StatusCode),
+                    "projection_mapper_http_status",
+                    "Projection mapper returned an unsuccessful HTTP status.",
+                    endpointKey,
+                    httpStatus);
             }
 
             var payload = await response.Content.ReadFromJsonAsync<ProjectionMapperResponseDto>(cancellationToken);
-            if (payload is null)
+            if (payload?.Coordinates is not { Count: > 0 }
+                || payload.Coordinates.Any(point => point is not { Count: >= 2 } || point.Any(value => !double.IsFinite(value))))
             {
                 error = TelemetryErrorCategory.Serialization;
-                throw new ProjectionMapperClientException("Projection mapper returned an empty response.");
+                throw new ProjectionMapperClientException(
+                    ProjectionMapperFailureKind.DependencyResponse,
+                    "projection_mapper_invalid_coordinates",
+                    "Projection mapper returned missing or invalid coordinate data.",
+                    endpointKey,
+                    httpStatus);
             }
 
             activity.SetTelemetrySuccess();
@@ -167,16 +191,21 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
         {
             outcome = TelemetryOutcome.Failure;
             error = TelemetryErrorCategory.Timeout;
-            var wrapped = new ProjectionMapperClientException("Projection mapper request timed out.", ex);
-            activity.SetTelemetryError(error, wrapped);
+            var wrapped = new ProjectionMapperClientException(
+                ProjectionMapperFailureKind.Transient, "projection_mapper_timeout",
+                "Projection mapper request timed out.", endpointKey, httpStatus, ex);
+            activity.SetTelemetryError(error, wrapped, recordException: false);
             throw wrapped;
         }
         catch (HttpRequestException ex)
         {
             outcome = TelemetryOutcome.Failure;
             error = TelemetryErrorCategory.Unavailable;
-            var wrapped = new ProjectionMapperClientException("Projection mapper request failed.", ex);
-            activity.SetTelemetryError(error, wrapped);
+            var wrapped = new ProjectionMapperClientException(
+                ex.StatusCode is { } status ? ClassifyFailure(status) : ProjectionMapperFailureKind.Transient,
+                "projection_mapper_transport",
+                "Projection mapper request failed.", endpointKey, (int?)ex.StatusCode ?? httpStatus, ex);
+            activity.SetTelemetryError(error, wrapped, recordException: false);
             throw wrapped;
         }
         catch (JsonException ex)
@@ -184,9 +213,10 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
             outcome = TelemetryOutcome.Failure;
             error = TelemetryErrorCategory.Serialization;
             var wrapped = new ProjectionMapperClientException(
-                "Projection mapper response could not be deserialized.",
-                ex);
-            activity.SetTelemetryError(error, wrapped);
+                httpStatus.HasValue ? ProjectionMapperFailureKind.DependencyResponse : ProjectionMapperFailureKind.Unknown,
+                "projection_mapper_invalid_json",
+                "Projection mapper payload could not be serialized or deserialized.", endpointKey, httpStatus, ex);
+            activity.SetTelemetryError(error, wrapped, recordException: false);
             throw wrapped;
         }
         catch (NotSupportedException ex)
@@ -194,9 +224,10 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
             outcome = TelemetryOutcome.Failure;
             error = TelemetryErrorCategory.Serialization;
             var wrapped = new ProjectionMapperClientException(
-                "Projection mapper payload could not be serialized or deserialized.",
-                ex);
-            activity.SetTelemetryError(error, wrapped);
+                httpStatus.HasValue ? ProjectionMapperFailureKind.DependencyResponse : ProjectionMapperFailureKind.Configuration,
+                "projection_mapper_unsupported_payload",
+                "Projection mapper payload serialization is unsupported.", endpointKey, httpStatus, ex);
+            activity.SetTelemetryError(error, wrapped, recordException: false);
             throw wrapped;
         }
         catch (ProjectionMapperClientException ex)
@@ -207,15 +238,17 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
                 error = TelemetryErrorCategory.Dependency;
             }
 
-            activity.SetTelemetryError(error, ex);
+            activity.SetTelemetryError(error, ex, recordException: false);
             throw;
         }
         catch (Exception ex)
         {
             outcome = TelemetryOutcome.Failure;
             error = TelemetryErrorCategory.Unknown;
-            var wrapped = new ProjectionMapperClientException("Projection mapper operation failed.", ex);
-            activity.SetTelemetryError(error, wrapped);
+            var wrapped = new ProjectionMapperClientException(
+                ProjectionMapperFailureKind.Unknown, "projection_mapper_unknown",
+                "Projection mapper operation failed.", endpointKey, httpStatus, ex);
+            activity.SetTelemetryError(error, wrapped, recordException: false);
             throw wrapped;
         }
         finally
@@ -304,6 +337,13 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
             ? TelemetryErrorCategory.Unavailable
             : TelemetryErrorCategory.Dependency;
     }
+
+    private static ProjectionMapperFailureKind ClassifyFailure(HttpStatusCode statusCode) => (int)statusCode switch
+    {
+        408 or 429 or >= 500 => ProjectionMapperFailureKind.Transient,
+        401 or 403 => ProjectionMapperFailureKind.Configuration,
+        _ => ProjectionMapperFailureKind.Unknown
+    };
 
     private static void RecordKnownContentLength(
         DependencyOperation operation,

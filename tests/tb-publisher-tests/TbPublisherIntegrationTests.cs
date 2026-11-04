@@ -1,10 +1,12 @@
 using System.Text;
 using System.Text.Json;
+using System.Net;
 using ImagingPipeline.Common.Dtos.Messaging;
 using ImagingPipeline.Common.Dtos.Rules.Models;
 using ImagingPipeline.ProjectionMapperClient;
 using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.TbPublisher.MessageHandling;
+using ImagingPipeline.TbPublisher.Processing;
 using ImagingPipeline.TbPublisher.Tests.Fakes;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,6 +18,29 @@ namespace ImagingPipeline.TbPublisher.Tests;
 public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFixture>
 {
     private readonly RabbitMqBrokerFixture _broker;
+    private const string ValidBody = """
+    {
+      "taskId": "msg-1",
+      "ruleId": "rule-1",
+      "algorithmName": ["FindAir", "Rpn"],
+      "tenantId": "tenant-1",
+      "imageId": "image-1",
+      "roiFootprint": { "type": "Point", "coordinates": [35.98, 34.15] },
+      "photoTime": "2026-07-27T10:00:00Z",
+      "sensorType": "EO",
+      "imageUrl": "/images/image-1.tiff",
+      "imageWidth": 4096,
+      "imageHeight": 3072,
+      "bestResolution": 100,
+      "sensorName": "sensor-1",
+      "areaOfInterest": "region-alpha",
+      "gridType": "EO",
+      "gridURI": "grid://example",
+      "tilingConfigs": [
+        { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 32, "tileOverlapHeight": 32 }
+      ]
+    }
+    """;
 
     public TbPublisherIntegrationTests(RabbitMqBrokerFixture broker)
     {
@@ -37,34 +62,13 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
 
         var consumerTask = consumer.ConsumeAsync(handler, cts.Token);
-        var body = """
-        {
-          "taskId": "msg-1",
-          "ruleId": "rule-1",
-          "algorithmName": ["FindAir", "Rpn"],
-          "tenantId": "tenant-1",
-          "imageId": "image-1",
-          "roiFootprint": { "type": "Point", "coordinates": [35.98, 34.15] },
-          "photoTime": "2026-07-27T10:00:00Z",
-          "sensorType": "EO",
-          "imageUrl": "/images/image-1.tiff",
-          "imageWidth": 4096,
-          "imageHeight": 3072,
-          "bestResolution": 100,
-          "sensorName": "sensor-1",
-          "areaOfInterest": "region-alpha",
-          "tilingConfigs": [
-            { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 32, "tileOverlapHeight": 32 }
-          ]
-        }
-        """;
-        await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8(body, "msg-1"), cts.Token);
+        await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8(ValidBody, "msg-1"), cts.Token);
 
         var output = await WaitForMessageAsync(topology.OutputQueue, cts.Token);
         await StopConsumerAsync(consumerTask, cts);
 
         var outputMessage = JsonSerializer.Deserialize<TbPublisherOutputMessageDto>(
-            output, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            output.Body.Span, new JsonSerializerOptions(JsonSerializerDefaults.Web));
         Assert.Equal("rule-1", outputMessage!.MissionMetadata.Overlay.RuleId);
         Assert.Equal(
             [AlgorithmName.FindAir, AlgorithmName.Rpn],
@@ -94,14 +98,16 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
         var deadLetter = await WaitForMessageAsync(topology.DeadLetterQueue, cts.Token);
         await StopConsumerAsync(consumerTask, cts);
 
-        Assert.Equal("{}", deadLetter);
+        Assert.Equal("{}", Encoding.UTF8.GetString(deadLetter.Body.Span));
+        AssertFailure(deadLetter, RabbitMqFailureKind.InvalidData, "invalid_input");
+        Assert.Equal(0, projectionMapper.RequestCount);
         Assert.Null(await BasicGetAsync(topology.OutputQueue, CancellationToken.None));
     }
 
     [RabbitMqBrokerFact]
     public async Task ProjectionMapperFailureIsRetriedThenDeadLettered()
     {
-        await using var projectionMapper = new FakeProjectionMapperServer(_ => "not valid json");
+        await using var projectionMapper = new FakeProjectionMapperServer(_ => "{}", HttpStatusCode.ServiceUnavailable);
 
         var topology = CreateTopology();
         await using var provider = BuildProvider(topology, projectionMapper.BaseUrl);
@@ -111,35 +117,53 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
 
         var consumerTask = consumer.ConsumeAsync(handler, cts.Token);
-        var body = """
-        {
-          "taskId": "msg-1",
-          "ruleId": "rule-1",
-          "algorithmName": ["FindAir"],
-          "tenantId": "tenant-1",
-          "imageId": "image-1",
-          "roiFootprint": { "type": "Point", "coordinates": [35.98, 34.15] },
-          "photoTime": "2026-07-27T10:00:00Z",
-          "sensorType": "EO",
-          "imageUrl": "/images/image-1.tiff",
-          "imageWidth": 4096,
-          "imageHeight": 3072,
-          "bestResolution": 100,
-          "sensorName": "sensor-1",
-          "areaOfInterest": "region-alpha",
-          "tilingConfigs": [
-            { "tileSizeWidth": 512, "tileSizeHeight": 512, "tileOverlapWidth": 32, "tileOverlapHeight": 32 }
-          ]
-        }
-        """;
-        await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8(body, "msg-1"), cts.Token);
+        await publisher.PublishToInputAsync(RabbitMqMessageEnvelope.FromUtf8(ValidBody, "msg-1"), cts.Token);
 
         var deadLetter = await WaitForMessageAsync(topology.DeadLetterQueue, cts.Token);
         await StopConsumerAsync(consumerTask, cts);
 
-        Assert.Equal(body, deadLetter);
+        Assert.Equal(ValidBody, Encoding.UTF8.GetString(deadLetter.Body.Span));
+        AssertFailure(deadLetter, RabbitMqFailureKind.Transient, "projection_mapper_http_status", 503);
+        Assert.Equal("msg-1", deadLetter.BasicProperties.MessageId);
+        Assert.True(RabbitMqFailureHeaders.TryReadNonNegativeInt(
+            new Dictionary<string, object?>(deadLetter.BasicProperties.Headers!), "retry-count", out var retryCount));
+        Assert.Equal(1, retryCount);
         Assert.Equal(2, projectionMapper.RequestCount);
         Assert.Null(await BasicGetAsync(topology.OutputQueue, CancellationToken.None));
+    }
+
+    [RabbitMqBrokerFact]
+    public async Task InvalidProjectionResponseIsRetainedWithoutRetryingOrChangingTheSource()
+    {
+        await using var projectionMapper = new FakeProjectionMapperServer(_ => "not valid json");
+        var topology = CreateTopology();
+        await using var provider = BuildProvider(topology, projectionMapper.BaseUrl);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var consumerTask = provider.GetRequiredService<IRabbitMqConsumer>().ConsumeAsync(
+            provider.GetRequiredService<IRabbitMqMessageHandler>(), cts.Token);
+        await provider.GetRequiredService<IRabbitMqPublisher>().PublishToInputAsync(
+            RabbitMqMessageEnvelope.FromUtf8(ValidBody, "malformed-response"), cts.Token);
+
+        var deadLetter = await WaitForMessageAsync(topology.DeadLetterQueue, cts.Token);
+        await StopConsumerAsync(consumerTask, cts);
+
+        Assert.Equal(ValidBody, Encoding.UTF8.GetString(deadLetter.Body.Span));
+        AssertFailure(deadLetter, RabbitMqFailureKind.DependencyResponse, "projection_mapper_invalid_json", 200);
+        Assert.Equal(1, projectionMapper.RequestCount);
+        Assert.Null(await BasicGetAsync(topology.OutputQueue, CancellationToken.None));
+        Assert.Null(await BasicGetAsync(topology.RetryQueue, CancellationToken.None));
+    }
+
+    private static void AssertFailure(BasicGetResult delivery, RabbitMqFailureKind kind, string code, int? httpStatus = null)
+    {
+        Assert.NotNull(delivery.BasicProperties.Headers);
+        var headers = new Dictionary<string, object?>(delivery.BasicProperties.Headers);
+        Assert.True(RabbitMqFailureHeaders.TryReadFailure(headers, out var failure));
+        Assert.Equal(kind, failure.Kind);
+        Assert.Equal(code, failure.Code);
+        Assert.Equal(httpStatus, failure.HttpStatus);
+        Assert.True(RabbitMqFailureHeaders.TryReadText(headers, "failure-service", out var service));
+        Assert.Equal("tb-publisher", service);
     }
 
     private TestTopology CreateTopology()
@@ -169,6 +193,8 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
             ["RabbitMq:InputQueue"] = topology.InputQueue,
             ["RabbitMq:OutputQueue"] = topology.OutputQueue,
             ["RabbitMq:DeadLetterQueue"] = topology.DeadLetterQueue,
+            ["RabbitMq:EnrichedDeadLetterEnabled"] = "true",
+            ["RabbitMq:FailureServiceName"] = "tb-publisher",
             ["RabbitMq:RetryQueue"] = topology.RetryQueue,
             ["RabbitMq:RetryDelayMilliseconds"] = "100",
             ["RabbitMq:MaxRetryAttempts"] = "1",
@@ -190,13 +216,14 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
             .AddProjectionMapperClient(configuration);
 
         services.AddSingleton<IInputMessageValidator, InputMessageValidator>();
+        services.AddSingleton<TbPublisherGeometryConverter>();
         services.AddSingleton<ITbPublisherOutputMessageBuilder, TbPublisherOutputMessageBuilder>();
         services.AddSingleton<IRabbitMqMessageHandler, TbPublisherMessageHandler>();
 
         return services.BuildServiceProvider(validateScopes: true);
     }
 
-    private static async Task<string> WaitForMessageAsync(string queue, CancellationToken cancellationToken)
+    private static async Task<BasicGetResult> WaitForMessageAsync(string queue, CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(10));
@@ -215,12 +242,11 @@ public sealed class TbPublisherIntegrationTests : IClassFixture<RabbitMqBrokerFi
         throw new TimeoutException($"Timed out waiting for message in {queue}.");
     }
 
-    private static async Task<string?> BasicGetAsync(string queue, CancellationToken cancellationToken)
+    private static async Task<BasicGetResult?> BasicGetAsync(string queue, CancellationToken cancellationToken)
     {
         await using var connection = await CreateConnectionAsync(cancellationToken);
         await using var channel = await connection.CreateChannelAsync(cancellationToken: cancellationToken);
-        var result = await channel.BasicGetAsync(queue, autoAck: true, cancellationToken);
-        return result is null ? null : Encoding.UTF8.GetString(result.Body.Span);
+        return await channel.BasicGetAsync(queue, autoAck: true, cancellationToken);
     }
 
     private static Task<IConnection> CreateConnectionAsync(CancellationToken cancellationToken)

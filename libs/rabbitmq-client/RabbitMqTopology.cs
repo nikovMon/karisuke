@@ -122,7 +122,9 @@ internal static class RabbitMqTopology
 
         if (string.Equals(options.RetryExchangeType, ExchangeType.Headers, StringComparison.OrdinalIgnoreCase))
         {
-            arguments.TryAdd("x-match", "any");
+            // Headers exchanges exclude x-* fields with plain any/all matching.
+            arguments.TryAdd("x-match", options.RetryCountHeader.StartsWith("x-", StringComparison.Ordinal)
+                ? "any-with-x" : "any");
             arguments[options.RetryCountHeader] = retryQueue.RetryCount;
         }
 

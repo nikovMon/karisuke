@@ -37,6 +37,9 @@ internal static partial class RabbitMqLog
     [LoggerMessage(106, LogLevel.Warning, "RabbitMQ message rejected for dead-letter routing.")]
     public static partial void DeadLettered(ILogger logger);
 
+    [LoggerMessage(116, LogLevel.Warning, "RabbitMQ failed input retained with confirmed publication.")]
+    public static partial void FailureRetained(ILogger logger);
+
     [LoggerMessage(107, LogLevel.Error,
         "RabbitMQ completion routing failed; the consumer channel will close and the broker will requeue the unacknowledged delivery.")]
     public static partial void CompletionFailed(ILogger logger, Exception exception);

@@ -74,6 +74,11 @@ internal sealed class StructuredJsonConsoleFormatter(IOptionsMonitor<JsonConsole
 
     private static object? NormalizeState(object? state)
     {
+        if (state is LosslessJsonLogChunk chunk)
+        {
+            return chunk.Attributes;
+        }
+
         if (state is not IEnumerable<KeyValuePair<string, object?>> attributes)
         {
             return EcsLogValueNormalizer.Normalize("scope", state, MaxCollectionCount, MaxStringLength);

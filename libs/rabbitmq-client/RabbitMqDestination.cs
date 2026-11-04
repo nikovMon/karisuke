@@ -38,6 +38,8 @@ public sealed record RabbitMqDestination
 {
     public required RabbitMqDestinationConnection Connection { get; init; }
     public required string QueueName { get; init; }
+    /// <summary>False for preprovisioned retention targets; publishing still requires a routable queue.</summary>
+    public bool DeclareTopology { get; init; } = true;
     public IReadOnlyDictionary<string, object?> QueueArguments { get; init; } = EmptyArguments;
 
     /// <summary>Empty publishes through the default exchange, routed by queue name.</summary>

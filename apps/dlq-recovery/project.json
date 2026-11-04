@@ -1,0 +1,13 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "dlq-recovery",
+  "targets": {
+    "docker-build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "docker build -f apps/dlq-recovery/Dockerfile -t karisuke/dlq-recovery:local .",
+        "cwd": "{workspaceRoot}"
+      }
+    }
+  }
+}
