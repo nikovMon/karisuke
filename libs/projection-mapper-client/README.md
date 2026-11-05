@@ -10,6 +10,8 @@ Endpoint paths resolve against the HTTP client base address (`ProjectionMapper:H
 A leading `/` selects a path at the host root; paths without it are relative to
 the base path. Absolute HTTP/HTTPS endpoints are also supported. Other URI schemes
 and relative endpoints without a base address fail as configuration errors.
+Rooted paths are parsed as relative URIs before resolution so they are not
+misclassified as `file:` URLs on Unix. Explicit absolute URLs are checked first.
 
 `ProjectionMapperClientException` exposes `Kind`, `Code`, `Operation`, and optional
 `HttpStatus`. HTTP 408/429/5xx, transport failures, and request timeouts are
