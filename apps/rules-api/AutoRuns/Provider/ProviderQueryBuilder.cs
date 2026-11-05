@@ -48,7 +48,7 @@ public sealed class ProviderQueryBuilder(
                 var common = FilterClauses(filters);
                 var match = rule.Match;
                 if (match?.Resolution is { } resolution)
-                    AddRange(common, _options.RequestFields.Resolution, resolution.Min, resolution.Max);
+                    AddResolutionRange(common, _options.RequestFields.Resolution, resolution.Min, resolution.Max);
                 if (match?.LocationWkt is { } area)
                     common.Add(Clause("geo_intersect", _options.RequestFields.Geometry, new object[] { area }));
                 if (match?.SensorTypes is { Count: > 0 } types)
@@ -224,7 +224,7 @@ public sealed class ProviderQueryBuilder(
         if (filters.IsRealtime is { } realtime)
             clauses.Add(Clause("match", fields.IsRealtime, new[] { realtime }));
         if (filters.Resolution is { } resolution)
-            AddRange(clauses, fields.Resolution, resolution.Min, resolution.Max);
+            AddResolutionRange(clauses, fields.Resolution, resolution.Min, resolution.Max);
         AddTime(fields.CreatedTime, filters.CreatedTime);
         AddTime(fields.PhotoTime, filters.PhotoTime);
         if (filters.Wkt is { } area)
@@ -265,6 +265,10 @@ public sealed class ProviderQueryBuilder(
                 [Field(field)] = new { type = "IN", values }
             }
         };
+
+    // The provider multiplies resolution bounds by 100 before querying stored values.
+    private static void AddResolutionRange(List<object> clauses, string field, double? from, double? to) =>
+        AddRange(clauses, field, from / 100, to / 100);
 
     private static void AddRange(List<object> clauses, string field, object? from, object? to)
     {

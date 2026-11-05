@@ -26,6 +26,56 @@ public sealed class AutoRunApiTests
     private const string Area = "POLYGON ((0 0, 1 0, 1 1, 0 1, 0 0))";
 
     [Theory]
+    [InlineData(AutoRunSourceMode.Rules)]
+    [InlineData(AutoRunSourceMode.Filters)]
+    [InlineData(AutoRunSourceMode.OverlayIds)]
+    public async Task ResolutionRoundTripPreservesTheStoredValueThroughProviderScaling(AutoRunSourceMode mode)
+    {
+        using var fixture = new Fixture();
+        fixture.Provider.StoredResolution = 80;
+        fixture.Provider.MatchResolution = true;
+        var rule = Rule("Resolution 80", "tenant");
+        rule.Match!.Resolution = new() { Min = 80, Max = 80 };
+        fixture.Store.Add(RulesIndex, "shared-rule", rule);
+        var request = Request() with
+        {
+            Source = new()
+            {
+                Mode = mode,
+                OverlayIds = mode == AutoRunSourceMode.OverlayIds ? ["overlay-1"] : null,
+                Filters = mode == AutoRunSourceMode.OverlayIds ? null : new() { Resolution = new() { Min = 80, Max = 80 } }
+            }
+        };
+
+        using var accepted = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", request, AutoRunJson.Options);
+        await AssertStatus(accepted, HttpStatusCode.Accepted);
+        var ready = await WaitForState(fixture.Client, (await Read<AutoRunSummary>(accepted)).Id, AutoRunState.Ready);
+        Assert.Equal(1, ready.Counters.Selected);
+        Assert.Equal(80, Assert.Single(ready.Targets).Rule.Match!.Resolution!.Min);
+        if (mode == AutoRunSourceMode.OverlayIds) Assert.Empty(ready.Queries);
+        else
+        {
+            var ranges = Assert.Single(ready.Queries).GetProperty("filter").GetProperty("logical_operators").GetProperty("AND")
+                .EnumerateArray().Where(clause => clause.TryGetProperty("range", out var range) && range.TryGetProperty("RESOLUTION", out _))
+                .Select(clause => clause.GetProperty("range").GetProperty("RESOLUTION").GetProperty("values")[0]).ToArray();
+            Assert.NotEmpty(ranges);
+            Assert.All(ranges, range =>
+            {
+                Assert.Equal(0.8, range.GetProperty("gte").GetDouble());
+                Assert.Equal(0.8, range.GetProperty("lte").GetDouble());
+            });
+        }
+
+        using var started = await fixture.Client.PostAsync($"/auto-runs/{ready.Id}/start", null);
+        await AssertStatus(started, HttpStatusCode.OK);
+        await WaitForState(fixture.Client, ready.Id, AutoRunState.Completed);
+        var message = Assert.Single(fixture.Broker.Messages).Message;
+        using var published = JsonDocument.Parse(message.Body);
+        Assert.Equal(80, published.RootElement.GetProperty("bestResolution").GetDouble());
+        Assert.Equal(80, GatewayInputMessageParser.Parse(message.Body).BestResolution);
+    }
+
+    [Theory]
     [InlineData(AutoRunSourceMode.Filters)]
     [InlineData(AutoRunSourceMode.Rules)]
     public async Task ZeroMinimumResolutionReachesProviderAndLightweightHistoryOmitsSnapshots(AutoRunSourceMode mode)
@@ -52,7 +102,7 @@ public sealed class AutoRunApiTests
                 .EnumerateArray().Single(c => c.TryGetProperty("range", out var ranges) && ranges.TryGetProperty("RESOLUTION", out _));
             var range = condition.GetProperty("range").GetProperty("RESOLUTION").GetProperty("values")[0];
             Assert.Equal(0, range.GetProperty("gte").GetDouble());
-            Assert.Equal(100, range.GetProperty("lte").GetDouble());
+            Assert.Equal(1, range.GetProperty("lte").GetDouble());
         }
         using var historyResponse = await fixture.Client.GetAsync("/auto-runs?summaryOnly=true");
         await AssertStatus(historyResponse, HttpStatusCode.OK);
@@ -602,8 +652,8 @@ public sealed class AutoRunApiTests
             .GetProperty("match").GetProperty("ISREALTIME").GetProperty("values")[0].GetBoolean());
         var range = clauses.Single(c => c.TryGetProperty("range", out _)).GetProperty("range")
             .GetProperty("RESOLUTION").GetProperty("values")[0];
-        Assert.Equal(40, range.GetProperty("gte").GetDouble());
-        Assert.Equal(60, range.GetProperty("lte").GetDouble());
+        Assert.Equal(0.4, range.GetProperty("gte").GetDouble());
+        Assert.Equal(0.6, range.GetProperty("lte").GetDouble());
         Assert.Equal(6, fixture.Provider.Calls.Count);
         Assert.Single(fixture.Broker.Messages);
         using var originalResponse = await fixture.Client.GetAsync($"/auto-runs/{original.Id}");
@@ -1293,6 +1343,8 @@ public sealed class AutoRunApiTests
 
     private sealed class ProviderHandler : HttpMessageHandler
     {
+        public double StoredResolution { get; set; } = 50;
+        public bool MatchResolution { get; set; }
         public string ImageUrl { get; set; } = "https://images.invalid/original";
         public string PhotoTime { get; set; } = "2000-01-02T10:00:00Z";
         public JsonElement ImageWidth { get; set; } = JsonSerializer.SerializeToElement(100);
@@ -1307,6 +1359,18 @@ public sealed class AutoRunApiTests
             Calls.Enqueue(new(request.Method, request.RequestUri!, body,
                 request.Headers.ToDictionary(header => header.Key, header => header.Value.ToArray(), StringComparer.OrdinalIgnoreCase)));
             if (BeforeResponse is { } wait) await wait(cancellationToken);
+            if (MatchResolution && request.Method == HttpMethod.Post)
+            {
+                using var query = JsonDocument.Parse(body!);
+                var ranges = query.RootElement.GetProperty("filter").GetProperty("logical_operators").GetProperty("AND")
+                    .EnumerateArray().Where(clause => clause.TryGetProperty("range", out var range) && range.TryGetProperty("RESOLUTION", out _))
+                    .Select(clause => clause.GetProperty("range").GetProperty("RESOLUTION").GetProperty("values")[0]);
+                // Elastic Provider multiplies request bounds by 100 before querying stored ES values.
+                if (ranges.Any(range =>
+                    range.TryGetProperty("gte", out var min) && StoredResolution < min.GetDouble() * 100 ||
+                    range.TryGetProperty("lte", out var max) && StoredResolution > max.GetDouble() * 100))
+                    return new(HttpStatusCode.OK) { Content = new StringContent("""{"entities_list":[]}""", Encoding.UTF8, "application/json") };
+            }
             var entity = new
             {
                 exclusive_id = new { entity_id = "overlay-1" }, geo = new { wkt = Area },
@@ -1314,7 +1378,7 @@ public sealed class AutoRunApiTests
                 {
                     GlobalId = "overlay-1", Url = ImageUrl, GridPath = "https://grids.invalid/original",
                     Sensor = "camera", ImagingTechnique = "EO", SolutionType = "grid", Sortie = "sortie-1",
-                    RegistrationQuality = "Accurate", Resolution = 0.5, ImageWidth, ImageHeight,
+                    RegistrationQuality = "Accurate", Resolution = StoredResolution / 100, ImageWidth, ImageHeight,
                     PhotoTime, Created = "2000-01-02T11:00:00Z", IsRealTime = false
                 }
             };

@@ -181,7 +181,7 @@ Within each job, the adapter finishes every page of one query before starting th
 }
 ```
 
-Filter fields combine with AND. Values within a list are alternatives and are compared exactly, including case. Lists must be nonempty if supplied; registration qualities are `Accurate` and `Sensor`. Resolution bounds must be finite JSON numbers: minimum is zero or greater, maximum is strictly positive, and minimum must not exceed maximum when both are supplied. Explicit minimum `0` is preserved as provider `gte: 0`; a blank/omitted bound is omitted. This changes overlay-filter validation, not saved-rule validation or the positive resolution required on actual overlays. Both numeric and time boundaries are inclusive, and either boundary may be omitted. API timestamps require ISO 8601 seconds with `Z` or an explicit offset; timezone-less request dates are rejected. Use JSON `true` or `false` for `isRealtime`; omitting it means either value.
+Filter fields combine with AND. Values within a list are alternatives and are compared exactly, including case. Lists must be nonempty if supplied; registration qualities are `Accurate` and `Sensor`. Resolution bounds use the same numeric scale as the stored Elasticsearch resolution and normalized `bestResolution`. They must be finite JSON numbers: minimum is zero or greater, maximum is strictly positive, and minimum must not exceed maximum when both are supplied. The adapter divides supplied resolution bounds by 100 before sending them to Elastic Provider, which multiplies them by 100 when querying Elasticsearch. Explicit minimum `0` is preserved as provider `gte: 0`; a blank/omitted bound is omitted. This applies to both overlay-filter and saved-rule query bounds; local matching uses the original bounds. Both numeric and time boundaries are inclusive, and either boundary may be omitted. API timestamps require ISO 8601 seconds with `Z` or an explicit offset; timezone-less request dates are rejected. Use JSON `true` or `false` for `isRealtime`; omitting it means either value.
 
 WKT must be a valid Polygon or MultiPolygon. The search selects intersecting overlays without clipping their footprints. The matched rule's geometry determines the ROI used for dispatch. Explicit filters are checked again against returned overlays locally; an overlay missing a value required by a filter does not match.
 
@@ -356,7 +356,7 @@ Request construction follows the supplied working logical-operator example, not 
     "logical_operators": {
       "AND": [
         { "match": { "SENSOR": { "type": "IN", "values": ["ar"] } } },
-        { "range": { "RESOLUTION": { "type": "IN", "values": [{ "gte": 1, "lte": 20 }] } } },
+        { "range": { "RESOLUTION": { "type": "IN", "values": [{ "gte": 0.01, "lte": 0.2 }] } } },
         { "range": { "date": { "type": "IN", "values": [{ "gte": "2026-10-04T16:40:00.000Z", "lte": "2026-10-05T16:43:00.999Z" }] } } }
       ]
     }
@@ -365,7 +365,7 @@ Request construction follows the supplied working logical-operator example, not 
 }
 ```
 
-Different rule/sensor branches use separate AND queries, and each query's entire continuation chain finishes before the next query begins. The adapter does not invent an OR grammar or retry by dropping a rejected condition. Provider request aliases are configurable under `AutoRun:Provider:RequestFields`:
+The resolution bounds in this provider request correspond to Auto Run bounds of `1` and `20`. Different rule/sensor branches use separate AND queries, and each query's entire continuation chain finishes before the next query begins. The adapter does not invent an OR grammar or retry by dropping a rejected condition. Provider request aliases are configurable under `AutoRun:Provider:RequestFields`:
 
 | Option | Default request alias |
 | --- | --- |
@@ -434,7 +434,7 @@ The response contract is separate from request aliases. The ordinary GET and eac
 | `properties_list.ImageWidth`, `properties_list.ImageHeight` | `width`, `height` |
 | `geo.wkt` | Polygon/MultiPolygon GeoJSON `roiFootprint` |
 
-Elastic Provider returns `properties_list.Resolution` in meters per pixel (m/px): the resolution in centimeters per pixel divided by 100. The pipeline's `bestResolution` uses centimeters per pixel (cm/px), so Auto Run multiplies the provider value by 100 before local matching and publication. For example, `50 cm/px` is returned as `0.5 m/px` and normalized back to `bestResolution: 50`.
+Elastic Provider multiplies incoming resolution bounds by 100 before querying Elasticsearch and divides the stored resolution by 100 in its response. Auto Run compensates at both boundaries so filters, saved rules, local matching, and published `bestResolution` retain the stored Elasticsearch numeric value. For example, entering `80` sends `0.8` to the provider, which queries Elasticsearch for `80`; a stored value of `80` is returned by the provider as `0.8` and normalized back to `bestResolution: 80`. Request bounds are divided by 100 and response values multiplied by 100 without explicit rounding. This is compensation for the provider's scaling behavior; it does not change stored Elasticsearch values.
 
 Response aliases can be changed under `AutoRun:Provider:ResponseFields` using the option names in [ElasticProviderOptions.cs](AutoRuns/Provider/ElasticProviderOptions.cs). The GET result's mapped `GlobalId` must equal the requested ID. Response resolution must be a JSON number, and `IsRealTime`, when present, must be a JSON boolean.
 
