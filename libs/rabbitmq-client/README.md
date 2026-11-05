@@ -385,7 +385,7 @@ alongside it.
   controlled by `OutputPublishConcurrency`; only after all confirmed publishes
   complete does the client acknowledge the input message. Each output message
   has `RetryCountHeader` reset to `0`.
-- Non-retryable failures are negatively acknowledged with `requeue: false`.
+- With the default `EnrichedDeadLetterEnabled=false`, non-retryable failures are negatively acknowledged with `requeue: false`.
   RabbitMQ routes them from `InputQueue` through the configured
   `DeadLetterExchange` into `DeadLetterQueue`.
 - Retryable failures are published to the retry queue for the incremented
@@ -395,6 +395,54 @@ alongside it.
   left unacknowledged and the consumer channel is closed. RabbitMQ requeues the
   delivery when the channel closes; this avoids an immediate `requeue: true`
   hot loop that would bypass the delayed retry policy.
+
+### Enriched failure retention
+
+Set `RabbitMq:EnrichedDeadLetterEnabled=true` and `RabbitMq:FailureServiceName`
+to the service name to retain classified final failures explicitly. Typed
+`RetryableFailure(RabbitMqFailure)` and `NonRetryableFailure(RabbitMqFailure)`
+carry a bounded failure class/code/message, dependency, operation and optional
+HTTP status. String-only failures remain `unknown`; they are never inferred to
+be transient from their text. Malformed JSON is `invalid-data`.
+
+On exhaustion or permanent failure, the original bytes, message/correlation IDs,
+content type and inbound headers (including `x-updated-fields`) are published
+persistently and with mandatory publisher confirms before acknowledging input.
+Failure timestamps and redrive metadata survive short retries. Successful output
+starts a new stage and drops failure/redrive metadata through the existing header
+allowlist. A failed confirmation leaves input unacknowledged; channel shutdown
+requeues it. A crash after confirmation and before acknowledgement can duplicate it.
+
+For a headers retry exchange, a configured retry header beginning with `x-`
+defaults to `x-match=any-with-x`; RabbitMQ excludes such headers with plain `any`.
+Other retry headers retain `any`. An explicitly configured match mode is preserved.
+
+By default, retention goes directly to `EffectiveDeadLetterQueue` on the input
+connection, including `InputCluster` when configured. To use another destination,
+set `RabbitMq:FailureDestination:Queue` and optionally its `Connection` fields
+`Host`, `Port`, `Username`, `Password`, `VirtualHost`. Pre-provision that queue:
+the failure publisher never declares or changes its topology. The queue should
+be durable and have no TTL, expiry or destructive overflow policy when indefinite
+retention is required. Existing remote connection options do not expose TLS.
+Classic-queue retention still depends on broker/disk durability; existing short
+retry TTL/dead-letter transfers keep their existing broker delivery limitations.
+
+`RabbitMqFailureHeaders` defines the public metadata contract and conservative
+parsers for scheduled replay. Failure message headers are bounded to 4096
+characters (`failure-message-truncated=true` records clipping); code, service,
+dependency and operation fields are bounded to 256 characters.
+
+`RabbitMqFailureLog.Log` emits a sanitized JSON diagnostic after retention. Its
+`RabbitMq:FailureLogging:ExcludedPaths` removes configured geometry/heavy fields
+recursively by property name or exact dotted path (`*` denotes array members).
+Defaults include the TB `focusedPxWkt` and rule `locationWkt`/`ruleLocationWkt`
+fields as well as polygon/coordinate/footprint fields.
+Malformed JSON logs its byte length/hash and parse failure, without dumping raw
+bytes. Other fields and arrays survive in numbered 2048-character chunks using
+the shared lossless log state. Reassemble by `failure_log_id` and index, verify
+count/length/SHA-256, and parse the concatenated JSON. Logging remains best effort
+with bounded export queues; the retention queue holds the authoritative original.
+Logging failure does not replay a retained input.
 
 This provides **at-least-once delivery**, not exactly-once delivery. A process
 failure between publishing output and acknowledging input can create a duplicate.
@@ -412,5 +460,5 @@ non-recoverable channel shutdown, and completion failures fault `ConsumeAsync`;
 the application-level consumer worker restarts it with exponential, jittered,
 failure-only delay. `ReconnectDelaySeconds` is the base delay, the default cap
 is 30 seconds, and a consumer that remains active for at least the cap resets
-the sequence. Failures are structured-log events; credentials and message
-bodies are never logged by the library.
+the sequence. Failures are structured-log events. Enriched retention additionally
+logs the explicitly sanitized original described above; credentials are not logged.

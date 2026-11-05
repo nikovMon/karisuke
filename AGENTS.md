@@ -26,7 +26,7 @@ dotnet format ImagingPipeline.sln --verify-no-changes
 ## Layout
 
 ```
-apps/   deployable services: gateway (legacy FindAir), unified-gateway (new), rules-api, tb-publisher, tb-consumer
+apps/   deployable services: gateway (legacy FindAir), unified-gateway (new), rules-api, tb-publisher, tb-consumer, dlq-recovery (scheduled)
 libs/   shared libraries: common-dtos, pipeline-catalog, pipeline-contracts, rule-engine, dispatch,
         rabbitmq-client, rabbitmq-configuration, elasticsearch-client, projection-mapper-client,
         geometry-utils, observability

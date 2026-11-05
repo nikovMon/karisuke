@@ -1,7 +1,10 @@
 using System.Collections.Frozen;
+using System.Net.Sockets;
+using System.Security.Authentication;
 using ImagingPipeline.Observability;
 using ImagingPipeline.PipelineCatalog;
 using ImagingPipeline.RabbitMqClient;
+using RabbitMQ.Client.Exceptions;
 
 namespace ImagingPipeline.UnifiedGateway.Dispatch;
 
@@ -37,7 +40,9 @@ public sealed class RabbitMqDispatchTransport : IDispatchTransport
         if (!_destinations.TryGetValue(unit.PipelineId, out var destination))
         {
             // Only an enabled pipeline whose catalog transport is rabbitmq has a destination.
-            return DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Handler);
+            return DispatchOutcome.Rejected(unit, TelemetryErrorCategory.Handler, failureDetails:
+                new(RabbitMqFailureKind.Configuration, "gateway.rabbitmq.destination_missing", "No enabled RabbitMQ destination is configured.",
+                    unit.PipelineId, "dispatch_rabbitmq"));
         }
 
         try
@@ -51,10 +56,54 @@ public sealed class RabbitMqDispatchTransport : IDispatchTransport
         }
         catch (Exception ex)
         {
-            // Broker and connection failures are transient from the gateway's point of view;
-            // the source message retry policy bounds how often they are attempted.
-            return DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Publish, ex);
+            // Keep the existing short retry behavior, but do not authorize later replay for
+            // authentication, topology mistakes or an unrecognized exception.
+            var kind = ClassifyFailure(ex);
+            var (code, message) = kind switch
+            {
+                RabbitMqFailureKind.Transient => ("gateway.rabbitmq.connection", "RabbitMQ publication failed transiently."),
+                RabbitMqFailureKind.Configuration => ("gateway.rabbitmq.configuration", "RabbitMQ authentication, routing or topology configuration failed."),
+                _ => ("gateway.rabbitmq.unclassified", "RabbitMQ publication failed without a recognized cause.")
+            };
+            return DispatchOutcome.Retryable(unit, TelemetryErrorCategory.Publish, ex, failureDetails:
+                new(kind, code, message, unit.PipelineId, "dispatch_rabbitmq"));
         }
+    }
+
+    private static RabbitMqFailureKind ClassifyFailure(Exception exception)
+    {
+        if (exception is AuthenticationFailureException or PossibleAuthenticationFailureException or AuthenticationException
+            or PublishException { IsReturn: true })
+        {
+            return RabbitMqFailureKind.Configuration;
+        }
+
+        if (exception is OperationInterruptedException interrupted)
+        {
+            return interrupted.ShutdownReason?.ReplyCode switch
+            {
+                403 or 404 or 405 or 406 or 530 => RabbitMqFailureKind.Configuration,
+                320 or 541 => RabbitMqFailureKind.Transient,
+                _ => RabbitMqFailureKind.Unknown
+            };
+        }
+
+        if (exception is AggregateException aggregate)
+        {
+            var kinds = aggregate.InnerExceptions.Select(ClassifyFailure).ToArray();
+            return kinds.Contains(RabbitMqFailureKind.Configuration) ? RabbitMqFailureKind.Configuration
+                : kinds.Length > 0 && kinds.All(kind => kind == RabbitMqFailureKind.Transient) ? RabbitMqFailureKind.Transient
+                : RabbitMqFailureKind.Unknown;
+        }
+
+        if (exception.InnerException is { } inner)
+        {
+            return ClassifyFailure(inner);
+        }
+
+        return exception is IOException or SocketException or TimeoutException or OperationCanceledException or PublishException { IsReturn: false }
+            ? RabbitMqFailureKind.Transient
+            : RabbitMqFailureKind.Unknown;
     }
 
     internal static RabbitMqMessageEnvelope CreateEnvelope(DispatchUnit unit)

@@ -17,6 +17,92 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
     }
 
     [RabbitMqBrokerFact]
+    public async Task EnrichedFinalFailurePreservesRawBodyHeadersAndConfirmsPersistentRetention()
+    {
+        var topology = CreateTopology();
+        var retainedQueue = _broker.CreateName("retained");
+        _broker.TrackQueue(retainedQueue);
+        var configuration = BuildConfiguration(topology, new Dictionary<string, string?>
+        {
+            ["RabbitMq:EnrichedDeadLetterEnabled"] = "true",
+            ["RabbitMq:FailureServiceName"] = "test-service",
+            ["RabbitMq:FailureDestination:Queue"] = retainedQueue
+        });
+        await using var provider = BuildProvider(configuration);
+        await using var connection = await CreateConnectionAsync(CancellationToken.None);
+        await using var channel = await connection.CreateChannelAsync(new CreateChannelOptions(true, true));
+        await channel.QueueDeclareAsync(topology.InputQueue, true, false, false);
+        await channel.QueueDeclareAsync(retainedQueue, true, false, false);
+        var original = new byte[] { 0x7b, 0xff, 0x00, 0x7d };
+        await channel.BasicPublishAsync(string.Empty, topology.InputQueue, true, new BasicProperties
+        {
+            MessageId = "original-id",
+            CorrelationId = "correlation",
+            ContentType = "application/json",
+            Persistent = true,
+            Headers = new Dictionary<string, object?>
+            {
+                ["x-retry-count"] = 3,
+                ["redrive-count"] = 2,
+                ["x-updated-fields"] = new List<object> { Encoding.UTF8.GetBytes("gridType") }
+            }
+        }, original);
+        var input = await channel.BasicGetAsync(topology.InputQueue, autoAck: false);
+        Assert.NotNull(input);
+        var envelope = new RabbitMqMessageEnvelope(input.BasicProperties.MessageId!, input.Body.ToArray(),
+            input.BasicProperties.ContentType!, new Dictionary<string, object?>(input.BasicProperties.Headers!), input.BasicProperties.CorrelationId);
+        var failure = new RabbitMqFailure(RabbitMqFailureKind.Transient, "pm-timeout", "Request timed out.", "projection-mapper", "i2g");
+
+        await provider.GetRequiredService<RabbitMqOutcomeRouter>().CompleteAsync(channel,
+            new(input.DeliveryTag, envelope, false, null), RabbitMqMessageProcessingResult.RetryableFailure(failure), CancellationToken.None);
+
+        var retained = await channel.BasicGetAsync(retainedQueue, autoAck: true);
+        Assert.NotNull(retained);
+        Assert.Equal(original, retained.Body.ToArray());
+        Assert.True(retained.BasicProperties.Persistent);
+        Assert.Equal("original-id", retained.BasicProperties.MessageId);
+        Assert.Equal("correlation", retained.BasicProperties.CorrelationId);
+        var headers = new Dictionary<string, object?>(retained.BasicProperties.Headers!);
+        Assert.True(RabbitMqFailureHeaders.TryReadFailure(headers, out var actualFailure));
+        Assert.Equal(failure, actualFailure);
+        Assert.Equal(2, headers["redrive-count"]);
+        Assert.Equal("gridType", Encoding.UTF8.GetString(Assert.IsType<byte[]>(Assert.IsAssignableFrom<IList<object>>(headers["x-updated-fields"])[0])));
+        Assert.Null(await channel.BasicGetAsync(topology.InputQueue, autoAck: true));
+    }
+
+    [RabbitMqBrokerFact]
+    public async Task MissingRetentionDestinationIsReturnedAndOriginalIsRequeuedWithoutCreatingQueue()
+    {
+        var topology = CreateTopology();
+        var missingQueue = _broker.CreateName("missing-retention");
+        var configuration = BuildConfiguration(topology, new Dictionary<string, string?>
+        {
+            ["RabbitMq:EnrichedDeadLetterEnabled"] = "true",
+            ["RabbitMq:FailureServiceName"] = "test-service",
+            ["RabbitMq:FailureDestination:Queue"] = missingQueue
+        });
+        await using var provider = BuildProvider(configuration);
+        await using var connection = await CreateConnectionAsync(CancellationToken.None);
+        await using (var channel = await connection.CreateChannelAsync(new CreateChannelOptions(true, true)))
+        {
+            await channel.QueueDeclareAsync(topology.InputQueue, true, false, false);
+            await channel.BasicPublishAsync(string.Empty, topology.InputQueue, true,
+                new BasicProperties { MessageId = "original-id", Persistent = true }, "original"u8.ToArray());
+            var input = await channel.BasicGetAsync(topology.InputQueue, autoAck: false);
+            Assert.NotNull(input);
+
+            await Assert.ThrowsAsync<RabbitMqMessageCompletionException>(() => provider.GetRequiredService<RabbitMqOutcomeRouter>()
+                .CompleteAsync(channel, new(input.DeliveryTag, RabbitMqMessageEnvelope.FromUtf8("original", "original-id"), false, null),
+                    RabbitMqMessageProcessingResult.NonRetryableFailure(new RabbitMqFailure(RabbitMqFailureKind.InvalidData, "invalid", "Invalid input.")),
+                    CancellationToken.None));
+        }
+
+        var requeued = await WaitForEnvelopeAsync(topology.InputQueue);
+        Assert.Equal("original-id", requeued.MessageId);
+        Assert.Equal("original", requeued.BodyAsUtf8());
+    }
+
+    [RabbitMqBrokerFact]
     public async Task PublishToInputAsyncPublishesPersistentMessageToInputQueue()
     {
         var topology = CreateTopology();
@@ -420,7 +506,8 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
         var configuration = BuildConfiguration(topology, new Dictionary<string, string?>
         {
             ["RabbitMq:InputExchangeType"] = "headers",
-            ["RabbitMq:InputBindingArguments:message-kind"] = "image"
+            // The publisher intentionally forwards only its contract's allowed headers.
+            ["RabbitMq:InputBindingArguments:algorithmName"] = "image"
         });
         await using var provider = BuildProvider(configuration);
         var publisher = provider.GetRequiredService<IRabbitMqPublisher>();
@@ -433,7 +520,7 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
                 Encoding.UTF8.GetBytes("headers-route"),
                 Headers: new Dictionary<string, object?>
                 {
-                    ["message-kind"] = "image"
+                    ["algorithmName"] = "image"
                 }));
 
         var message = await WaitForMessageAsync(topology.InputQueue);
@@ -595,10 +682,17 @@ public sealed class RabbitMqClientBrokerTests : IClassFixture<RabbitMqBrokerFixt
 
         while (!timeout.IsCancellationRequested)
         {
-            var info = await PassiveQueueDeclareAsync(queue);
-            if (info.ConsumerCount == expectedCount)
+            try
             {
-                return;
+                var info = await PassiveQueueDeclareAsync(queue);
+                if (info.ConsumerCount == expectedCount)
+                {
+                    return;
+                }
+            }
+            catch (RabbitMQ.Client.Exceptions.OperationInterruptedException ex) when (ex.ShutdownReason?.ReplyCode == 404)
+            {
+                // Consumer startup declares topology asynchronously; absence is not readiness.
             }
 
             await Task.Delay(250, timeout.Token);

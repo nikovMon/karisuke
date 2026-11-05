@@ -43,6 +43,8 @@ public static class RabbitMqClientServiceCollectionExtensions
 
         services.TryAddSingleton<IRabbitMqConsumerConnectionManager, RabbitMqConsumerConnectionManager>();
         services.TryAddSingleton<RabbitMqOutcomeRouter>();
+        services.AddRabbitMqDestinationPublisher(configuration);
+        services.TryAddSingleton<IRabbitMqFailurePublisher, RabbitMqFailurePublisher>();
         services.TryAddSingleton<IRabbitMqConsumer, RabbitMqConsumer>();
         services.TryAddSingleton<IRabbitMqClient, RabbitMqClient>();
 

@@ -44,16 +44,17 @@ public sealed class SourceMessageHandler(
         catch (InvalidInputMessageException ex)
         {
             telemetry.Rejected(ex);
-            return RabbitMqMessageProcessingResult.NonRetryableFailure(ex.ErrorCode);
+            return RabbitMqMessageProcessingResult.NonRetryableFailure(
+                new RabbitMqFailure(RabbitMqFailureKind.InvalidData, ex.ErrorCode, "Source message failed input validation.", Operation: "parse_source"));
         }
 
         telemetry.Parsed(image);
-        var invalidPipelines = new List<string>();
-        var units = PrepareUnits(image, imageContext, message, invalidPipelines);
+        var preparationFailures = new List<RabbitMqFailure>();
+        var units = PrepareUnits(image, imageContext, message, preparationFailures);
         var outcomes = await dispatcher.DispatchAsync(units, cancellationToken);
 
-        var result = Decide(outcomes, invalidPipelines);
-        telemetry.Completed(outcomes, invalidPipelines.Count, result);
+        var result = Decide(outcomes, preparationFailures);
+        telemetry.Completed(outcomes, preparationFailures.Count, result);
         return result;
     }
 
@@ -61,7 +62,7 @@ public sealed class SourceMessageHandler(
         GatewayInputMessage image,
         PipelineDispatchContext imageContext,
         RabbitMqMessageEnvelope message,
-        List<string> invalidPipelines)
+        List<RabbitMqFailure> preparationFailures)
     {
         var units = new Dictionary<string, DispatchUnit>(StringComparer.Ordinal);
         var pipelines = ruleCache.Current;
@@ -106,7 +107,11 @@ public sealed class SourceMessageHandler(
                     }
                     else
                     {
-                        invalidPipelines.Add(pipelineId);
+                        preparationFailures.Add(prepared.Status == PipelinePreparationStatus.Disabled
+                            ? new(RabbitMqFailureKind.Configuration, "gateway.pipeline.disabled", "Pipeline is disabled.", pipelineId, "prepare")
+                            : new(RabbitMqFailureKind.InvalidData, "gateway.contract.invalid",
+                                $"Pipeline contract validation failed for fields: {string.Join(", ", prepared.Errors.Take(5).Select(error => error.Field))}.",
+                                pipelineId, "prepare"));
                     }
                 }
             }
@@ -142,24 +147,35 @@ public sealed class SourceMessageHandler(
 
     // A retryable failure retries the whole message; targets dedupe the already delivered units
     // by dispatch ID. A permanent failure dead-letters it, naming the pipelines that failed.
-    private static RabbitMqMessageProcessingResult Decide(IReadOnlyList<DispatchOutcome> outcomes, IReadOnlyList<string> invalidPipelines)
+    private static RabbitMqMessageProcessingResult Decide(IReadOnlyList<DispatchOutcome> outcomes, IReadOnlyList<RabbitMqFailure> preparationFailures)
     {
-        var retryable = FailedPipelines(outcomes, DispatchStatus.Retryable);
-        if (retryable.Count > 0)
+        var retryable = Failures(outcomes, DispatchStatus.Retryable);
+        if (retryable.Length > 0)
         {
-            return RabbitMqMessageProcessingResult.RetryableFailure($"Dispatch can be retried for pipelines: {string.Join(", ", retryable)}");
+            return RabbitMqMessageProcessingResult.RetryableFailure(Summarize(retryable, "Dispatch can be retried"));
         }
 
-        var rejected = FailedPipelines(outcomes, DispatchStatus.Rejected).Union(invalidPipelines).Order(StringComparer.Ordinal).ToList();
-        return rejected.Count > 0
-            ? RabbitMqMessageProcessingResult.NonRetryableFailure($"Dispatch was rejected for pipelines: {string.Join(", ", rejected)}")
+        var rejected = Failures(outcomes, DispatchStatus.Rejected).Concat(preparationFailures).ToArray();
+        return rejected.Length > 0
+            ? RabbitMqMessageProcessingResult.NonRetryableFailure(Summarize(rejected, "Dispatch was rejected"))
             : RabbitMqMessageProcessingResult.Success();
     }
 
-    private static List<string> FailedPipelines(IReadOnlyList<DispatchOutcome> outcomes, DispatchStatus status) =>
+    private static RabbitMqFailure[] Failures(IReadOnlyList<DispatchOutcome> outcomes, DispatchStatus status) =>
         outcomes.Where(outcome => outcome.Status == status)
-            .Select(outcome => outcome.Unit.PipelineId)
-            .Distinct(StringComparer.Ordinal)
-            .Order(StringComparer.Ordinal)
-            .ToList();
+            .Select(outcome => outcome.FailureDetails ?? new(RabbitMqFailureKind.Unknown, "gateway.dispatch.unclassified",
+                "Dispatch failed without structured failure information.", outcome.Unit.PipelineId, "dispatch", outcome.StatusCode))
+            .ToArray();
+
+    private static RabbitMqFailure Summarize(IReadOnlyList<RabbitMqFailure> failures, string action)
+    {
+        // Retry actions and automatic replay eligibility are separate: an unknown retryable
+        // sibling must never acquire a transient label from a known timeout in another unit.
+        var primary = failures.OrderBy(failure => failure.Kind == RabbitMqFailureKind.Transient ? 1 : 0)
+            .ThenBy(failure => failure.Dependency, StringComparer.Ordinal).First();
+        var pipelines = failures.Select(failure => failure.Dependency).OfType<string>()
+            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).Take(8);
+        var message = $"{action} for pipelines: {string.Join(", ", pipelines)}. {primary.Message}";
+        return primary with { Message = message.Length <= 1024 ? message : message[..1024] };
+    }
 }

@@ -95,6 +95,43 @@ delivery for retry, duplicate, and broker investigation. Trace ID correlates
 the distributed execution. Correlation ID is not duplicated on current
 inter-service outputs.
 
+### Retained failures and scheduled recovery
+
+With `RabbitMq:EnrichedDeadLetterEnabled`, final failures are explicitly published
+persistently to their configured retention destination with mandatory routing
+and tracked confirms before the input ACK. The original body and typed inbound
+headers are preserved, including `x-updated-fields`. The feature is enabled by
+the TB publisher, TB consumer and unified gateway configurations; other shared
+client users keep the existing broker-dead-letter behavior unless opted in.
+
+Retained inputs add `failure-class`, `failure-code`, `failure-message`,
+`failure-service`, `dependency`, `operation`, optional `http-status`,
+`first-failure-at` and `last-failure-at`. Classes are `transient`, `invalid-data`,
+`dependency-response`, `configuration` and `unknown`. Diagnostic text in headers
+is bounded; `failure-message-truncated` indicates a bounded message summary.
+
+The scheduled worker adds/increments `redrive-count`, `last-redrive-at` and
+`redrive-run-id`, resetting only the short retry-count header. Short retries
+preserve this metadata. Normal successful stage output still uses the existing
+allowlist, so another stage does not inherit the previous stage's replay budget.
+Retention/replay operations are exceptions to the normal input/output allowlist.
+
+Failure event 117 carries a logging copy of the original with configurable heavy
+fields excluded; the queue always keeps the complete original. Event 118 reports
+diagnostic formatting/export submission failure. Large logging copies use
+`LosslessJsonLogChunk` records with event identifier, index, total count and hash
+to preserve all remaining fields through exporter size limits. Reassemble by
+identifier and index; missing chunks mean an incomplete log, not an incomplete
+retained message. The existing exporter remains non-blocking and best effort.
+Malformed JSON produces a parse failure, byte count and hash, without dumping an
+unfiltered raw body. See the shared client's failure logging options.
+
+Recovery events 6000-6006 report run start, dry-run source counts, scanned,
+confirmed replay publications, retained publications, stop reason and failures.
+They do not claim downstream processing success. The short-lived job does not
+expose a Prometheus listener; monitor queue/byte growth and OpenShift Job state
+through their existing exporters. Indefinite retention has no fixed size bound.
+
 ## ECS application logs
 
 The existing stream naming is:

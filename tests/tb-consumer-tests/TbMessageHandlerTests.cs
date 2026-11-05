@@ -636,6 +636,51 @@ public class TbMessageHandlerTests
             Times.Never);
     }
 
+    [Theory]
+    [InlineData(ProjectionMapperFailureKind.Transient, RabbitMqFailureKind.Transient, RabbitMqMessageFailureAction.Retry)]
+    [InlineData(ProjectionMapperFailureKind.Configuration, RabbitMqFailureKind.Configuration, RabbitMqMessageFailureAction.DeadLetter)]
+    [InlineData(ProjectionMapperFailureKind.DependencyResponse, RabbitMqFailureKind.DependencyResponse, RabbitMqMessageFailureAction.DeadLetter)]
+    [InlineData(ProjectionMapperFailureKind.Unknown, RabbitMqFailureKind.Unknown, RabbitMqMessageFailureAction.DeadLetter)]
+    public async Task HandleAsync_ProjectionFailurePreservesClassification(
+        ProjectionMapperFailureKind kind, RabbitMqFailureKind expected, RabbitMqMessageFailureAction action)
+    {
+        _projectionMapperMock
+            .Setup(m => m.ProcessBatchAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<IReadOnlyList<double>>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProjectionMapperClientException(kind, "example_code", "Safe failure summary.", ProjectionMapperEndpointKeys.I2GById, 503));
+
+        var result = await _handler.HandleAsync(ToEnvelope(CreateValidInput()));
+
+        Assert.Equal(action, result.FailureAction);
+        Assert.Equal(expected, result.FailureDetails!.Kind);
+        Assert.Equal("projection_mapper", result.FailureDetails.Dependency);
+        Assert.Equal(ProjectionMapperEndpointKeys.I2GById, result.FailureDetails.Operation);
+        Assert.Equal(503, result.FailureDetails.HttpStatus);
+        _publisherMock.Verify(p => p.PublishToOutputAsync(It.IsAny<RabbitMqMessageEnvelope>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("count")]
+    [InlineData("shape")]
+    [InlineData("nonfinite")]
+    public async Task HandleAsync_InvalidProjectedCoordinatesAreHeld(string defect)
+    {
+        IReadOnlyList<IReadOnlyList<double>> mapped = defect switch
+        {
+            "count" => [[1, 2]],
+            "shape" => [[1, 2], [1], [1, 2], [1, 2]],
+            _ => [[1, 2], [double.NaN, 2], [1, 2], [1, 2]]
+        };
+        _projectionMapperMock
+            .Setup(m => m.ProcessBatchAsync(It.IsAny<string>(), It.IsAny<IReadOnlyList<IReadOnlyList<double>>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mapped);
+
+        var result = await _handler.HandleAsync(ToEnvelope(CreateValidInput()));
+
+        Assert.Equal(RabbitMqMessageFailureAction.DeadLetter, result.FailureAction);
+        Assert.Equal(RabbitMqFailureKind.DependencyResponse, result.FailureDetails!.Kind);
+        _publisherMock.Verify(p => p.PublishToOutputAsync(It.IsAny<RabbitMqMessageEnvelope>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task HandleAsync_ProjectionCancellation_MarksProjectionSpanCancelled()
     {
@@ -707,6 +752,7 @@ public class TbMessageHandlerTests
         // Assert
         Assert.False(result.IsSuccess);
         Assert.Contains("Json deserialization failed", result.Error);
+        Assert.Equal(RabbitMqFailureKind.InvalidData, result.FailureDetails!.Kind);
     }
 
     [Fact]

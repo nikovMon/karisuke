@@ -2,6 +2,7 @@ using ImagingPipeline.Observability;
 using System.Net;
 using System.Net.Sockets;
 using ImagingPipeline.PipelineCatalog;
+using ImagingPipeline.RabbitMqClient;
 using ImagingPipeline.UnifiedGateway.Dispatch;
 using static ImagingPipeline.UnifiedGateway.Tests.DispatchTestData;
 
@@ -81,6 +82,7 @@ public sealed class HttpDispatchTransportTests
         Assert.Equal(TelemetryErrorCategory.Validation, outcome.Error);
         Assert.NotNull(outcome.Exception);
         Assert.DoesNotContain("private-value", outcome.Exception.Message, StringComparison.Ordinal);
+        Assert.Equal(RabbitMqFailureKind.Configuration, outcome.FailureDetails?.Kind);
         Assert.Empty(handler.Requests);
     }
 
@@ -130,7 +132,45 @@ public sealed class HttpDispatchTransportTests
 
         Assert.Equal(DispatchStatus.Delivered, delivered.Status);
         Assert.Equal(409, delivered.StatusCode);
+        Assert.Null(delivered.FailureDetails);
         Assert.Equal(DispatchStatus.Rejected, rejected.Status);
+    }
+
+    [Theory]
+    [InlineData(408, RabbitMqFailureKind.Transient)]
+    [InlineData(429, RabbitMqFailureKind.Transient)]
+    [InlineData(500, RabbitMqFailureKind.Transient)]
+    [InlineData(503, RabbitMqFailureKind.Transient)]
+    [InlineData(401, RabbitMqFailureKind.Configuration)]
+    [InlineData(403, RabbitMqFailureKind.Configuration)]
+    [InlineData(404, RabbitMqFailureKind.Configuration)]
+    [InlineData(302, RabbitMqFailureKind.Configuration)]
+    [InlineData(400, RabbitMqFailureKind.DependencyResponse)]
+    [InlineData(422, RabbitMqFailureKind.DependencyResponse)]
+    public async Task FailureDetailsPreserveHttpCauseAndDependency(int statusCode, RabbitMqFailureKind kind)
+    {
+        var pipeline = HttpPipeline("algo");
+
+        var outcome = await CreateTransport(new StubHandler((HttpStatusCode)statusCode), pipeline)
+            .SendAsync(Unit(pipeline), CancellationToken.None);
+
+        var failure = Assert.IsType<RabbitMqFailure>(outcome.FailureDetails);
+        Assert.Equal(kind, failure.Kind);
+        Assert.Equal(statusCode, failure.HttpStatus);
+        Assert.Equal("algo", failure.Dependency);
+        Assert.Equal("dispatch_http", failure.Operation);
+    }
+
+    [Fact]
+    public async Task UnclassifiedHttpFailureIsNotMarkedAsAutomaticallyRecoverable()
+    {
+        var pipeline = HttpPipeline("algo");
+        var handler = new StubHandler(HttpStatusCode.OK) { Failure = new HttpRequestException("unclassified") };
+
+        var outcome = await CreateTransport(handler, pipeline).SendAsync(Unit(pipeline), CancellationToken.None);
+
+        Assert.Equal(DispatchStatus.Retryable, outcome.Status);
+        Assert.Equal(RabbitMqFailureKind.Unknown, outcome.FailureDetails?.Kind);
     }
 
     [Fact]
@@ -148,6 +188,8 @@ public sealed class HttpDispatchTransportTests
         Assert.Equal(TelemetryErrorCategory.Connection, outcome.Error);
         Assert.Null(outcome.StatusCode);
         Assert.IsType<HttpRequestException>(outcome.Exception);
+        Assert.Equal(RabbitMqFailureKind.Transient, outcome.FailureDetails?.Kind);
+        Assert.Equal("gateway.http.connection", outcome.FailureDetails?.Code);
     }
 
     [Fact]
@@ -164,6 +206,8 @@ public sealed class HttpDispatchTransportTests
 
         Assert.Equal(DispatchStatus.Retryable, outcome.Status);
         Assert.Equal(TelemetryErrorCategory.Timeout, outcome.Error);
+        Assert.Equal(RabbitMqFailureKind.Transient, outcome.FailureDetails?.Kind);
+        Assert.Equal("gateway.http.timeout", outcome.FailureDetails?.Code);
     }
 
     [Fact]

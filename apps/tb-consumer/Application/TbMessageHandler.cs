@@ -51,7 +51,8 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
             {
                 stage.Rejected(TelemetryErrorCategory.Serialization);
                 _logger.DeserializationRejected(deserializationError);
-                return RabbitMqMessageProcessingResult.Failure(deserializationError);
+                return RabbitMqMessageProcessingResult.NonRetryableFailure(new RabbitMqFailure(
+                    RabbitMqFailureKind.InvalidData, "invalid_json", deserializationError));
             }
 
             // Built from unvalidated input, so every field is normalised defensively.
@@ -70,7 +71,8 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                     validationFailure.BatchTilesAmount,
                     validationFailure.ActualBatchTileCount,
                     validationFailure.OffendingTileIndex);
-                return RabbitMqMessageProcessingResult.Failure(validationFailure.Message);
+                return RabbitMqMessageProcessingResult.NonRetryableFailure(new RabbitMqFailure(
+                    RabbitMqFailureKind.InvalidData, validationFailure.Code, validationFailure.Message));
             }
 
             return await HandleValidatedMessageAsync(input, message, stage, cancellationToken);
@@ -120,7 +122,7 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
         var projection = await MapTileCornersAsync(input, overlay, context, stage, cancellationToken);
         if (projection.Mapped is null)
         {
-            return RabbitMqMessageProcessingResult.RetryableFailure(projection.FailureReason!);
+            return projection.Failure!;
         }
 
         var mappedCoordinateCount = projection.Mapped.Sum(coordinates => coordinates.Count / 2);
@@ -168,8 +170,8 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
     }
 
     /// <summary>
-    /// Maps each tile's ROI to ground coordinates, four corners per tile. A count mismatch is
-    /// reported as a failure reason rather than an exception because the batch is retryable.
+    /// Maps each tile's ROI to ground coordinates, four corners per tile. Dependency-response
+    /// defects are retained for review, separately from transient dependency failures.
     /// </summary>
     private async Task<ProjectionResult> MapTileCornersAsync(
         TbConsumerInputDto input,
@@ -209,18 +211,33 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
                     tileCorners,
                     cancellationToken);
 
-            if (mapped.Count != input.Tiles.Count * 4)
+            if (mapped.Count != input.Tiles.Count * 4
+                || mapped.Any(point => point is not { Count: >= 2 } || point.Any(value => !double.IsFinite(value))))
             {
-                stage.Retryable(TelemetryErrorCategory.Dependency);
-                span.Failed(TelemetryErrorCategory.Dependency);
-                _logger.ProjectionResultCountMismatchScheduledForRetry(input.Tiles.Count, mapped.Count);
-                return new ProjectionResult(
-                    null,
-                    $"Projection mapper returned {mapped.Count} results for {input.Tiles.Count} requested tiles.");
+                throw new ProjectionMapperClientException(
+                    ProjectionMapperFailureKind.DependencyResponse,
+                    "projection_mapper_invalid_coordinates",
+                    "Projection mapper returned invalid coordinate data for the tile batch.",
+                    useRegistrationEndpoint ? ProjectionMapperEndpointKeys.I2GByRegistration : ProjectionMapperEndpointKeys.I2GById);
             }
 
             span.SetTag("findair.coordinate.count", mapped.Count);
             return new ProjectionResult(mapped, null);
+        }
+        catch (ProjectionMapperClientException ex)
+        {
+            var failure = ProjectionFailure(ex);
+            if (failure.FailureAction == RabbitMqMessageFailureAction.Retry)
+            {
+                stage.Retryable(TelemetryErrorCategory.Dependency);
+            }
+            else
+            {
+                stage.Rejected(TelemetryErrorCategory.Dependency);
+            }
+            span.Failed(TelemetryErrorCategory.Dependency, ex, recordException: false);
+            _logger.ProjectionFailed(input.Tiles.Count, ex.Kind.ToString(), ex.Code, ex.HttpStatus);
+            return new ProjectionResult(null, failure);
         }
         catch (OperationCanceledException ex)
         {
@@ -545,7 +562,23 @@ public sealed class TbMessageHandler : IRabbitMqMessageHandler
 
     private readonly record struct ProjectionResult(
         IReadOnlyList<IReadOnlyList<double>>? Mapped,
-        string? FailureReason);
+        RabbitMqMessageProcessingResult? Failure);
+
+    private static RabbitMqMessageProcessingResult ProjectionFailure(ProjectionMapperClientException exception)
+    {
+        var kind = exception.Kind switch
+        {
+            ProjectionMapperFailureKind.Transient => RabbitMqFailureKind.Transient,
+            ProjectionMapperFailureKind.DependencyResponse => RabbitMqFailureKind.DependencyResponse,
+            ProjectionMapperFailureKind.Configuration => RabbitMqFailureKind.Configuration,
+            _ => RabbitMqFailureKind.Unknown
+        };
+        var failure = new RabbitMqFailure(kind, exception.Code, exception.Message,
+            "projection_mapper", exception.Operation, exception.HttpStatus);
+        return kind == RabbitMqFailureKind.Transient
+            ? RabbitMqMessageProcessingResult.RetryableFailure(failure)
+            : RabbitMqMessageProcessingResult.NonRetryableFailure(failure);
+    }
 
     private sealed record ValidationFailure(
         string Code,

@@ -113,6 +113,7 @@ public sealed class TbPublisherMessageHandlerTests
         Assert.False(result.IsSuccess);
         Assert.Null(result.OutputBody);
         Assert.NotNull(result.Error);
+        Assert.Equal(RabbitMqFailureKind.InvalidData, result.FailureDetails!.Kind);
     }
 
     [Fact]
@@ -149,7 +150,8 @@ public sealed class TbPublisherMessageHandlerTests
     public async Task HandleAsyncReturnsRetryableFailureWhenProjectionMapperFails()
     {
         var handler = CreateHandler(
-            FakeProjectionMapperClient.ThrowingFailure(new ProjectionMapperClientException("mapper down")),
+            FakeProjectionMapperClient.ThrowingFailure(new ProjectionMapperClientException(
+                ProjectionMapperFailureKind.Transient, "projection_mapper_transport", "mapper down", ProjectionMapperEndpointKeys.G2IMultiPoints)),
             new FakeRabbitMqPublisher());
 
         var result = await handler.HandleAsync(RabbitMqMessageEnvelope.FromUtf8(Encoding.UTF8.GetString(ValidBody), "msg-1"));
@@ -157,6 +159,40 @@ public sealed class TbPublisherMessageHandlerTests
         Assert.False(result.IsSuccess);
         Assert.Contains("mapper down", result.Error);
         Assert.Equal(RabbitMqMessageFailureAction.Retry, result.FailureAction);
+        Assert.Equal(RabbitMqFailureKind.Transient, result.FailureDetails!.Kind);
+        Assert.Equal("projection_mapper", result.FailureDetails.Dependency);
+    }
+
+    [Theory]
+    [InlineData(ProjectionMapperFailureKind.Configuration, RabbitMqFailureKind.Configuration)]
+    [InlineData(ProjectionMapperFailureKind.DependencyResponse, RabbitMqFailureKind.DependencyResponse)]
+    [InlineData(ProjectionMapperFailureKind.Unknown, RabbitMqFailureKind.Unknown)]
+    public async Task HandleAsyncHoldsNonTransientProjectionFailures(ProjectionMapperFailureKind kind, RabbitMqFailureKind expected)
+    {
+        var publisher = new FakeRabbitMqPublisher();
+        var handler = CreateHandler(FakeProjectionMapperClient.ThrowingFailure(new ProjectionMapperClientException(
+            kind, "example_code", "Safe failure summary.", ProjectionMapperEndpointKeys.G2IMultiPoints, 403)), publisher);
+
+        var result = await handler.HandleAsync(new RabbitMqMessageEnvelope("example", ValidBody));
+
+        Assert.Equal(RabbitMqMessageFailureAction.DeadLetter, result.FailureAction);
+        Assert.Equal(expected, result.FailureDetails!.Kind);
+        Assert.Equal(403, result.FailureDetails.HttpStatus);
+        Assert.Equal(ProjectionMapperEndpointKeys.G2IMultiPoints, result.FailureDetails.Operation);
+        Assert.Empty(publisher.PublishedToOutput);
+    }
+
+    [Fact]
+    public async Task HandleAsyncInvalidProjectedGeometryIsDependencyResponseFailure()
+    {
+        var publisher = new FakeRabbitMqPublisher();
+        var handler = CreateHandler(FakeProjectionMapperClient.ReturningSuccess([[1]]), publisher);
+
+        var result = await handler.HandleAsync(new RabbitMqMessageEnvelope("example", ValidBody));
+
+        Assert.Equal(RabbitMqMessageFailureAction.DeadLetter, result.FailureAction);
+        Assert.Equal(RabbitMqFailureKind.DependencyResponse, result.FailureDetails!.Kind);
+        Assert.Empty(publisher.PublishedToOutput);
     }
 
     [Fact]

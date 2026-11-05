@@ -19,6 +19,7 @@ apps/
   unified-gateway/
   tb-publisher/
   tb-consumer/
+  dlq-recovery/
   rules-api/
 libs/
   common-dtos/
@@ -40,6 +41,7 @@ tests/
   rabbitmq-client-tests/
   tb-publisher-tests/
   tb-consumer-tests/
+  dlq-recovery-tests/
   rules-api-tests/
   integration-tests/
 ```
@@ -49,6 +51,11 @@ tests/
 `apps/unified-gateway` consumes image updates, matches independently refreshed pipeline rules, and dispatches FindAir/DeepWisdom/SarAtc payloads through RabbitMQ or HTTP. Each pipeline configures its destination and arbitrary extra JSON data in the shared `pipelinecatalog.json`, which also supplies pipeline names and contracts to the Rules API. The gateway exposes health and metrics; pipeline metadata and rule management routes belong to the Rules API. See [its README](apps/unified-gateway/README.md) for configuration, validation, observability and Nx commands.
 
 Tile Builder and Embedder implementations are not present in this repository; their current integration boundary is represented by RabbitMQ DTOs and the publisher/consumer applications.
+
+`apps/dlq-recovery` is a bounded scheduled worker for replaying transient DLQ
+failures, including transfers between brokers. It retains invalid and exhausted
+originals indefinitely and emits failure logs with geometry omitted. See its
+[README](apps/dlq-recovery/README.md) and the [OpenShift examples](deploy/dlq-recovery).
 
 The external Tile Builder forwards W3C trace/baggage and timing headers but exports
 its own telemetry to a separate backend. TB Consumer therefore continues the same
@@ -63,6 +70,9 @@ All runnable applications use the same correlation contract, but each signal fol
 - traces use OTLP to an OpenTelemetry Collector and then Elastic APM;
 - ECS structured logs use HTTP to Logstash and then Elasticsearch data streams;
 - application and .NET runtime metrics are exposed on `/metrics` for Prometheus scraping.
+
+The short-lived DLQ recovery job reports run outcomes through logs and does not
+start a metrics HTTP listener; broker and Job metrics come from infrastructure.
 
 Configure the trace exporter with standard OpenTelemetry environment variables:
 
