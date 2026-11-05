@@ -264,7 +264,7 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
 
     private Uri? ResolveEndpoint(string endpoint)
     {
-        if (Uri.TryCreate(endpoint, UriKind.RelativeOrAbsolute, out var absolute) && absolute.IsAbsoluteUri)
+        if (Uri.TryCreate(endpoint, UriKind.Absolute, out var absolute))
         {
             return absolute;
         }

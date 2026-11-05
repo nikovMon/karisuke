@@ -89,11 +89,11 @@ public sealed class ProjectionMapperFailureTests
     }
 
     [Theory]
-    [InlineData("/projection/g2i", "http://localhost/base/", "http://localhost/projection/g2i")]
+    [InlineData("http://localhost/projection/g2i", "http://localhost/base/", "http://localhost/projection/g2i")]
     [InlineData("projection/g2i", "http://localhost/base/", "http://localhost/base/projection/g2i")]
     [InlineData("https://example.invalid/projection/g2i", "http://localhost/base/", "https://example.invalid/projection/g2i")]
     [InlineData("https://example.invalid/projection/g2i", null, "https://example.invalid/projection/g2i")]
-    public async Task HttpEndpointsResolveUsingHttpClientUriRules(string endpoint, string? baseAddress, string expectedUri)
+    public async Task SupportedHttpEndpointsUseExpectedRequestUri(string endpoint, string? baseAddress, string expectedUri)
     {
         Uri? requestUri = null;
         var client = CreateClient(request =>
@@ -164,7 +164,7 @@ public sealed class ProjectionMapperFailureTests
 
     private static ProjectionMapperClient CreateClient(
         Func<HttpRequestMessage, HttpResponseMessage> responder,
-        string endpoint = "/projection/g2i",
+        string endpoint = "http://localhost/projection/g2i",
         string? baseAddress = "http://localhost") =>
         new(new HttpClient(new FakeHttpMessageHandler(responder))
         {

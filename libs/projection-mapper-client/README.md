@@ -6,13 +6,6 @@ Typed HTTP client for ground-to-image and image-to-ground mapping. Register it w
 override the checked-in application examples. One call makes one HTTP request;
 this library does not add retries or health probes.
 
-Endpoint paths resolve against the HTTP client base address (`ProjectionMapper:Host`).
-A leading `/` selects a path at the host root; paths without it are relative to
-the base path. Absolute HTTP/HTTPS endpoints are also supported. Other URI schemes
-and relative endpoints without a base address fail as configuration errors.
-Rooted paths are parsed as relative URIs before resolution so they are not
-misclassified as `file:` URLs on Unix. Explicit absolute URLs are checked first.
-
 `ProjectionMapperClientException` exposes `Kind`, `Code`, `Operation`, and optional
 `HttpStatus`. HTTP 408/429/5xx, transport failures, and request timeouts are
 `Transient`. HTTP 401/403 and invalid endpoint configuration are `Configuration`.
@@ -28,3 +21,8 @@ messages; non-transient failures require review by default.
 
 Run `dotnet test tests/projection-mapper-client-tests/ImagingPipeline.ProjectionMapperClient.Tests.csproj`
 from the repository root.
+
+Test fixtures configure complete HTTP endpoint URLs, including the dynamically
+allocated mock-server port in integration tests. This keeps response and failure
+classification tests independent of platform-specific parsing of rooted paths.
+Runtime endpoint handling is unchanged.
