@@ -84,13 +84,20 @@ public sealed class ProjectionMapperClientTests
     [Fact]
     public async Task LogicalOperationCreatesInternalSpanWithOverlayOnlyOnTheSpan()
     {
+        using var parent = new Activity(nameof(LogicalOperationCreatesInternalSpanWithOverlayOnlyOnTheSpan)).Start();
         Activity? completed = null;
         using var listener = new ActivityListener
         {
             ShouldListenTo = source => source.Name == "FindAir.ProjectionMapper",
             Sample = static (ref ActivityCreationOptions<ActivityContext> _) =>
                 ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = activity => completed = activity
+            ActivityStopped = activity =>
+            {
+                if (activity.ParentId == parent.Id)
+                {
+                    completed = activity;
+                }
+            }
         };
         ActivitySource.AddActivityListener(listener);
         var client = CreateClient(new FakeHttpMessageHandler(_ =>
@@ -121,13 +128,20 @@ public sealed class ProjectionMapperClientTests
     [Fact]
     public async Task RegistrationOperationExposesBoundedProjectionModeAndSanitizedRoute()
     {
+        using var parent = new Activity(nameof(RegistrationOperationExposesBoundedProjectionModeAndSanitizedRoute)).Start();
         Activity? completed = null;
         using var listener = new ActivityListener
         {
             ShouldListenTo = source => source.Name == "FindAir.ProjectionMapper",
             Sample = static (ref ActivityCreationOptions<ActivityContext> _) =>
                 ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = activity => completed = activity
+            ActivityStopped = activity =>
+            {
+                if (activity.ParentId == parent.Id)
+                {
+                    completed = activity;
+                }
+            }
         };
         ActivitySource.AddActivityListener(listener);
         var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)

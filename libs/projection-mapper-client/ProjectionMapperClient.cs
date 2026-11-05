@@ -264,15 +264,15 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
 
     private Uri? ResolveEndpoint(string endpoint)
     {
-        if (Uri.TryCreate(endpoint, UriKind.Absolute, out var absolute))
+        if (_httpClient.BaseAddress is not null
+            && Uri.TryCreate(_httpClient.BaseAddress, endpoint, out var resolved))
         {
-            return absolute;
+            return resolved;
         }
 
-        return _httpClient.BaseAddress is not null
-            && Uri.TryCreate(_httpClient.BaseAddress, endpoint, out var resolved)
-                ? resolved
-                : null;
+        return Uri.TryCreate(endpoint, UriKind.Absolute, out var absolute)
+            ? absolute
+            : null;
     }
 
     private static void AddHttpRequestTags(Activity? activity, Uri? endpoint)
