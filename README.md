@@ -138,6 +138,14 @@ npx nx test observability-tests
 npx nx test integration-tests
 ```
 
+## Continuous integration
+
+[Build and test](.github/workflows/build-test.yml) runs when a pull request targeting
+`dev` or `main` is opened, reopened, or updated. It restores dependencies, builds
+all projects, and runs all .NET tests through Nx. Two temporary RabbitMQ 3.12.11
+brokers provide the test endpoints on ports 5672 and 5673. The workflow does not
+publish images or deploy applications.
+
 ## Docker
 
 Build all application images through Nx:
