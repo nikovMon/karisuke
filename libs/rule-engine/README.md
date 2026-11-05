@@ -8,8 +8,8 @@ Matches incoming image updates against rules. Shared by the unified gateway and,
 
 Rules are v2 documents (`PipelineRuleDocument` in `libs/common-dtos`): `match` holds the conditions and each `runParams` entry is one run of the pipeline, in its contract's shape. All present conditions must hold: photo age, sensor (registration quality and grid type; a sensor with neither accepts any of them), sensor type (`sensorTypes`, exact match on the image's `sensorType`; an image without one does not match a rule that lists types), resolution, SAR mode (`modeSAR`, exact match; an image without a mode does not match a rule that lists modes), then geometry. An absent condition means no constraint. A rule with no conditions is rejected unless it sets `matchAll: true`, and empty collections such as `sensors: []` are rejected rather than read as "any". The intersection of the image and the rule's location becomes the downstream ROI; a rule without a location covers the whole image.
 
-v1 rules (`RuleDto`) are not read here. The old gateway keeps serving them until the migration converts them to v2.
+v1 rules (`RuleDto`) are not read here. Use `apps/rule-migrator` to convert retained v1 rules to v2 before loading them.
 
 The matcher does not log. It returns the matched rules and, for every other rule, the first condition it failed. Callers log that with `LogRulesEvaluated` inside a scope carrying the image and pipeline IDs, so searching an image ID shows why it did or did not reach each pipeline. Log events use IDs 7001-7999 with static messages; details are structured fields.
 
-This code started as a copy of `apps/gateway`'s rule handling. The old gateway keeps its own copy until the unified gateway replaces it.
+This library owns the rule handling used by the unified gateway. The legacy gateway application has been removed.

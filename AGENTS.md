@@ -14,7 +14,7 @@ Instructions for AI coding agents (and a fast orientation for humans) working in
 
 ```bash
 npm install                                  # once
-npx nx build <project>                       # e.g. gateway, unified-gateway, rules-api, rule-engine
+npx nx build <project>                       # e.g. unified-gateway, rules-api, rule-engine
 npx nx test <project>-tests                  # e.g. rule-engine-tests
 npx nx affected -t build test                # what you must run before declaring done
 npx nx graph --file=docs/project-graph.json  # dependency graph (optional)
@@ -26,7 +26,7 @@ dotnet format ImagingPipeline.sln --verify-no-changes
 ## Layout
 
 ```
-apps/   deployable services: gateway (legacy FindAir), unified-gateway (new), rules-api, tb-publisher, tb-consumer, dlq-recovery (scheduled)
+apps/   deployable services: unified-gateway, rules-api, tb-publisher, tb-consumer, dlq-recovery (scheduled)
 libs/   shared libraries: common-dtos, pipeline-catalog, pipeline-contracts, rule-engine, dispatch,
         rabbitmq-client, rabbitmq-configuration, elasticsearch-client, projection-mapper-client,
         geometry-utils, observability

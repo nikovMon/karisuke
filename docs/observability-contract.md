@@ -191,11 +191,9 @@ Important success events are:
 
 | Event | Meaning | Level |
 |---|---|---|
-| 2010 | Gateway image processed and tenant tasks built | Information |
 | 3015 | TB Publisher task processed and Tile Builder requests published | Information |
 | 4015 | TB Consumer Tile Builder batch completed | Information |
 | 4017 | One tile was published and broker-confirmed to Embedder | Information |
-| 2021 | Routine successful rule-cache refresh | Debug, console only with checked-in filters |
 
 Rejections and retries are Warning. Unrecoverable failures are Error. Normal
 rule-refresh and Rules API operation detail remains Debug.
@@ -320,10 +318,10 @@ logical tile more than once. Use tile.id logs for logical-tile deduplication.
 Pipeline IDs and transport kinds come from the deployment catalog and are
 bounded. The meter and activity source are ImagingPipeline.UnifiedGateway.
 
-### Gateway and Rules API
+### Legacy compatibility and Rules API
 
-Gateway exposes rule-cache entries, age, skipped rules, refresh outcomes and
-duration, evaluated/matched rules, and photo-age filtering. Rules API exposes
+The shared observability library retains legacy gateway metric APIs for compatibility;
+the removed application no longer emits them. Rules API exposes
 operation outcomes/durations, document and batch counts, and validation
 failures.
 
@@ -377,11 +375,11 @@ or the HTTP/protobuf equivalents. Logs use:
     Observability__Logs__DataStream__Dataset=findair
     Observability__Logs__DataStream__Namespace=integration
 
-Metrics use each pod's /metrics endpoint. Gateway, Unified Gateway, TB
+Metrics use each pod's /metrics endpoint. Unified Gateway, TB
 Publisher, and TB Consumer default to port 9464. Rules API uses its existing HTTP port.
 
 Service identity defaults to namespace findair and service names
-findair-gateway, findair-rules-api, findair-tb-publisher, and
+findair-rules-api, findair-tb-publisher, and
 findair-tb-consumer; Unified Gateway uses unified-gateway. Deployment environment, service version, pod UID/name,
 namespace, deployment, node, container, and cluster should be supplied by the
 OpenShift config and downward API.

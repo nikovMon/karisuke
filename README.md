@@ -1,6 +1,6 @@
 # Karisuke
 
-Karisuke is a C#/.NET 10 imaging-pipeline monorepo. It contains the Rules API, Gateway, Tile Builder publisher/consumer boundaries, shared data and dependency clients, OpenTelemetry instrumentation, tests, and Docker packaging.
+Karisuke is a C#/.NET 10 imaging-pipeline monorepo. It contains the Rules API, Unified Gateway, Tile Builder publisher/consumer boundaries, shared data and dependency clients, OpenTelemetry instrumentation, tests, and Docker packaging.
 
 Nx is the monorepo task orchestrator. `dotnet` and MSBuild perform the actual restore, build, test, run, and publish work.
 
@@ -15,7 +15,6 @@ Nx is the monorepo task orchestrator. `dotnet` and MSBuild perform the actual re
 
 ```text
 apps/
-  gateway/
   unified-gateway/
   tb-publisher/
   tb-consumer/
@@ -32,7 +31,6 @@ libs/
   rabbitmq-client/
 tests/
   elasticsearch-client-tests/
-  gateway-tests/
   unified-gateway-tests/
   pipeline-catalog-tests/
   pipeline-contracts-tests/
@@ -120,7 +118,7 @@ npm run nx:graph
 Build individual projects with Nx:
 
 ```powershell
-npx nx build gateway
+npx nx build unified-gateway
 npx nx build tb-publisher
 npx nx build tb-consumer
 npx nx build rules-api
@@ -132,7 +130,7 @@ npx nx build rabbitmq-client
 Run tests through Nx:
 
 ```powershell
-npx nx test gateway-tests
+npx nx test unified-gateway-tests
 npx nx test tb-publisher-tests
 npx nx test tb-consumer-tests
 npx nx test rules-api-tests
@@ -154,7 +152,7 @@ Build one image directly:
 docker build -f apps/rules-api/Dockerfile -t karisuke/rules-api:local .
 ```
 
-Start the four application containers:
+Start the three application containers:
 
 ```powershell
 docker compose up --build

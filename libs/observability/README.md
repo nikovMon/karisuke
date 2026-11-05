@@ -14,13 +14,13 @@ Only traces use OTLP. This library does not register OTLP exporters for logs or 
 
 ## Host registration
 
-The Gateway, TB Publisher, and TB Consumer are workers with a lightweight ASP.NET Core listener used only for Prometheus:
+The Unified Gateway, TB Publisher, and TB Consumer are workers with a lightweight ASP.NET Core listener used only for Prometheus:
 
 ```csharp
 using ImagingPipeline.Observability;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.AddImagingPipelineObservability(ObservabilityServiceNames.Gateway);
+builder.AddImagingPipelineObservability(ObservabilityServiceNames.UnifiedGateway);
 builder.ConfigureImagingPipelinePrometheusListener();
 
 // Register the worker and application services.
@@ -207,7 +207,7 @@ Metrics are pulled by Prometheus; the applications do not push them to the Colle
 
 | Service | Listener | Default path |
 | --- | --- | --- |
-| Gateway | Dedicated worker listener on `9464` | `/metrics` |
+| Unified Gateway | Dedicated worker listener on `9464` | `/metrics` |
 | TB Publisher | Dedicated worker listener on `9464` | `/metrics` |
 | TB Consumer | Dedicated worker listener on `9464` | `/metrics` |
 | Rules API | Existing API listener | `/metrics` |
@@ -229,7 +229,7 @@ The strongly typed recorder groups are:
 - WorkloadTelemetry for images, tasks, Tile Builder requests/batches, logical
   tile counts, and Embedder publish attempts, grouped only by bounded business
   dimensions.
-- GatewayTelemetry for cache and rule-matching data.
+- Unified gateway rule-load, contract-preparation and dispatch telemetry. `GatewayTelemetry` remains a compatibility API for legacy instrumentation.
 - RulesTelemetry for CRUD/bulk outcomes, duration, counts, and validation.
 Log-export health is observable through:
 

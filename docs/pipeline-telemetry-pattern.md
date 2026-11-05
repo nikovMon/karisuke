@@ -6,7 +6,7 @@ metrics, spans, and logs must exist; this document says how handler code
 produces them without burying the business logic in bookkeeping.
 
 `apps/tb-consumer/Application/TbMessageHandler.cs` is the reference
-implementation. TB Publisher and Gateway still use the older hand-rolled form
+implementation. TB Publisher still uses the older hand-rolled form
 and are expected to migrate.
 
 ## The problem this solves
@@ -284,7 +284,6 @@ part of the dump that catches a changed span extent.
 |---|---|
 | TB Consumer | Migrated; reference implementation |
 | TB Publisher | Not migrated; still has the hand-rolled form |
-| Gateway | Not migrated; still has the hand-rolled form |
 | Unified Gateway | Dispatch uses `PipelineSpanScope` and a per-unit `DispatchTelemetry` scope; contract preparation is still hand-rolled |
 
 The TB Consumer migration changed no emitted telemetry. Every span, metric, and

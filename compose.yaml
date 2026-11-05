@@ -1,10 +1,4 @@
 services:
-  gateway:
-    image: karisuke/gateway:local
-    build:
-      context: .
-      dockerfile: apps/gateway/Dockerfile
-
   tb-publisher:
     image: karisuke/tb-publisher:local
     build:
