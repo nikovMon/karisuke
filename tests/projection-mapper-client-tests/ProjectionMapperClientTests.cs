@@ -84,13 +84,20 @@ public sealed class ProjectionMapperClientTests
     [Fact]
     public async Task LogicalOperationCreatesInternalSpanWithOverlayOnlyOnTheSpan()
     {
+        using var parent = new Activity(nameof(LogicalOperationCreatesInternalSpanWithOverlayOnlyOnTheSpan)).Start();
         Activity? completed = null;
         using var listener = new ActivityListener
         {
             ShouldListenTo = source => source.Name == "FindAir.ProjectionMapper",
             Sample = static (ref ActivityCreationOptions<ActivityContext> _) =>
                 ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = activity => completed = activity
+            ActivityStopped = activity =>
+            {
+                if (activity.ParentId == parent.Id)
+                {
+                    completed = activity;
+                }
+            }
         };
         ActivitySource.AddActivityListener(listener);
         var client = CreateClient(new FakeHttpMessageHandler(_ =>
@@ -121,13 +128,20 @@ public sealed class ProjectionMapperClientTests
     [Fact]
     public async Task RegistrationOperationExposesBoundedProjectionModeAndSanitizedRoute()
     {
+        using var parent = new Activity(nameof(RegistrationOperationExposesBoundedProjectionModeAndSanitizedRoute)).Start();
         Activity? completed = null;
         using var listener = new ActivityListener
         {
             ShouldListenTo = source => source.Name == "FindAir.ProjectionMapper",
             Sample = static (ref ActivityCreationOptions<ActivityContext> _) =>
                 ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = activity => completed = activity
+            ActivityStopped = activity =>
+            {
+                if (activity.ParentId == parent.Id)
+                {
+                    completed = activity;
+                }
+            }
         };
         ActivitySource.AddActivityListener(listener);
         var handler = new FakeHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
@@ -206,9 +220,9 @@ public sealed class ProjectionMapperClientTests
             Host = "http://projection-mapper.test",
             Endpoints = new Dictionary<string, string>
             {
-                [ProjectionMapperEndpointKeys.G2IMultiPoints] = "/flare/g2i-by-id",
-                [ProjectionMapperEndpointKeys.I2GById] = "/flare/i2g-by-id",
-                [ProjectionMapperEndpointKeys.I2GByRegistration] = "/flare/i2g-by-registration"
+                [ProjectionMapperEndpointKeys.G2IMultiPoints] = "http://projection-mapper.test/flare/g2i-by-id",
+                [ProjectionMapperEndpointKeys.I2GById] = "http://projection-mapper.test/flare/i2g-by-id",
+                [ProjectionMapperEndpointKeys.I2GByRegistration] = "http://projection-mapper.test/flare/i2g-by-registration"
             },
             SendingSystem = "flare"
         };

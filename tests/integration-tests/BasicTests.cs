@@ -5,21 +5,28 @@ namespace ImagingPipeline.IntegrationTests;
 public sealed class BasicTests
 {
     [Fact]
-    public void GatewayOutputQueueDeclarationMatchesTbPublisherInputQueueDeclaration()
+    public void UnifiedGatewayFindAirOutputQueueDeclarationMatchesTbPublisherInputQueueDeclaration()
     {
         var repositoryRoot = FindRepositoryRoot();
 
-        using var gatewayDocument = ReadAppSettings(repositoryRoot, "gateway");
+        using var catalogDocument = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+            repositoryRoot, "libs", "pipeline-catalog", "configuration", "pipelinecatalog.json")));
         using var tbPublisherDocument = ReadAppSettings(repositoryRoot, "tb-publisher");
 
-        var gatewayRabbitMq = gatewayDocument.RootElement.GetProperty("RabbitMq");
+        var gatewayOutput = catalogDocument.RootElement
+            .GetProperty("PipelineCatalog")
+            .GetProperty("Pipelines")
+            .GetProperty("FindAir")
+            .GetProperty("Transport")
+            .GetProperty("RabbitMq")
+            .GetProperty("Output");
         var tbPublisherRabbitMq = tbPublisherDocument.RootElement.GetProperty("RabbitMq");
 
         Assert.Equal(
-            GetRequiredString(gatewayRabbitMq, "OutputQueue"),
+            GetRequiredString(gatewayOutput, "QueueName"),
             GetRequiredString(tbPublisherRabbitMq, "InputQueue"));
 
-        var outputQueueArguments = ReadArguments(gatewayRabbitMq, "OutputQueueHeaders");
+        var outputQueueArguments = ReadArguments(gatewayOutput, "Arguments");
         var inputQueueArguments = BuildInputQueueArguments(tbPublisherRabbitMq);
 
         Assert.Equal(

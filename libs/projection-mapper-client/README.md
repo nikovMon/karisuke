@@ -21,3 +21,8 @@ messages; non-transient failures require review by default.
 
 Run `dotnet test tests/projection-mapper-client-tests/ImagingPipeline.ProjectionMapperClient.Tests.csproj`
 from the repository root.
+
+Test fixtures configure complete HTTP endpoint URLs, including the dynamically
+allocated mock-server port in integration tests. This keeps response and failure
+classification tests independent of platform-specific parsing of rooted paths.
+Runtime endpoint handling is unchanged.

@@ -26,7 +26,6 @@ The user's latest scope takes precedence over the [supplied specification and ti
 | `libs/pipeline-contracts` | Register payload contracts, validate run parameters and build payload bytes/attributes. |
 | `libs/rabbitmq-configuration` | Share argument normalization without broker or host dependencies; keep validation in the caller. |
 | `apps/unified-gateway` | Host health/metrics and observability; expose work preparation for an already matched pipeline. |
-| Existing `apps/gateway` | Retain its current consumption, rule cache, matching and delivery behavior. |
 | Existing `apps/rules-api` | Retain its current API and persistence behavior. |
 
 The catalog stores deployment choices. A contract is a code implementation selected by `ContractId`, not a protocol sender. The same contract may be selected by several pipeline IDs with different rule sources, extra data and destinations.

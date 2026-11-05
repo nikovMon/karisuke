@@ -270,7 +270,7 @@ Per-service endpoints:
 
 | Service | `service.name` | Metrics endpoint |
 | --- | --- | --- |
-| Gateway | `findair-gateway` | `http://<pod-ip>:9464/metrics` |
+| Unified Gateway | `unified-gateway` | `http://<pod-ip>:9464/metrics` |
 | TB Publisher | `findair-tb-publisher` | `http://<pod-ip>:9464/metrics` |
 | TB Consumer | `findair-tb-consumer` | `http://<pod-ip>:9464/metrics` |
 | Rules API | `findair-rules-api` | `http://<pod-ip>:8080/metrics` |
@@ -493,7 +493,7 @@ Send a test batch from a pod in an allowed namespace:
 ```sh
 curl -i \
   -H 'Content-Type: application/json' \
-  --data '[{"@timestamp":"2026-07-30T10:00:00Z","ecs":{"version":"8.0.0"},"message":"observability ingestion test","log":{"level":"information","logger":"deployment-test"},"service":{"name":"findair-gateway","namespace":"findair","version":"test","environment":"production"},"event":{"dataset":"findair"}}]' \
+  --data '[{"@timestamp":"2026-07-30T10:00:00Z","ecs":{"version":"8.0.0"},"message":"observability ingestion test","log":{"level":"information","logger":"deployment-test"},"service":{"name":"unified-gateway","namespace":"findair","version":"test","environment":"production"},"event":{"dataset":"findair"}}]' \
   http://production-logstash:8081/
 ```
 

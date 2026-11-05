@@ -74,7 +74,7 @@ The user excluded Roberto and warmup and clarified that `ExtraData` is the per-p
 
 ## Repository cross-check
 
-These observations refer to the existing gateway baseline; they are not features newly added to the unified gateway.
+These historical observations refer to the gateway baseline before its removal; source paths in this table are available in Git history. They are not features newly added to the unified gateway.
 
 | Existing behavior | Repository source |
 |---|---|
