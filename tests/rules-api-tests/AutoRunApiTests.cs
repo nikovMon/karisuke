@@ -1160,6 +1160,146 @@ public sealed class AutoRunApiTests
     }
 
     [Fact]
+    public async Task SensorNameChoicesExposeCachedCanonicalSpellingsInSortedOrder()
+    {
+        using var fixture = new Fixture(configurationOverrides: new Dictionary<string, string?>
+        {
+            ["AutoRun:SensorCatalog:BaseUrl"] = "http://sensors.example"
+        }, sensorNames: ["Brt", "aRe", "Ary"]);
+
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            using var response = await fixture.Client.GetAsync("/auto-runs/sensor-names");
+            await AssertStatus(response, HttpStatusCode.OK);
+            using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.True(body.RootElement.GetProperty("enabled").GetBoolean());
+            Assert.Equal(new[] { "aRe", "Ary", "Brt" }, body.RootElement.GetProperty("sensorNames")
+                .EnumerateArray().Select(value => value.GetString()));
+        }
+        Assert.Equal(1, fixture.SensorCatalog.Requests);
+        Assert.Empty(fixture.Provider.Calls);
+    }
+
+    [Theory]
+    [InlineData(true, "")]
+    [InlineData(false, "http://sensors.example")]
+    public async Task DisabledSensorNameChoicesReturnAnEmptyListWithoutCallingTheApi(bool enabled, string baseUrl)
+    {
+        using var fixture = new Fixture(enabled: enabled, configurationOverrides: new Dictionary<string, string?>
+        {
+            ["AutoRun:SensorCatalog:BaseUrl"] = baseUrl
+        });
+
+        using var response = await fixture.Client.GetAsync("/auto-runs/sensor-names");
+        await AssertStatus(response, HttpStatusCode.OK);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.False(body.RootElement.GetProperty("enabled").GetBoolean());
+        Assert.Empty(body.RootElement.GetProperty("sensorNames").EnumerateArray());
+        Assert.Equal(0, fixture.SensorCatalog.Requests);
+    }
+
+    [Fact]
+    public async Task AnEmptySensorCatalogIsDistinctFromDisabledChoices()
+    {
+        using var fixture = new Fixture(configurationOverrides: new Dictionary<string, string?>
+        {
+            ["AutoRun:SensorCatalog:BaseUrl"] = "http://sensors.example"
+        }, sensorNames: []);
+
+        using var response = await fixture.Client.GetAsync("/auto-runs/sensor-names");
+        await AssertStatus(response, HttpStatusCode.OK);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(body.RootElement.GetProperty("enabled").GetBoolean());
+        Assert.Empty(body.RootElement.GetProperty("sensorNames").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task SensorNameChoicesReturnSanitized503WhileOtherOptionsRemainAvailable()
+    {
+        using var fixture = new Fixture(configurationOverrides: new Dictionary<string, string?>
+        {
+            ["AutoRun:SensorCatalog:BaseUrl"] = "http://sensors.example"
+        }, sensorCatalogStatus: HttpStatusCode.ServiceUnavailable);
+
+        using var response = await fixture.Client.GetAsync("/auto-runs/sensor-names");
+        await AssertStatus(response, HttpStatusCode.ServiceUnavailable);
+        var text = await response.Content.ReadAsStringAsync();
+        using var body = JsonDocument.Parse(text);
+        Assert.Equal("sensor_catalog_unavailable", body.RootElement.GetProperty("code").GetString());
+        Assert.Contains("Sensor names are temporarily unavailable", body.RootElement.GetProperty("error").GetString());
+        Assert.DoesNotContain("private upstream detail", text, StringComparison.Ordinal);
+        using var options = await fixture.Client.GetAsync("/auto-runs/options");
+        await AssertStatus(options, HttpStatusCode.OK);
+    }
+
+    [Theory]
+    [InlineData(AutoRunSourceMode.Rules)]
+    [InlineData(AutoRunSourceMode.Filters)]
+    public async Task SensorCatalogCanonicalizesSearchWhileKeepingRuleNamesAndMatchingBothRules(AutoRunSourceMode mode)
+    {
+        using var fixture = new Fixture(configurationOverrides: new Dictionary<string, string?>
+        {
+            ["AutoRun:SensorCatalog:BaseUrl"] = "http://sensors.example"
+        });
+        fixture.Provider.SensorName = "aRe";
+        fixture.Provider.MatchSensorName = true;
+        var firstRule = Rule("First spelling", "tenant");
+        firstRule.Match!.Sensors![0].Name = "arE";
+        var secondRule = Rule("Second spelling", "tenant");
+        secondRule.Match!.Sensors![0].Name = "Are";
+        fixture.Store.Add(RulesIndex, "shared-rule", firstRule);
+        fixture.Store.Add(RulesIndex, "second-rule", secondRule);
+        var request = Request() with
+        {
+            Source = new() { Mode = mode, Filters = new() { SensorNames = ["ARE"] } },
+            Targets = [.. Request().Targets, new() { PipelineId = "FindAir", RuleId = "second-rule", MinOverlays = 1, MaxOverlays = 1 }]
+        };
+
+        using var accepted = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", request, AutoRunJson.Options);
+        await AssertStatus(accepted, HttpStatusCode.Accepted);
+        var ready = await WaitForState(fixture.Client, (await Read<AutoRunSummary>(accepted)).Id, AutoRunState.Ready);
+
+        Assert.Equal(1, ready.Counters.Selected);
+        Assert.Equal(2, ready.Targets.Count);
+        Assert.All(ready.Targets, target => Assert.Equal(1, target.Selected));
+        Assert.Equal(new[] { "arE", "Are" }, ready.Targets.Select(target => target.Rule.Match!.Sensors![0].Name));
+        Assert.Equal(1, fixture.SensorCatalog.Requests);
+        var query = Assert.Single(ready.Queries);
+        var sensorClauses = query.GetProperty("filter").GetProperty("logical_operators").GetProperty("AND")
+            .EnumerateArray().Where(clause => clause.TryGetProperty("match", out var match) && match.TryGetProperty("SENSOR", out _)).ToArray();
+        Assert.NotEmpty(sensorClauses);
+        Assert.All(sensorClauses, clause => Assert.Equal("aRe", Assert.Single(clause.GetProperty("match")
+            .GetProperty("SENSOR").GetProperty("values").EnumerateArray()).GetString()));
+
+        using var started = await fixture.Client.PostAsync($"/auto-runs/{ready.Id}/start", null);
+        await AssertStatus(started, HttpStatusCode.OK);
+        await WaitForState(fixture.Client, ready.Id, AutoRunState.Completed);
+        using var published = JsonDocument.Parse(Assert.Single(fixture.Broker.Messages).Message.Body);
+        Assert.Equal("aRe", published.RootElement.GetProperty("sensorName").GetString());
+    }
+
+    [Fact]
+    public async Task UnknownCatalogSensorFailsPreparationBeforeAnyOverlayRequest()
+    {
+        using var fixture = new Fixture(configurationOverrides: new Dictionary<string, string?>
+        {
+            ["AutoRun:SensorCatalog:BaseUrl"] = "http://sensors.example"
+        });
+        var request = Request() with
+        {
+            Source = new() { Mode = AutoRunSourceMode.Filters, Filters = new() { SensorNames = ["missing"] } },
+            Targets = []
+        };
+        using var accepted = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", request, AutoRunJson.Options);
+        await AssertStatus(accepted, HttpStatusCode.Accepted);
+        var failed = await WaitForState(fixture.Client, (await Read<AutoRunSummary>(accepted)).Id, AutoRunState.Failed);
+
+        Assert.Contains(failed.Errors, error => error.Contains("Sensor name 'missing' was not found in the sensor catalog", StringComparison.Ordinal));
+        Assert.Empty(fixture.Provider.Calls);
+        Assert.Equal(1, fixture.SensorCatalog.Requests);
+    }
+
+    [Fact]
     public async Task CoarseEOResponseCannotMakeActualPANMatchVisibleRule()
     {
         using var fixture = new Fixture();
@@ -1271,13 +1411,17 @@ public sealed class AutoRunApiTests
         private readonly WebApplicationFactory<Program> _app;
         public InMemoryIndexStore Store { get; } = new();
         public ProviderHandler Provider { get; } = new();
+        public SensorCatalogHandler SensorCatalog { get; } = new();
         public CapturingBroker Broker { get; } = new();
         public HttpClient Client { get; }
 
         public Fixture(bool enabled = true, IReadOnlyDictionary<string, string>? providerHeaders = null, int maxSelectedOverlays = 100000,
             IReadOnlyDictionary<string, string?>? configurationOverrides = null, TimeProvider? time = null,
-            IReadOnlyDictionary<string, string?>? lowerPriorityConfiguration = null)
+            IReadOnlyDictionary<string, string?>? lowerPriorityConfiguration = null,
+            string[]? sensorNames = null, HttpStatusCode sensorCatalogStatus = HttpStatusCode.OK)
         {
+            if (sensorNames is not null) SensorCatalog.Names = sensorNames;
+            SensorCatalog.Status = sensorCatalogStatus;
             _baseFactory = new(Store);
             _app = _baseFactory.WithWebHostBuilder(builder =>
             {
@@ -1317,6 +1461,8 @@ public sealed class AutoRunApiTests
                     }
                     services.AddHttpClient<IElasticOverlayProvider, ElasticOverlayProvider>()
                         .ConfigurePrimaryHttpMessageHandler(() => Provider);
+                    services.AddHttpClient(SensorNameCatalog.HttpClientName)
+                        .ConfigurePrimaryHttpMessageHandler(() => SensorCatalog);
                     services.RemoveAll<IRabbitMqDestinationPublisher>();
                     services.AddSingleton<IRabbitMqDestinationPublisher>(Broker);
                 });
@@ -1341,8 +1487,32 @@ public sealed class AutoRunApiTests
 
     private sealed record ProviderCall(HttpMethod Method, Uri Uri, string? Body, IReadOnlyDictionary<string, string[]> Headers);
 
+    private sealed class SensorCatalogHandler : HttpMessageHandler
+    {
+        private int _requests;
+        public int Requests => Volatile.Read(ref _requests);
+        public string[] Names { get; set; } = ["aRe", "Brt"];
+        public HttpStatusCode Status { get; set; } = HttpStatusCode.OK;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _requests);
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.Equal("/sensors/api/v1/sensors/list/sensor/", request.RequestUri!.AbsolutePath);
+            Assert.Null(request.Headers.Authorization);
+            return Task.FromResult(new HttpResponseMessage(Status)
+            {
+                Content = new StringContent(Status == HttpStatusCode.OK
+                    ? JsonSerializer.Serialize(Names.Select(name => new { sensorName = name })) : "private upstream detail",
+                    Encoding.UTF8, "application/json")
+            });
+        }
+    }
+
     private sealed class ProviderHandler : HttpMessageHandler
     {
+        public string SensorName { get; set; } = "camera";
+        public bool MatchSensorName { get; set; }
         public double StoredResolution { get; set; } = 50;
         public bool MatchResolution { get; set; }
         public string ImageUrl { get; set; } = "https://images.invalid/original";
@@ -1359,6 +1529,15 @@ public sealed class AutoRunApiTests
             Calls.Enqueue(new(request.Method, request.RequestUri!, body,
                 request.Headers.ToDictionary(header => header.Key, header => header.Value.ToArray(), StringComparer.OrdinalIgnoreCase)));
             if (BeforeResponse is { } wait) await wait(cancellationToken);
+            if (MatchSensorName && request.Method == HttpMethod.Post)
+            {
+                using var query = JsonDocument.Parse(body!);
+                var sensorClauses = query.RootElement.GetProperty("filter").GetProperty("logical_operators").GetProperty("AND")
+                    .EnumerateArray().Where(clause => clause.TryGetProperty("match", out var match) && match.TryGetProperty("SENSOR", out _));
+                if (sensorClauses.Any(clause => !clause.GetProperty("match").GetProperty("SENSOR").GetProperty("values")
+                    .EnumerateArray().Any(value => value.GetString() == SensorName)))
+                    return new(HttpStatusCode.OK) { Content = new StringContent("""{"entities_list":[]}""", Encoding.UTF8, "application/json") };
+            }
             if (MatchResolution && request.Method == HttpMethod.Post)
             {
                 using var query = JsonDocument.Parse(body!);
@@ -1377,7 +1556,7 @@ public sealed class AutoRunApiTests
                 properties_list = new
                 {
                     GlobalId = "overlay-1", Url = ImageUrl, GridPath = "https://grids.invalid/original",
-                    Sensor = "camera", ImagingTechnique = "EO", SolutionType = "grid", Sortie = "sortie-1",
+                    Sensor = SensorName, ImagingTechnique = "EO", SolutionType = "grid", Sortie = "sortie-1",
                     RegistrationQuality = "Accurate", Resolution = StoredResolution / 100, ImageWidth, ImageHeight,
                     PhotoTime, Created = "2000-01-02T11:00:00Z", IsRealTime = false
                 }

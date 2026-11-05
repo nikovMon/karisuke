@@ -20,11 +20,14 @@ const state = {
   pipelines: [], runId: null, run: null, timer: null, itemsFrom: 0, itemsSize: 20,
   itemsOutcome: '', publicationDirty: false, refreshVersion: 0, rulesVersion: 0,
   rulesLoading: false, rulesPipeline: '', rulesSearch: '', rulesStatus: '', rulesTimer: null, rulesController: null, resumeRules: false,
-  selectionOperation: null, setupReady: false, preparing: false, rerunPending: false,
+  selectionOperation: null, pendingRules: new Map(), setupReady: false, preparing: false, rerunPending: false,
+  sensorNames: [], selectedSensorNames: new Set(), sensorNamesEnabled: false, sensorNamesLoaded: false,
+  sensorNamesLoading: false, sensorNamesError: '', sensorNamesVersion: 0, sensorNamesSearch: '',
   history: [], historyVersion: 0, historyTimer: null, historyDeleting: false, historyPendingIds: new Set(),
   progressTimer: null, progressClock: null
 };
 const $ = id => document.getElementById(id);
+const ruleKey = (pipelineId, ruleId) => JSON.stringify([pipelineId, ruleId]);
 const pendingRunActions = new Map();
 const directSource = () => document.querySelector('[name="source-mode"]:checked')?.value === 'Filters'
   || (document.querySelector('[name="source-mode"]:checked')?.value === 'OverlayIds'
@@ -132,7 +135,7 @@ function configurationMarkup() {
       </div>
       <details id="filter-details" class="filter-details"><summary>Overlay filters <span id="filters-description" class="muted">Optional for rule-derived searches</span></summary><div>
         <div class="filter-actions"><button id="clear-filters" type="button" class="button compact ghost">Clear all filters</button><span id="filter-status" class="hint" role="status"></span></div>
-        <div class="field-row">${field('sensor-names', 'Sensor names', 'e.g. SENSOR_A, SENSOR_B')}<fieldset id="sensor-types" class="sensor-type-selector" aria-describedby="sensor-types-help"><legend>Sensor types</legend><div id="sensor-type-options" class="sensor-type-options"></div><p id="sensor-types-help" class="hint">Loading sensor types…</p></fieldset></div>
+        <div class="field-row"><fieldset id="sensor-names" class="sensor-type-selector" aria-describedby="sensor-names-help"><legend>Sensor names</legend><label class="field sensor-name-search" for="sensor-name-search"><span>Search sensor names</span><input id="sensor-name-search" type="search" placeholder="Type part of a sensor name" autocomplete="off" aria-controls="sensor-name-options" aria-describedby="sensor-name-search-status"></label><p id="sensor-name-search-status" class="hint" role="status" aria-live="polite"></p><div id="sensor-name-options" class="sensor-type-options sensor-name-options"></div><p id="sensor-names-help" class="hint" role="status" aria-live="polite">Loading sensor names…</p><button id="reload-sensor-names" type="button" class="button compact ghost">Refresh sensor names</button></fieldset><fieldset id="sensor-types" class="sensor-type-selector" aria-describedby="sensor-types-help"><legend>Sensor types</legend><div id="sensor-type-options" class="sensor-type-options"></div><p id="sensor-types-help" class="hint">Loading sensor types…</p></fieldset></div>
         <div class="field-row"><label class="field" for="registration-quality"><span>Registration quality</span><select id="registration-quality"><option value="">Any quality</option><option value="Accurate">Accurate</option><option value="Sensor">Sensor</option><option value="Accurate,Sensor">Accurate or Sensor</option></select></label><label class="field" for="is-realtime"><span>Realtime overlay</span><select id="is-realtime"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select></label></div>
         <div class="field-row">${field('resolution-min', 'Minimum resolution', 'No lower bound', 'number', 'min="0" step="any"')}${field('resolution-max', 'Maximum resolution', 'No upper bound', 'number', 'min="0" step="any"')}</div>
         <div class="field search-area-field"><div class="search-area-heading"><label class="field-label" for="area-wkt">Search area · WKT</label><button id="open-area-map" type="button" class="button compact ghost" aria-haspopup="dialog" aria-controls="area-map-dialog" aria-describedby="area-map-hint" disabled>Open map</button></div><textarea id="area-wkt" class="mono" placeholder="POLYGON ((...)) or MULTIPOLYGON (((...)))" spellcheck="false"></textarea><small>Selects intersecting overlays. Gateway rules determine the dispatched ROI.</small><small id="area-map-hint">Loading map settings…</small></div>
@@ -151,6 +154,7 @@ function configurationMarkup() {
       <div id="rule-browser" class="rule-browser" hidden><div class="browser-header"><span id="rule-browser-label">AVAILABLE RULES · active and inactive</span><span id="rule-page-label" role="status" aria-live="polite"></span></div><div id="rule-list" class="browser-list"></div><div class="browser-footer"><div class="pagination"><button type="button" class="button compact ghost" id="rules-prev" aria-label="Previous rules page">←</button><button type="button" class="button compact ghost" id="rules-next" aria-label="Next rules page">→</button></div><button type="button" class="button compact" id="add-rules">Add selected rules</button></div></div>
       <details class="paste-rules"><summary>Already have rule IDs?</summary><div class="toolbar"><label class="field" for="pasted-rule-ids"><span>Rule IDs in the selected pipeline</span><textarea id="pasted-rule-ids" rows="2" placeholder="Paste IDs separated by commas or new lines"></textarea></label><button type="button" class="button" id="add-pasted-rules">Add IDs</button></div></details>
       <div id="rule-error" class="inline-error" role="alert" hidden></div>
+      <div class="rule-selection-actions"><button type="button" class="button compact ghost" id="clear-selected-rules" disabled>Clear all selected rules</button><span id="pending-rule-count" class="hint" role="status" aria-live="polite"></span></div>
       <div id="selected-targets"></div>
       <p class="hint" style="margin-top:14px">Selected rules control the preview, including each rule's photo-age limit. Inactive rules can be used for selection; the gateway dispatches using its current active rules, which may include other pipelines.</p>
     </div></fieldset>
@@ -197,6 +201,22 @@ function attachConfiguration() {
   });
   attachPublicationPresets();
   $('sensor-types').addEventListener('change', updateSensorTypeHint);
+  $('sensor-names').addEventListener('change', event => {
+    const input = event.target.closest('[name="sensor-name"]');
+    if (!input || input.disabled) return;
+    if (input.checked) state.selectedSensorNames.add(input.value);
+    else state.selectedSensorNames.delete(input.value);
+    if (!input.checked && !state.sensorNames.includes(input.value)) {
+      input.closest('.sensor-type-option').remove();
+      $('sensor-name-search').focus();
+    }
+    updateSensorNameHint();
+  });
+  $('sensor-name-search').addEventListener('input', event => {
+    state.sensorNamesSearch = event.target.value;
+    renderSensorNames();
+  });
+  $('reload-sensor-names').addEventListener('click', () => { if (!state.sensorNamesLoading) loadSensorNames(); });
   document.querySelectorAll('[name="source-mode"]').forEach(radio => radio.addEventListener('change', updateSource));
   document.querySelectorAll('[name="id-processing"]').forEach(radio => radio.addEventListener('change', updateSource));
   $('pipeline-select').addEventListener('change', () => { cancelRuleSelection(); hideError('rule-error'); state.rulesFrom = 0; loadRules(); });
@@ -207,9 +227,36 @@ function attachConfiguration() {
   $('rules-next').addEventListener('click', () => { state.rulesFrom += state.rulesSize; loadRules(); });
   $('add-rules').addEventListener('click', () => {
     if (state.selectionOperation || state.preparing) return;
-    if (!$('pipeline-select').value) return showError('rule-error', new Error('Select a pipeline first.'));
-    const selected = [...document.querySelectorAll('[name="rule-choice"]:checked')].map(input => state.rules[Number(input.value)]);
-    try { selected.forEach(rule => addTarget($('pipeline-select').value, rule)); renderTargets(); renderRuleList(); } catch (error) { showError('rule-error', error); }
+    hideError('rule-error');
+    try {
+      const selected = [...state.pendingRules.values()].filter(({ pipelineId, rule }) =>
+        !state.targets.some(target => target.pipelineId === pipelineId && target.ruleId === rule._id));
+      const limit = state.options?.limits.maxTargets ?? 100;
+      if (state.targets.length + selected.length > limit) throw new Error(`A preview supports at most ${limit} rule targets. No rules were added.`);
+      selected.forEach(({ pipelineId, rule }) => addTarget(pipelineId, rule));
+      renderTargets(); renderRuleList();
+    } catch (error) { showError('rule-error', error); }
+  });
+  $('rule-list').addEventListener('change', event => {
+    const input = event.target.closest('[name="rule-choice"]');
+    const pipeline = $('pipeline-select').value;
+    if (!input || input.disabled || state.selectionOperation || state.preparing || state.rulesLoading || state.rulesPipeline !== pipeline) return;
+    const rule = state.rules[Number(input.value)];
+    const key = ruleKey(pipeline, rule._id);
+    if (input.checked) state.pendingRules.set(key, { pipelineId: pipeline, rule });
+    else state.pendingRules.delete(key);
+    $('rule-selection-status').textContent = '';
+    syncSelectionControls();
+  });
+  $('clear-selected-rules').addEventListener('click', () => {
+    if (state.preparing) return;
+    cancelRuleSelection();
+    state.targets = [];
+    state.pendingRules.clear();
+    hideError('rule-error');
+    renderTargets(); renderRuleList();
+    $('rule-selection-status').textContent = 'All selected rules cleared.';
+    syncSelectionControls();
   });
   $('select-all-rules').addEventListener('click', selectAllRules);
   $('add-pasted-rules').addEventListener('click', addPastedRules);
@@ -225,8 +272,9 @@ function attachConfiguration() {
   });
   $('selected-targets').addEventListener('click', event => {
     const button = event.target.closest('[data-remove-target]');
-    if (!button) return;
-    state.targets.splice(Number(button.dataset.removeTarget), 1);
+    if (!button || button.disabled || state.selectionOperation || state.preparing) return;
+    const [removed] = state.targets.splice(Number(button.dataset.removeTarget), 1);
+    state.pendingRules.delete(ruleKey(removed.pipelineId, removed.ruleId));
     renderTargets();
     renderRuleList();
   });
@@ -235,7 +283,7 @@ function attachConfiguration() {
 }
 
 async function loadSetup() {
-  await Promise.allSettled([loadOptions(), loadPipelines()]);
+  await Promise.allSettled([loadOptions(), loadPipelines(), loadSensorNames()]);
 }
 
 async function loadOptions() {
@@ -281,6 +329,59 @@ function renderWorkspaceLimits(options) {
     ['Provider request pause', `${number(options.provider?.requestDelayMs)} ms`],
     ...(options.memory ? [['Process memory', `${bytes(options.memory.processBytes)} / ${bytes(options.memory.limitBytes)}`]] : [])
   ].map(([key, value]) => `<div class="limit-line"><span>${key}</span><strong>${escape(value)}</strong></div>`).join('');
+}
+
+async function loadSensorNames() {
+  const version = ++state.sensorNamesVersion;
+  state.sensorNamesLoading = true;
+  state.sensorNamesError = '';
+  renderSensorNames();
+  try {
+    const catalog = await api.sensorNames();
+    if (version !== state.sensorNamesVersion) return;
+    if (typeof catalog?.enabled !== 'boolean' || !Array.isArray(catalog.sensorNames)
+      || catalog.sensorNames.some(name => typeof name !== 'string' || !name.trim()))
+      throw new Error('The sensor-name catalog returned an unexpected response.');
+    state.sensorNames = catalog.enabled ? [...new Set(catalog.sensorNames)] : [];
+    state.sensorNamesEnabled = catalog.enabled;
+    state.sensorNamesLoaded = true;
+  } catch (error) {
+    if (version === state.sensorNamesVersion) state.sensorNamesError = error.message;
+  } finally {
+    if (version === state.sensorNamesVersion) { state.sensorNamesLoading = false; renderSensorNames(); }
+  }
+}
+
+const sensorNameChoices = () => [...new Set([...state.sensorNames, ...state.selectedSensorNames])];
+const sensorNameMatches = name => name.toLowerCase().includes(state.sensorNamesSearch.trim().toLowerCase());
+
+function renderSensorNames() {
+  if (!$('sensor-name-options')) return;
+  const names = sensorNameChoices().filter(sensorNameMatches);
+  if ($('sensor-name-search').value !== state.sensorNamesSearch) $('sensor-name-search').value = state.sensorNamesSearch;
+  const hidden = document.querySelector('[name="source-mode"]:checked')?.value === 'OverlayIds';
+  $('sensor-name-options').innerHTML = names.map(name =>
+    `<label class="sensor-type-option"><input type="checkbox" name="sensor-name" value="${escape(name)}" aria-label="${escape(name)}" ${state.selectedSensorNames.has(name) ? 'checked' : ''} ${hidden ? 'disabled' : ''}><span>${escape(name)}${!state.sensorNames.includes(name) ? ' (no longer available)' : ''}</span></label>`).join('');
+  $('sensor-names').setAttribute('aria-busy', String(state.sensorNamesLoading));
+  $('reload-sensor-names').disabled = state.sensorNamesLoading;
+  $('reload-sensor-names').textContent = state.sensorNamesError ? 'Retry sensor names' : 'Refresh sensor names';
+  updateSensorNameHint();
+}
+
+function updateSensorNameHint() {
+  const count = state.selectedSensorNames.size;
+  const unavailable = [...state.selectedSensorNames].some(name => !state.sensorNames.includes(name));
+  const names = sensorNameChoices();
+  const matched = names.filter(sensorNameMatches).length;
+  const hiddenSelected = [...state.selectedSensorNames].filter(name => !sensorNameMatches(name)).length;
+  $('sensor-name-search-status').textContent = state.sensorNamesSearch.trim()
+    ? `${matched ? `${matched} of ${names.length} names match.` : 'No sensor names match your search.'} ${count} selected${hiddenSelected ? ` (${hiddenSelected} hidden by search)` : ''}.` : '';
+  $('sensor-names-help').textContent = state.sensorNamesLoading ? 'Loading sensor names… Existing selections are kept.'
+    : state.sensorNamesError ? `Sensor names could not be loaded. ${state.sensorNamesError}${state.sensorNamesLoaded ? ' Previously loaded choices and selections are kept.' : ' Other filters still apply.'}`
+    : unavailable ? `Some selected sensor names are no longer available. Deselect them before preparing a filtered preview.${hiddenSelected ? ' Clear the search to see all selected names.' : ''}`
+    : !state.sensorNamesEnabled ? 'Sensor names are not configured on this instance. Other filters still apply.'
+    : !state.sensorNames.length ? 'No sensor names are available. Other filters still apply.'
+    : count ? `${count} selected. Matches any selected sensor name.` : 'Any sensor name. Select one or more to narrow the search.';
 }
 
 function configureSensorTypes() {
@@ -353,7 +454,18 @@ function syncSelectionControls() {
   $('select-all-scope').textContent = pipeline
     ? `All ${filtered ? 'matching ' : ''}rules in ${pipeline}, across every page. ${state.rulesStatus === 'true' ? 'Active only.' : state.rulesStatus === 'false' ? 'Inactive only.' : 'Includes active and inactive rules.'}`
     : 'Choose a pipeline to select all its rules across every page.';
-  $('add-rules').disabled = busy || state.rulesLoading || state.rulesPipeline !== pipeline || !state.rules.length;
+  $('add-rules').disabled = busy || state.rulesLoading || !state.pendingRules.size;
+  $('clear-selected-rules').disabled = state.preparing || !(state.targets.length || state.pendingRules.size || state.selectionOperation);
+  $('pending-rule-count').textContent = state.pendingRules.size
+    ? `${state.pendingRules.size} checked rule${state.pendingRules.size === 1 ? '' : 's'} waiting to be added across pages and pipelines.` : '';
+  for (const input of $('rule-list').querySelectorAll('[name="rule-choice"]')) {
+    const rule = state.rules[Number(input.value)];
+    if (!rule || state.rulesLoading || state.rulesPipeline !== pipeline) { input.disabled = true; input.checked = false; continue; }
+    const exists = state.targets.some(target => target.pipelineId === pipeline && target.ruleId === rule._id);
+    input.disabled = busy || exists;
+    input.checked = exists || state.pendingRules.has(ruleKey(pipeline, rule._id));
+  }
+  for (const button of $('selected-targets').querySelectorAll('[data-remove-target]')) button.disabled = busy;
   $('add-pasted-rules').disabled = busy;
   $('prepare-button').disabled = busy || !state.options?.enabled || (!directSource() && !state.setupReady);
 }
@@ -417,6 +529,7 @@ async function selectAllRules() {
     const newRules = checkCapacity();
     // Commit only after every page succeeds. Keep existing target objects and quotas.
     state.targets.push(...newRules.map(rule => ({ pipelineId: pipeline, ruleId: rule._id, minOverlays: '0', maxOverlays: '100', rule })));
+    for (const rule of candidates.values()) state.pendingRules.delete(ruleKey(pipeline, rule._id));
     renderTargets();
     if (!state.rulesLoading) renderRuleList();
     const existing = candidates.size - newRules.length;
@@ -550,9 +663,14 @@ function renderRuleList() {
 }
 
 function addTarget(pipelineId, rule) {
-  if (state.targets.some(target => target.pipelineId === pipelineId && target.ruleId === rule._id)) return;
+  const key = ruleKey(pipelineId, rule._id);
+  if (state.targets.some(target => target.pipelineId === pipelineId && target.ruleId === rule._id)) {
+    state.pendingRules.delete(key);
+    return;
+  }
   if (state.targets.length >= (state.options?.limits.maxTargets ?? 100)) throw new Error(`A preview supports at most ${state.options?.limits.maxTargets ?? 100} rule targets.`);
   state.targets.push({ pipelineId, ruleId: rule._id, minOverlays: '0', maxOverlays: '100', rule });
+  state.pendingRules.delete(key);
 }
 
 async function addPastedRules() {
@@ -614,11 +732,14 @@ function timeValue(id) {
 }
 
 function clearFilters() {
-  for (const id of ['sensor-names', 'registration-quality', 'is-realtime', 'resolution-min', 'resolution-max',
+  for (const id of ['registration-quality', 'is-realtime', 'resolution-min', 'resolution-max',
     'area-wkt', 'created-from', 'created-to', 'photo-from', 'photo-to']) {
     $(id).value = '';
     $(id).setCustomValidity('');
   }
+  state.selectedSensorNames.clear();
+  state.sensorNamesSearch = '';
+  renderSensorNames();
   for (const input of document.querySelectorAll('#sensor-types input')) input.checked = false;
   updateSensorTypeHint();
   hideError('form-error');
@@ -627,7 +748,9 @@ function clearFilters() {
 
 function collectFilters() {
   const result = {};
-  const sensorNames = splitValues($('sensor-names').value);
+  const sensorNames = [...state.selectedSensorNames];
+  if (sensorNames.some(name => !state.sensorNames.includes(name)))
+    throw new Error('Some selected sensor names are no longer available. Deselect them or clear the filters before preparing a preview.');
   if (sensorNames.length) result.sensorNames = sensorNames;
   const sensorTypes = selectedSensorTypes();
   if (sensorTypes.length) result.sensorTypes = sensorTypes;

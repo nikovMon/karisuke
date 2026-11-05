@@ -329,7 +329,7 @@ public sealed partial class AutoRunService(
         try
         {
             memory?.ThrowIfUnsafe();
-            queryBodies = queryBuilder.Build(job.Request.Source, job.Targets.Select(t => t.Rule).ToArray());
+            queryBodies = await queryBuilder.BuildAsync(job.Request.Source, job.Targets.Select(t => t.Rule).ToArray(), cancellationToken);
             var queryBytes = queryBodies.Sum(q => (long)JsonSerializer.SerializeToUtf8Bytes(q).Length);
             lock (_gate)
             {

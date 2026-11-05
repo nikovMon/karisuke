@@ -14,14 +14,32 @@ namespace ImagingPipeline.Rules.Api.AutoRuns.Provider;
 /// and grid types together; callers union pages locally instead of guessing provider OR syntax.
 /// </summary>
 public sealed class ProviderQueryBuilder(
-    IOptions<ElasticProviderOptions> configured, IAutoRunMemoryGuard? memory = null, TimeProvider? timeProvider = null)
+    IOptions<ElasticProviderOptions> configured, IAutoRunMemoryGuard? memory = null, TimeProvider? timeProvider = null,
+    ISensorNameCatalog? sensorCatalog = null)
 {
     private readonly ElasticProviderOptions _options = configured.Value;
     private readonly IReadOnlyDictionary<string, string> _sensorTypeMappings =
         SensorTypeCatalog.Snapshot(configured.Value.SensorTypeMappings);
     private static readonly ConditionalWeakTable<AutoRunFilters, CompiledFilter> FilterCache = new();
 
-    public IReadOnlyList<JsonElement> Build(AutoRunSource source, IReadOnlyList<PipelineRuleDocument> rules)
+    public async Task<IReadOnlyList<JsonElement>> BuildAsync(AutoRunSource source,
+        IReadOnlyList<PipelineRuleDocument> rules, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(rules);
+        cancellationToken.ThrowIfCancellationRequested();
+        var needsNames = source.Mode is AutoRunSourceMode.Rules or AutoRunSourceMode.Filters &&
+            (source.Filters?.SensorNames is { Length: > 0 } ||
+             source.Mode == AutoRunSourceMode.Rules && rules.Any(rule => rule.Match?.Sensors is { Count: > 0 }));
+        // All query branches in one preparation use the same immutable catalog snapshot.
+        var names = needsNames && sensorCatalog is not null
+            ? await sensorCatalog.GetSnapshotAsync(cancellationToken) : null;
+        cancellationToken.ThrowIfCancellationRequested();
+        return Build(source, rules, names);
+    }
+
+    public IReadOnlyList<JsonElement> Build(AutoRunSource source, IReadOnlyList<PipelineRuleDocument> rules,
+        IReadOnlyDictionary<string, string>? sensorNames = null)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(rules);
@@ -37,7 +55,7 @@ public sealed class ProviderQueryBuilder(
         var result = new List<JsonElement>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         if (source.Mode == AutoRunSourceMode.Filters)
-            AddQuery(FilterClauses(source.Filters));
+            AddQuery(FilterClauses(source.Filters, sensorNames));
         else if (source.Mode == AutoRunSourceMode.Rules)
         {
             // Capture once: every branch and continuation page belongs to the same frozen search.
@@ -45,7 +63,7 @@ public sealed class ProviderQueryBuilder(
             foreach (var rule in rules)
             {
                 if (!TryRuleFilters(source.Filters, rule, referenceTime, out var filters)) continue;
-                var common = FilterClauses(filters);
+                var common = FilterClauses(filters, sensorNames);
                 var match = rule.Match;
                 if (match?.Resolution is { } resolution)
                     AddResolutionRange(common, _options.RequestFields.Resolution, resolution.Min, resolution.Max);
@@ -63,7 +81,7 @@ public sealed class ProviderQueryBuilder(
                     {
                         var branch = new List<object>(common)
                         {
-                            Clause("match", _options.RequestFields.SensorName, new[] { sensor.Name })
+                            Clause("match", _options.RequestFields.SensorName, new[] { CanonicalSensorName(sensor.Name, sensorNames) })
                         };
                         if (sensor.RegistrationQualities is { Count: > 0 } qualities)
                             branch.Add(Clause("match", _options.RequestFields.RegistrationQuality,
@@ -118,6 +136,13 @@ public sealed class ProviderQueryBuilder(
 
     private string[] TranslateSensorTypes(IEnumerable<string> types) =>
         types.Select(type => _sensorTypeMappings[type]).Distinct(StringComparer.Ordinal).ToArray();
+
+    private static string CanonicalSensorName(string name, IReadOnlyDictionary<string, string>? sensorNames)
+    {
+        if (sensorNames is null) return name;
+        return sensorNames.TryGetValue(name, out var canonical) ? canonical
+            : throw new InvalidOperationException($"Sensor name '{name}' was not found in the sensor catalog. Check the rule or filter name and the catalog refresh.");
+    }
 
     private static bool TryRuleFilters(AutoRunFilters? supplied, PipelineRuleDocument rule,
         DateTimeOffset referenceTime, out AutoRunFilters? filters)
@@ -205,12 +230,14 @@ public sealed class ProviderQueryBuilder(
     public static bool MatchesWithoutSensorType(ProviderOverlay overlay, AutoRunFilters filters) =>
         FilterCache.GetValue(filters, static value => new CompiledFilter(value)).Matches(overlay, ignoreSensorType: true);
 
-    private List<object> FilterClauses(AutoRunFilters? filters)
+    private List<object> FilterClauses(AutoRunFilters? filters, IReadOnlyDictionary<string, string>? sensorNames)
     {
         var clauses = new List<object>();
         if (filters is null) return clauses;
         var fields = _options.RequestFields;
-        AddList(fields.SensorName, filters.SensorNames);
+        if (filters.SensorNames is { } names)
+            clauses.Add(Clause("match", fields.SensorName,
+                names.Select(name => CanonicalSensorName(name.Trim(), sensorNames)).Distinct(StringComparer.Ordinal).ToArray()));
         if (filters.SensorTypes is { } types)
             clauses.Add(Clause("match", fields.SensorType, TranslateSensorTypes(types.Select(value => value.Trim()))));
         AddList(fields.GridType, filters.GridTypes);
@@ -301,7 +328,9 @@ public sealed class ProviderQueryBuilder(
         {
             var errors = Validate(filters).ToArray();
             if (errors.Length > 0) throw new ArgumentException(string.Join(" ", errors), nameof(filters));
-            _sensors = Set(filters.SensorNames); _types = Set(filters.SensorTypes); _grids = Set(filters.GridTypes);
+            _sensors = filters.SensorNames is null ? null
+                : new(filters.SensorNames.Select(value => value.Trim()), StringComparer.OrdinalIgnoreCase);
+            _types = Set(filters.SensorTypes); _grids = Set(filters.GridTypes);
             _qualities = Set(filters.RegistrationQualities); _sorties = Set(filters.SortieIds);
             _realtime = filters.IsRealtime;
             _minimum = filters.Resolution?.Min; _maximum = filters.Resolution?.Max;

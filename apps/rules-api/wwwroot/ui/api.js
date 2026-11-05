@@ -78,6 +78,7 @@ export async function request(path, { method = 'GET', body, signal } = {}) {
 
 export const api = {
   options: () => request('/auto-runs/options'),
+  sensorNames: () => request('/auto-runs/sensor-names'),
   pipelines: () => request('/pipelines'),
   rules: (pipeline, from, size, signal, search = '', isActive = '') => {
     const query = new URLSearchParams({ from, size });

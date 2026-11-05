@@ -353,7 +353,8 @@ public sealed class AutoRunProviderTests
         };
         Assert.True(ProviderQueryBuilder.Matches(overlay, filters));
         Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { IsRealtime = true }));
-        Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { SensorNames = ["ARC"] }));
+        Assert.True(ProviderQueryBuilder.Matches(overlay, filters with { SensorNames = ["ARC"] }));
+        Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { SensorNames = ["other"] }));
         Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { SensorTypes = ["EO"] }));
         Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { GridTypes = ["other"] }));
         Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { RegistrationQualities = ["Sensor"] }));

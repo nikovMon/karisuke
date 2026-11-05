@@ -28,6 +28,10 @@ const options = {
     limitBytes: 10307921510, headroomBytes: 9234179686, isUnderPressure: false }
 };
 const sensorTypeLabel = '<img src=x onerror="window.sensorTypeInjected=true">';
+const sensorNameLabel = '<img src=x onerror="window.sensorNameInjected=true">';
+let sensorNamesResponse = { enabled: true, sensorNames: ['SENSOR_A', 'SENSOR_B', 'ar', 'keep-sensor', 'Ary', 'Brt', sensorNameLabel] };
+let sensorNamesFailure = false;
+let sensorNamesGate = null;
 options.provider.sensorTypeMappings[sensorTypeLabel] = 'TEST';
 const rules = Array.from({ length: 11 }, (_, i) => ({
   _id: `rule-${i + 1}`, ruleName: i === 0 ? 'Urban detail' : i === 1 ? 'Archive coverage' : `Rule ${i + 1}`,
@@ -131,6 +135,10 @@ const server = http.createServer(async (req, res) => {
     requests.push({ method: req.method, path: url.pathname, search: url.search, body });
     const json = (data, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
     if (url.pathname === '/auto-runs/options') return json(options);
+    if (url.pathname === '/auto-runs/sensor-names') {
+      await sensorNamesGate;
+      return sensorNamesFailure ? json({ error: 'Sensor catalog is temporarily unavailable.', code: 'sensor_catalog_unavailable' }, 503) : json(sensorNamesResponse);
+    }
     if (url.pathname === '/map-test') {
       res.writeHead(200, { 'Content-Type': 'text/html' });
       return res.end('<!doctype html><html><body><h1>Test area map</h1><button>Choose an area</button></body></html>');
@@ -327,7 +335,16 @@ try {
   await page.getByLabel('Minimum for Urban detail').fill('25');
   await page.getByLabel('Maximum for Urban detail').fill('30');
   await page.locator('#filter-details summary').click();
-  await page.locator('#sensor-names').fill('SENSOR_A, SENSOR_A');
+  assert.equal(await page.locator('input#sensor-names').count(), 0, 'sensor names use catalog choices instead of free text');
+  assert.equal(await page.getByRole('searchbox', { name: 'Search sensor names', exact: true }).count(), 1, 'sensor names have an accessible local search');
+  await page.locator('#sensor-names').getByRole('checkbox', { name: 'SENSOR_A', exact: true }).check();
+  assert.deepEqual(await page.locator('#sensor-name-options input').evaluateAll(inputs => inputs.map(input => input.value)), sensorNamesResponse.sensorNames);
+  const nameSearchRequests = requests.filter(request => request.path === '/auto-runs/sensor-names').length;
+  await page.getByRole('searchbox', { name: 'Search sensor names', exact: true }).fill('sEnSoR_b');
+  assert.deepEqual(await page.locator('#sensor-name-options input').evaluateAll(inputs => inputs.map(input => input.value)), ['SENSOR_B']);
+  assert.match(await page.locator('#sensor-name-search-status').textContent(), /1 of 7 names match.*1 selected.*1 hidden/);
+  assert.equal(requests.filter(request => request.path === '/auto-runs/sensor-names').length, nameSearchRequests, 'sensor-name search is entirely local');
+  assert.equal(await page.locator('#sensor-names img').count(), 0, 'sensor names are escaped');
   assert.equal(await page.locator('#sensor-types input[type="text"]').count(), 0, 'sensor types cannot be entered as arbitrary text');
   assert.deepEqual(await page.locator('#sensor-types input').evaluateAll(inputs => inputs.map(input => input.value)), Object.keys(options.provider.sensorTypeMappings));
   assert.equal(await page.locator('#sensor-types img').count(), 0, 'configured type labels are escaped');
@@ -414,7 +431,9 @@ try {
   await page.waitForTimeout(2300);
   assert.equal(reads.get('run-1'), stoppedReads, 'terminal jobs must stop polling');
   await page.getByText('← Back to configuration', { exact: true }).click();
-  assert.equal(await page.locator('#sensor-names').inputValue(), 'SENSOR_A, SENSOR_A');
+  assert.equal(await page.getByRole('searchbox', { name: 'Search sensor names', exact: true }).inputValue(), 'sEnSoR_b', 'sensor-name search survives run navigation');
+  await page.getByRole('searchbox', { name: 'Search sensor names', exact: true }).fill('');
+  assert.deepEqual(await page.locator('#sensor-names input:checked').evaluateAll(inputs => inputs.map(input => input.value)), ['SENSOR_A']);
   assert.deepEqual(await page.locator('#sensor-types input:checked').evaluateAll(inputs => inputs.map(input => input.value)), ['VIS', 'PAN'], 'sensor type draft survives run navigation');
   assert.equal(await page.getByLabel('Minimum for Urban detail').inputValue(), '25');
   await page.locator('[name="source-mode"][value="OverlayIds"]').check();
@@ -499,6 +518,110 @@ try {
     await bulkPage.locator('#add-rules').click();
   };
 
+  // Uncommitted choices survive page, search and pipeline changes until added or cleared.
+  await openBulk('imagery');
+  await bulkPage.locator('[name="rule-choice"]').first().check();
+  await bulkPage.locator('#rules-next').click();
+  await bulkPage.getByText('Rule 11', { exact: true }).waitFor();
+  await bulkPage.locator('[name="rule-choice"]').check();
+  await bulkPage.locator('#rules-prev').click();
+  await bulkPage.getByText('Urban detail', { exact: true }).waitFor();
+  assert.ok(await bulkPage.locator('[name="rule-choice"]').first().isChecked(), 'pending choices survive pagination');
+  await bulkPage.locator('[name="rule-choice"]').nth(1).check();
+  await bulkPage.locator('#rule-search').fill('Rule 11');
+  await bulkPage.getByText('Rule 11', { exact: true }).waitFor();
+  assert.ok(await bulkPage.locator('[name="rule-choice"]').isChecked(), 'pending choices survive search');
+  await bulkPage.locator('[name="rule-choice"]').uncheck();
+  await bulkPage.locator('#rule-search').fill('');
+  await bulkPage.getByText('Urban detail', { exact: true }).waitFor();
+  await choosePipeline('secondary');
+  await bulkPage.locator('[name="rule-choice"]').first().check();
+  await choosePipeline('imagery');
+  assert.equal(await bulkPage.locator('[name="rule-choice"]:checked').count(), 2);
+  await bulkPage.locator('#add-rules').click();
+  assert.equal(await targetRows.count(), 3, 'Add includes remembered choices from every pipeline and excludes unchecked choices');
+  assert.equal(await targetRows.filter({ hasText: 'secondary' }).count(), 1, 'same rule ID remains distinct across pipelines');
+  assert.equal(await bulkPage.locator('[name="rule-choice"]:checked:disabled').count(), 2, 'added choices remain checked');
+  await bulkPage.getByLabel('Minimum for Urban detail', { exact: true }).fill('7');
+  await bulkPage.getByLabel('Maximum for Urban detail', { exact: true }).fill('17');
+  await bulkPage.getByRole('button', { name: 'Remove Archive coverage', exact: true }).click();
+  assert.ok(!(await bulkPage.locator('[name="rule-choice"]').nth(1).isChecked()), 'removing a target clears its checkbox');
+  await bulkPage.locator('[name="rule-choice"]').nth(1).check();
+  await bulkPage.locator('#add-rules').click();
+  assert.equal(await targetRows.count(), 3, 'adding another pending choice cannot duplicate existing targets');
+  assert.equal(await bulkPage.getByLabel('Maximum for Urban detail', { exact: true }).inputValue(), '17');
+  await bulkPage.locator('#rules-next').click();
+  await bulkPage.getByText('Rule 11', { exact: true }).waitFor();
+  await bulkPage.locator('[name="rule-choice"]').check();
+  await bulkPage.locator('#filter-details summary').click();
+  await bulkPage.locator('#sensor-names').getByRole('checkbox', { name: 'keep-sensor', exact: true }).check();
+  await bulkPage.locator('#overall-max').fill('321');
+  await bulkPage.locator('#batch-size').fill('8');
+  await bulkPage.locator('#rule-search').fill('Rule 11');
+  await bulkPage.waitForFunction(() => document.getElementById('rule-page-label').textContent === '1–1');
+  const clearRules = bulkPage.getByRole('button', { name: 'Clear all selected rules', exact: true });
+  await clearRules.click();
+  assert.equal(await targetRows.count(), 0);
+  assert.ok(!(await bulkPage.locator('[name="rule-choice"]').isChecked()), 'clear removes pending choices on the visible page');
+  assert.ok(await bulkPage.locator('#sensor-names').getByRole('checkbox', { name: 'keep-sensor', exact: true }).isChecked());
+  assert.equal(await bulkPage.locator('#overall-max').inputValue(), '321');
+  assert.equal(await bulkPage.locator('#batch-size').inputValue(), '8');
+  assert.equal(await bulkPage.locator('#rule-search').inputValue(), 'Rule 11');
+  await choosePipeline('secondary');
+  assert.equal(await bulkPage.locator('[name="rule-choice"]:checked').count(), 0, 'clear removes selections from other pipelines');
+  assert.ok(await clearRules.isDisabled());
+  assert.ok(await bulkPage.locator('#add-rules').isDisabled());
+
+  options.limits.maxTargets = 2;
+  await openBulk('imagery');
+  await bulkPage.locator('[name="rule-choice"]').first().check();
+  await bulkPage.locator('[name="rule-choice"]').nth(1).check();
+  await bulkPage.locator('#rules-next').click();
+  await bulkPage.getByText('Rule 11', { exact: true }).waitFor();
+  await bulkPage.locator('[name="rule-choice"]').check();
+  await bulkPage.locator('#add-rules').click();
+  await bulkPage.locator('#rule-error').filter({ hasText: 'at most 2 rule targets' }).waitFor();
+  assert.equal(await targetRows.count(), 0, 'manual cross-page additions are atomic at the target limit');
+  await bulkPage.locator('[name="rule-choice"]').uncheck();
+  await bulkPage.locator('#add-rules').click();
+  assert.equal(await targetRows.count(), 2, 'capacity failure preserves pending choices for correction');
+  assert.ok(await bulkPage.locator('#rule-error').isHidden());
+  await bulkPage.locator('#pipeline-select').selectOption('');
+  await clearRules.click();
+  assert.equal(await targetRows.count(), 0, 'clear also works after leaving the pipeline selector blank');
+  await choosePipeline('imagery');
+  assert.equal(await bulkPage.locator('[name="rule-choice"]:checked').count(), 0);
+  options.limits.maxTargets = 100;
+
+  await openBulk('imagery');
+  await bulkPage.locator('[name="rule-choice"]').first().check();
+  const clearedSelection = holdRulePage('imagery', 10);
+  await bulkButton.click();
+  await clearedSelection.entered;
+  await clearRules.click();
+  clearedSelection.release();
+  rulePageOverrides.delete('imagery');
+  await bulkPage.waitForTimeout(100);
+  assert.equal(await targetRows.count(), 0, 'clear cancels bulk selection before late results can add targets');
+  assert.equal(await bulkPage.locator('[name="rule-choice"]:checked').count(), 0);
+  assert.ok(await bulkButton.isEnabled());
+  assert.ok(await bulkPage.locator('#rule-error').isHidden());
+
+  let releaseClearedLookup, markClearedLookup;
+  const clearedLookup = new Promise(resolve => { releaseClearedLookup = resolve; });
+  const clearedLookupEntered = new Promise(resolve => { markClearedLookup = resolve; });
+  pendingResponses.add(releaseClearedLookup);
+  ruleLookupGates.set('rule-1', async () => { markClearedLookup(); await clearedLookup; });
+  await bulkPage.locator('.paste-rules summary').click();
+  await bulkPage.locator('#pasted-rule-ids').fill('rule-1');
+  await bulkPage.locator('#add-pasted-rules').click();
+  await clearedLookupEntered;
+  await clearRules.click();
+  releaseClearedLookup(); pendingResponses.delete(releaseClearedLookup); ruleLookupGates.delete('rule-1');
+  await bulkPage.waitForTimeout(100);
+  assert.equal(await targetRows.count(), 0, 'clear cancels pending pasted-ID lookups');
+  assert.ok(await bulkPage.locator('#rule-error').isHidden());
+
   // Start on page two: selection still begins at page zero, preserving existing quotas.
   await openBulk('imagery');
   await addFirstRule();
@@ -577,7 +700,9 @@ try {
   assert.equal(await targetRows.count(), 1, 'a later page failure cannot leave partial selection');
   assert.equal(await bulkPage.getByLabel('Minimum for Urban detail').inputValue(), '9');
   assert.equal(await bulkPage.getByLabel('Maximum for Urban detail').inputValue(), '19');
+  await bulkPage.locator('[name="rule-choice"]').nth(1).check();
   assert.ok(await bulkPage.locator('#add-rules').isEnabled());
+  await bulkPage.locator('[name="rule-choice"]').nth(1).uncheck();
   assert.ok(await bulkPage.locator('#add-pasted-rules').isEnabled());
   rulePageOverrides.delete('imagery');
   await selectAll('Added 10 rules from imagery.');
@@ -809,7 +934,7 @@ try {
   assert.ok(await filtersPage.getByLabel('Maximum for Urban detail').isDisabled());
   assert.equal(await filtersPage.locator('#overall-max').getAttribute('placeholder'), 'Default: 100 overlays');
   assert.ok(await filtersPage.locator('#preview-form').evaluate(form => form.checkValidity()), 'hidden invalid rule quota cannot block filters');
-  await filtersPage.locator('#sensor-names').fill('ar');
+  await filtersPage.locator('#sensor-names').getByRole('checkbox', { name: 'ar', exact: true }).check();
   await filtersPage.locator('#sensor-types').getByRole('checkbox', { name: 'Thermal imagery', exact: true }).check();
   await filtersPage.locator('#sensor-types').getByRole('checkbox', { name: 'PAN', exact: true }).check();
   await filtersPage.locator('[name="source-mode"][value="Rules"]').check();
@@ -1274,7 +1399,8 @@ try {
   for (const mode of ['Rules', 'Filters']) {
     await filterControlsPage.locator(`[name="source-mode"][value="${mode}"]`).check();
     await filterControlsPage.locator('#filter-details').evaluate(element => { element.open = true; });
-    for (const id of ['sensor-names', 'area-wkt']) await filterControlsPage.locator(`#${id}`).fill('invalid-search');
+    await filterControlsPage.locator('#sensor-names').getByRole('checkbox', { name: 'Ary', exact: true }).check();
+    await filterControlsPage.locator('#area-wkt').fill('invalid-search');
     for (const id of ['created-from', 'created-to', 'photo-from', 'photo-to']) await filterControlsPage.locator(`#${id}`).fill('2026-10-05T12:00');
     await filterControlsPage.locator('#registration-quality').selectOption('Accurate');
     await filterControlsPage.locator('#is-realtime').selectOption('true');
@@ -1288,7 +1414,8 @@ try {
     await filterControlsPage.keyboard.press('Enter');
     assert.ok(await filterControlsPage.locator('#form-error').isHidden());
     assert.equal(await filterControlsPage.locator('#sensor-types input:checked').count(), 0);
-    for (const id of ['sensor-names', 'registration-quality', 'is-realtime', 'resolution-min', 'resolution-max', 'area-wkt', 'created-from', 'created-to', 'photo-from', 'photo-to'])
+    assert.equal(await filterControlsPage.locator('#sensor-names input:checked').count(), 0);
+    for (const id of ['registration-quality', 'is-realtime', 'resolution-min', 'resolution-max', 'area-wkt', 'created-from', 'created-to', 'photo-from', 'photo-to'])
       assert.equal(await filterControlsPage.locator(`#${id}`).inputValue(), '', `${mode}: ${id} cleared`);
     assert.equal(await filterControlsPage.locator('#batch-size').inputValue(), '7');
     assert.equal(await filterControlsPage.locator('#delay-ms').inputValue(), '150');
@@ -1403,6 +1530,107 @@ try {
   assert.equal(await countdownPage.evaluate(() => window.countdownIntervals.size), 0, 'terminal state stops countdown');
   await countdownPage.close();
 
+  // Sensor-name loading is independent of setup, with cached choices retained on refresh errors.
+  let releaseSensorNames;
+  sensorNamesGate = new Promise(resolve => { releaseSensorNames = resolve; });
+  pendingResponses.add(releaseSensorNames);
+  sensorNamesFailure = true;
+  const sensorPage = await context.newPage();
+  sensorPage.on('pageerror', error => pageErrors.push(error.message));
+  await sensorPage.goto(`${origin}/ui/auto-run`);
+  await sensorPage.locator('#prepare-button:not(:disabled)').waitFor();
+  await sensorPage.locator('#filter-details summary').click();
+  assert.match(await sensorPage.locator('#sensor-names-help').textContent(), /Loading sensor names/);
+  assert.ok(await sensorPage.locator('#reload-sensor-names').isDisabled());
+  await sensorPage.locator('[name="source-mode"][value="OverlayIds"]').check();
+  await sensorPage.locator('#overlay-ids').fill('catalog-independent-id');
+  await sensorPage.locator('#prepare-button').click();
+  await sensorPage.locator('#start-run:not([hidden])').waitFor();
+  assert.equal(requests.filter(request => request.path === '/auto-runs/preview').at(-1).body.source.filters, undefined,
+    'direct IDs can prepare while the sensor-name catalog is still loading');
+  releaseSensorNames(); pendingResponses.delete(releaseSensorNames); sensorNamesGate = null;
+  await sensorPage.locator('.back-link').click();
+  await sensorPage.locator('[name="source-mode"][value="Filters"]').check();
+  await sensorPage.locator('#sensor-names-help').filter({ hasText: 'could not be loaded' }).waitFor();
+  assert.ok(await sensorPage.locator('#prepare-button').isEnabled(), 'catalog failure does not disable other filters');
+  assert.equal(await sensorPage.locator('#sensor-name-options input').count(), 0);
+  sensorNamesFailure = false;
+  await sensorPage.getByRole('button', { name: 'Retry sensor names', exact: true }).click();
+  await sensorPage.locator('#sensor-names').getByRole('checkbox', { name: 'Ary', exact: true }).waitFor();
+  await sensorPage.locator('#sensor-names').getByRole('checkbox', { name: 'Ary', exact: true }).focus();
+  await sensorPage.keyboard.press('Space');
+  await sensorPage.locator('#sensor-names').getByRole('checkbox', { name: 'Brt', exact: true }).check();
+  await sensorPage.locator('#sensor-names').getByRole('checkbox', { name: sensorNameLabel, exact: true }).check();
+  assert.equal(await sensorPage.locator('#sensor-names img').count(), 0);
+  assert.equal(await sensorPage.evaluate(() => Boolean(window.sensorNameInjected)), false);
+  const sensorSearch = sensorPage.getByRole('searchbox', { name: 'Search sensor names', exact: true });
+  await sensorSearch.fill('*');
+  assert.equal(await sensorPage.locator('#sensor-name-options input').count(), 0, 'sensor-name search treats wildcard symbols literally');
+  assert.match(await sensorPage.locator('#sensor-name-search-status').textContent(), /No sensor names match.*3 selected.*3 hidden/);
+  await sensorSearch.fill('IMG SRC');
+  assert.equal(await sensorPage.locator('#sensor-name-options input').count(), 1);
+  assert.ok(await sensorPage.locator('#sensor-names').getByRole('checkbox', { name: sensorNameLabel, exact: true }).isChecked());
+  assert.equal(await sensorPage.locator('#sensor-names img').count(), 0, 'filtered labels remain escaped');
+  await sensorSearch.fill('bR');
+  await sensorPage.locator('[name="source-mode"][value="Rules"]').check();
+  await sensorPage.locator('#filter-details summary').click();
+  assert.equal(await sensorSearch.inputValue(), 'bR', 'sensor-name search persists between source modes');
+  assert.equal(await sensorPage.locator('#sensor-name-options input:checked').count(), 1);
+  assert.match(await sensorPage.locator('#sensor-name-search-status').textContent(), /3 selected.*2 hidden/);
+  await sensorPage.locator('[name="source-mode"][value="Filters"]').check();
+  await sensorPage.locator('#prepare-button').click();
+  await sensorPage.locator('#start-run:not([hidden])').waitFor();
+  assert.deepEqual(requests.filter(request => request.path === '/auto-runs/preview').at(-1).body.source.filters.sensorNames,
+    ['Ary', 'Brt', sensorNameLabel], 'selected canonical names, including hidden search results, are serialized exactly');
+  await sensorPage.locator('.back-link').click();
+  assert.equal(await sensorSearch.inputValue(), 'bR', 'sensor-name search survives a preview round trip');
+  await sensorSearch.fill('');
+  assert.equal(await sensorPage.locator('#sensor-names input:checked').count(), 3, 'sensor-name choices survive run navigation');
+  sensorNamesFailure = true;
+  await sensorPage.locator('#reload-sensor-names').click();
+  await sensorPage.locator('#sensor-names-help').filter({ hasText: 'Previously loaded choices and selections are kept.' }).waitFor();
+  assert.equal(await sensorPage.locator('#sensor-names input:checked').count(), 3, 'failed refresh cannot silently drop selected filters');
+  sensorNamesFailure = false;
+  sensorNamesResponse = { enabled: true, sensorNames: ['Brt', sensorNameLabel] };
+  await sensorPage.locator('#reload-sensor-names').click();
+  await sensorPage.locator('#sensor-names-help').filter({ hasText: 'no longer available' }).waitFor();
+  assert.ok(await sensorPage.locator('#sensor-names').getByRole('checkbox', { name: 'Ary', exact: true }).isChecked());
+  const beforeRetiredName = requests.filter(request => request.path === '/auto-runs/preview').length;
+  await sensorPage.locator('#prepare-button').click();
+  await sensorPage.locator('#form-error').filter({ hasText: 'no longer available' }).waitFor();
+  assert.equal(requests.filter(request => request.path === '/auto-runs/preview').length, beforeRetiredName,
+    'removing a name from the catalog must not silently broaden an existing filter');
+  await sensorSearch.fill('Brt');
+  assert.match(await sensorPage.locator('#sensor-names-help').textContent(), /Clear the search to see all selected names/);
+  await sensorSearch.fill('ARY');
+  await sensorPage.locator('#sensor-names').getByRole('checkbox', { name: 'Ary', exact: true }).click();
+  assert.equal(await sensorPage.locator('#sensor-name-options input').count(), 0, 'a deselected unavailable name cannot be selected again');
+  await sensorPage.locator('#clear-filters').click();
+  assert.equal(await sensorPage.locator('#sensor-names input:checked').count(), 0);
+  assert.equal(await sensorSearch.inputValue(), '', 'Clear all filters also clears sensor-name search');
+  assert.equal(await sensorPage.locator('#sensor-name-options input').count(), 2);
+  sensorNamesResponse = { enabled: true, sensorNames: [] };
+  await sensorPage.locator('#reload-sensor-names').click();
+  await sensorPage.locator('#sensor-names-help').filter({ hasText: 'No sensor names are available' }).waitFor();
+  sensorNamesResponse = { enabled: false, sensorNames: [] };
+  await sensorPage.locator('#reload-sensor-names').click();
+  await sensorPage.locator('#sensor-names-help').filter({ hasText: 'not configured' }).waitFor();
+  assert.equal(await sensorPage.locator('#sensor-name-options input').count(), 0);
+  assert.ok(await sensorPage.locator('#prepare-button').isEnabled());
+  sensorNamesResponse = { enabled: true, sensorNames: Array.from({ length: 80 }, (_, i) => `Sensor ${i}`) };
+  await sensorPage.locator('#reload-sensor-names').click();
+  await sensorPage.locator('#sensor-names').getByRole('checkbox', { name: 'Sensor 79', exact: true }).waitFor();
+  await sensorPage.setViewportSize({ width: 390, height: 844 });
+  const catalogBounds = await sensorPage.locator('#sensor-name-options').evaluate(element => ({ height: element.clientHeight, total: element.scrollHeight }));
+  assert.ok(catalogBounds.height <= 240 && catalogBounds.total > catalogBounds.height, 'large catalogs use a bounded scrolling list');
+  assert.ok(await sensorPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'sensor choices fit mobile');
+  const catalogReads = requests.filter(request => request.path === '/auto-runs/sensor-names').length;
+  await sensorPage.locator('#refresh-history').click();
+  await sensorPage.waitForTimeout(100);
+  assert.equal(requests.filter(request => request.path === '/auto-runs/sensor-names').length, catalogReads,
+    'history and options refresh do not refetch the sensor catalog');
+  await sensorPage.close();
+
   options.enabled = false;
   const disabledPage = await context.newPage();
   disabledPage.on('pageerror', error => pageErrors.push(error.message));
@@ -1422,6 +1650,8 @@ try {
     'configuration publication presets', 'monitor presets require Apply and survive polling', 'terminal preset controls disabled',
     'select all across every page including inactive rules', 'bulk keyboard and mobile controls', 'bulk duplicate and quota preservation',
     'bulk cross-pipeline identity and capacity', 'empty pipeline selection', 'bulk exact target limit and no truncation',
+    'pending rule choices persist across pages searches and pipelines with atomic additions and preserved quotas',
+    'clear selected rules resets pending and committed choices across pipelines and cancels async results without changing filters',
     'atomic page failure and retry', 'bulk operation locking and live quota edits', 'stale pipeline cancellation and operation isolation',
     'pasted-ID batch cancellation keeps committed targets visible and submitted',
     'Overlay IDs defaults to direct gateway mode with no hidden targets or filters', 'optional selected-rule matching for IDs',
@@ -1446,6 +1676,9 @@ try {
     'Rules and Rules Simulate Coming Soon routes, deep links, mobile keyboard navigation and preserved Auto Run drafts',
     'all retained runs show data weights with individual and bulk deletion, pending cleanup polling, errors and deleted deep links',
     'configured sensor type multi-select preserves shared drafts, local names and exact frozen provider values',
+    'catalog sensor-name multi-select preserves canonical choices across modes and runs, escapes labels and fits large mobile lists',
+    'local sensor-name search is case-insensitive and literal, preserves hidden selected values and draft search, and clears with filters',
+    'sensor-name loading failure empty disabled retry and retained stale choices are independent from setup and direct IDs',
     'provider request pacing and retry progress, partial provider failure and queued-only success wording',
     'bounded escaped JSON and plain-text diagnostics preserve expansion across polling and fit mobile',
     'action errors retain validation fields, request status, trace identifiers and bounded non-JSON bodies',
