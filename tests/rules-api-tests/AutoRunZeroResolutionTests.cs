@@ -21,7 +21,7 @@ public sealed class AutoRunZeroResolutionTests
             .GetProperty("AND").EnumerateArray()).GetProperty("range").GetProperty("RESOLUTION");
         var values = Assert.Single(range.GetProperty("values").EnumerateArray());
         Assert.Equal(0, values.GetProperty("gte").GetDouble());
-        Assert.Equal(20, values.GetProperty("lte").GetDouble());
+        Assert.Equal(0.2, values.GetProperty("lte").GetDouble());
     }
 
     [Theory]

@@ -1,4 +1,5 @@
 using ImagingPipeline.Rules.Api.AutoRuns;
+using ImagingPipeline.Rules.Api.AutoRuns.Provider;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -12,7 +13,8 @@ public sealed class AutoRunsController(
     IOptions<AutoRunOptions> configured,
     IAutoRunMemoryGuard memory,
     IOptions<AutoRuns.Provider.ElasticProviderOptions> providerOptions,
-    AutoRuns.Provider.ProviderRequestCoordinator requests) : ControllerBase
+    AutoRuns.Provider.ProviderRequestCoordinator requests,
+    ISensorNameCatalog sensorCatalog) : ControllerBase
 {
     [HttpGet("options")]
     public IActionResult Options()
@@ -65,6 +67,30 @@ public sealed class AutoRunsController(
                 providerOptions.Value.SensorTypeMappings, providerOptions.Value.MaxConcurrentRequests
             }
         });
+    }
+
+    [HttpGet("sensor-names")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<IActionResult> SensorNames(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var snapshot = await sensorCatalog.GetSnapshotAsync(cancellationToken);
+            return Ok(new
+            {
+                Enabled = snapshot is not null,
+                SensorNames = snapshot?.Values.Order(StringComparer.OrdinalIgnoreCase).ToArray() ?? []
+            });
+        }
+        catch (ElasticProviderException)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new
+            {
+                error = "Sensor names are temporarily unavailable. Please retry loading the list.",
+                code = "sensor_catalog_unavailable"
+            });
+        }
     }
 
     [HttpPost("preview")]

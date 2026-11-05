@@ -64,8 +64,8 @@ public sealed class AutoRunPhotoAgeQueryTests
         Assert.Equal("2026-10-28T10:40:00.123Z", range.GetProperty("lte").GetString());
         Assert.Equal("2026-10-01T00:00:00.000Z", Range(query, "CREATED").GetProperty("gte").GetString());
         Assert.Equal("ar", Sensor(query));
-        Assert.Equal(1, Range(query, "RESOLUTION").GetProperty("gte").GetInt32());
-        Assert.Equal(20, Range(query, "RESOLUTION").GetProperty("lte").GetInt32());
+        Assert.Equal(0.01, Range(query, "RESOLUTION").GetProperty("gte").GetDouble());
+        Assert.Equal(0.2, Range(query, "RESOLUTION").GetProperty("lte").GetDouble());
         Assert.Equal(originalFilters, JsonSerializer.Serialize(filters));
         Assert.Equal(originalRule, JsonSerializer.Serialize(rule));
     }

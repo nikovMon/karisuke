@@ -151,4 +151,10 @@ internal static partial class RulesApiLog
     public static partial void ElasticsearchHealthProbeFailed(
         this ILogger logger,
         Exception exception);
+
+    [LoggerMessage(5060, LogLevel.Information, "Auto-run sensor catalog refreshed. SensorCount: {SensorCount}")]
+    public static partial void SensorCatalogRefreshed(this ILogger logger, int sensorCount);
+
+    [LoggerMessage(5061, LogLevel.Warning, "Auto-run sensor catalog refresh failed. Reason: {Reason}; HasCachedSnapshot: {HasCachedSnapshot}")]
+    public static partial void SensorCatalogRefreshFailed(this ILogger logger, string reason, bool hasCachedSnapshot);
 }

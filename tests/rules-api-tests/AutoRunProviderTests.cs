@@ -34,8 +34,8 @@ public sealed class AutoRunProviderTests
             clauses[0].GetProperty("match").GetProperty("SENSOR").GetProperty("values").EnumerateArray().Select(v => v.GetString()));
         Assert.Equal(JsonValueKind.False, Find(clauses, "match", "ISREALTIME")[0].ValueKind);
         var range = Find(clauses, "range", "RESOLUTION")[0];
-        Assert.Equal(0.4, range.GetProperty("gte").GetDouble());
-        Assert.Equal(0.7, range.GetProperty("lte").GetDouble());
+        Assert.Equal(0.004, range.GetProperty("gte").GetDouble());
+        Assert.Equal(0.007, range.GetProperty("lte").GetDouble(), precision: 12);
         Assert.Equal("2026-10-19T07:00:00.000Z",
             Find(clauses, "range", "CREATED")[0].GetProperty("gte").GetString());
         Assert.Equal(Area, Find(clauses, "geo_intersect", "geo")[0].GetString());
@@ -72,6 +72,7 @@ public sealed class AutoRunProviderTests
         Assert.All([first, second], clauses => Assert.Equal("SAR", Find(clauses, "match", "sensorType.keyword")[0].GetString()));
         Assert.All(queries, query =>
         {
+            Assert.Equal(0.01, Find(Clauses(query), "range", "RESOLUTION")[0].GetProperty("lte").GetDouble());
             var photoRange = Assert.Single(Find(Clauses(query), "range", "date").EnumerateArray());
             Assert.Equal(Find(first, "range", "date")[0].GetProperty("gte").GetString(),
                 photoRange.GetProperty("gte").GetString());
@@ -146,7 +147,7 @@ public sealed class AutoRunProviderTests
         var range = Find(clauses, "range", "Resolution")[0];
         Assert.Equal(JsonValueKind.Object, range.ValueKind);
         Assert.Equal(JsonValueKind.Number, range.GetProperty("gte").ValueKind);
-        Assert.Equal(0.5, range.GetProperty("gte").GetDouble());
+        Assert.Equal(0.005, range.GetProperty("gte").GetDouble());
         Assert.Equal("strip", Find(clauses, "match", "ModeSAR")[0].GetString());
         Assert.Equal("2026-10-04T16:40:00.123Z", Find(clauses, "range", photoField)[0].GetProperty("gte").GetString());
         Assert.Equal("2026-10-04T16:43:00.999Z", Find(clauses, "range", photoField)[0].GetProperty("lte").GetString());
@@ -352,7 +353,8 @@ public sealed class AutoRunProviderTests
         };
         Assert.True(ProviderQueryBuilder.Matches(overlay, filters));
         Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { IsRealtime = true }));
-        Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { SensorNames = ["ARC"] }));
+        Assert.True(ProviderQueryBuilder.Matches(overlay, filters with { SensorNames = ["ARC"] }));
+        Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { SensorNames = ["other"] }));
         Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { SensorTypes = ["EO"] }));
         Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { GridTypes = ["other"] }));
         Assert.False(ProviderQueryBuilder.Matches(overlay, filters with { RegistrationQualities = ["Sensor"] }));
@@ -389,8 +391,8 @@ public sealed class AutoRunProviderTests
             using var body = JsonDocument.Parse(bodies[^1]);
             var clauses = Clauses(body.RootElement);
             Assert.Equal("ar", Find(clauses, "match", "SENSOR")[0].GetString());
-            Assert.Equal(1, Find(clauses, "range", "RESOLUTION")[0].GetProperty("gte").GetDouble());
-            Assert.Equal(20, Find(clauses, "range", "RESOLUTION")[0].GetProperty("lte").GetDouble());
+            Assert.Equal(0.01, Find(clauses, "range", "RESOLUTION")[0].GetProperty("gte").GetDouble());
+            Assert.Equal(0.2, Find(clauses, "range", "RESOLUTION")[0].GetProperty("lte").GetDouble());
             var photoRange = Find(clauses, "range", "date")[0];
             Assert.Equal("2026-10-04T16:40:00.000Z", photoRange.GetProperty("gte").GetString());
             Assert.Equal("2026-10-05T16:43:00.999Z", photoRange.GetProperty("lte").GetString());

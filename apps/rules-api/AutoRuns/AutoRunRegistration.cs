@@ -52,6 +52,10 @@ public static class AutoRunRegistration
                 uri.Scheme is "http" or "https" && string.IsNullOrEmpty(uri.UserInfo),
                 "Enabled auto-run requires an HTTP(S) Elastic Provider BaseUrl without credentials.")
             .ValidateOnStart();
+        services.AddOptions<SensorCatalogOptions>()
+            .Bind(configuration.GetSection(SensorCatalogOptions.SectionName))
+            .Validate(options => options.IsValid(), "Sensor catalog URL, path, refresh interval, or timeout is invalid.")
+            .ValidateOnStart();
         services.TryAddSingleton(TimeProvider.System);
         services.TryAddSingleton<ProviderRequestCoordinator>();
         services.TryAddSingleton<IAutoRunMemoryGuard>(provider =>
@@ -62,6 +66,13 @@ public static class AutoRunRegistration
             .RemoveAllLoggers()
             .RedactLoggedHeaders(static _ => true)
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddHttpClient(SensorNameCatalog.HttpClientName, client => client.Timeout = Timeout.InfiniteTimeSpan)
+            .RemoveAllLoggers()
+            .RedactLoggedHeaders(static _ => true)
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddSingleton<SensorNameCatalog>();
+        services.AddSingleton<ISensorNameCatalog>(provider => provider.GetRequiredService<SensorNameCatalog>());
+        services.AddHostedService(provider => provider.GetRequiredService<SensorNameCatalog>());
         services.AddSingleton<ProviderQueryBuilder>();
         services.AddSingleton<IAutoRunRuleResolver, AutoRunRuleResolver>();
         services.AddSingleton<IAutoRunPublisher, AutoRunPublisher>();

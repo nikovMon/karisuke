@@ -53,6 +53,8 @@ Flarules uses the same API routes, supports all three source modes, browses save
 
 The rule browser searches within the selected pipeline across pages and supports an active/inactive status filter. **Select all matching rules** adds the rules matching those search/status filters across all pages; without filters it includes every rule, including inactive ones. Rules already selected retain their edited quotas, and targets from other pipelines remain selected. The operation adds nothing if fetching a page fails or the combined selection would exceed the 100-target limit; select fewer rules individually in that case. Selecting rules prepares the configuration only; it does not start a preview or publish messages.
 
+Checked rules stay checked when paging, searching, or switching pipelines. **Add selected rules** adds the pending choices from all pages and pipelines together, preserving existing targets and their quotas. **Clear all selected rules** clears both pending checkboxes and added selection rules across pipelines, and cancels an in-progress select-all or pasted-ID operation. Overlay filters and publication settings remain available for the next selection.
+
 `GET /pipelines/{pipelineId}/rules?search=thermal&isActive=true&from=0&size=10` supports literal, case-insensitive substring matching across `ruleName`, rule ID, description, sensor names, and sensor types. `search` is trimmed and limited to 200 characters; an omitted or blank search retains the existing list behavior. `from` skips matching rules, and `getNameOnly=true` supports the same search. Search symbols such as `*` are treated literally.
 
 Existing rules indexes can disable indexing of match conditions, so text search scans projected source fields through an Elasticsearch point-in-time snapshot, keeping at most 500 projected records per scan page plus the requested result page. Only the selected result page's full rule documents are fetched, from that same snapshot. A request that scans 100,000 rules without finding the requested page or exhausting the source returns an explicit `422` scan-limit error. Each list request opens its own snapshot; edits between UI pages can affect subsequent results. Cancellation and completion close the snapshot. This search concerns saved rule metadata, independently of the Elastic Provider overlay searches.
@@ -67,6 +69,8 @@ The optional filter forms in both modes omit grid types and sortie IDs. Existing
 
 **Sensor types** is a checkbox multi-select populated from `provider.sensorTypeMappings` in the options response. With no selection, this filter does not restrict sensor type. The same selection is preserved when switching between Rules and Filters or returning from a run; Overlay IDs does not submit the hidden filters. Types are configured choices rather than free-text values. The run page shows the resolved sensor type beside each selected overlay and preserves the exact provider query in its frozen-query view.
 
+**Sensor names** is a searchable checkbox multi-select populated from the cached sensor API catalog through `GET /auto-runs/sensor-names`. Search filters the loaded list by a literal substring, ignoring case, without additional API requests. Checked names stay selected and are submitted even when hidden by the search; the UI shows matching and selected counts. It submits the selected names with their exact catalog spelling; no selection means any sensor. Choices and search text survive mode changes and run navigation, and **Clear all filters** clears both. Loading, empty, disabled, unavailable, and no-search-match states are shown inline; a retry reloads the list through Rules API's cache. Other filters and direct overlay-ID submission remain available if the list cannot be loaded. If a refreshed catalog removes a selected name, the UI keeps it visible as unavailable until it is deselected instead of silently removing the filter.
+
 **Open map**, beside Search area, opens the website configured in `AutoRun:Ui:MapUrl` in an iframe dialog. The default is blank, which disables the button and shows a configuration hint. Supply an absolute HTTP(S) URL without embedded credentials. The map loads only when opened and unloads on close. Copy WKT from the map and paste it into Search area; no cross-site geometry transfer protocol is assumed. The configured website must permit iframe embedding. An **Open map in new tab** link is available when embedding is blocked. The dialog supports keyboard navigation, Escape from its own controls, and focus return to the trigger; the embedded website controls its own keyboard events.
 
 ### Workflow and routes
@@ -74,6 +78,7 @@ The optional filter forms in both modes omit grid types and sortie IDs. Existing
 | Method and route | Behavior |
 | --- | --- |
 | `GET /auto-runs/options` | Feature status, publication defaults, effective limits, `ui.mapUrl`, provider settings/catalog, current `memory` measurements, and `singleInstance: true`. The `execution` object adds active/queued counts, shared provider/publication capacity, transient memory reservations, and retained bytes. |
+| `GET /auto-runs/sensor-names` | Cached canonical sensor-name choices as `{ "enabled": true, "sensorNames": ["Ary", "Brt"] }`, sorted ignoring case. A disabled catalog returns `enabled: false` and an empty list; an unavailable initial load returns `503` with code `sensor_catalog_unavailable`. |
 | `POST /auto-runs/preview` | Accepts a preview request and returns `202 Accepted`, a run summary, and its `Location` URL. No messages are published. |
 | `GET /auto-runs` | Lists full retained run summaries, newest first. Add `?summaryOnly=true` for lightweight history entries without frozen rules, queries, or diagnostics. |
 | `GET /auto-runs/{id}` | Returns state, counters, target quotas, frozen rules, provider queries, warnings, errors, structured `diagnostics`, `diagnosticsOmitted`, current `providerProgress`, per-run `retainedBytes`, `deletionRequested`, and current process `memory` measurements. Includes `queuePosition`, `waitReason`, `preparationStartedAt`, `startRequestedAt`, and `serverTime`. |
@@ -181,7 +186,7 @@ Within each job, the adapter finishes every page of one query before starting th
 }
 ```
 
-Filter fields combine with AND. Values within a list are alternatives and are compared exactly, including case. Lists must be nonempty if supplied; registration qualities are `Accurate` and `Sensor`. Resolution bounds must be finite JSON numbers: minimum is zero or greater, maximum is strictly positive, and minimum must not exceed maximum when both are supplied. Explicit minimum `0` is preserved as provider `gte: 0`; a blank/omitted bound is omitted. This changes overlay-filter validation, not saved-rule validation or the positive resolution required on actual overlays. Both numeric and time boundaries are inclusive, and either boundary may be omitted. API timestamps require ISO 8601 seconds with `Z` or an explicit offset; timezone-less request dates are rejected. Use JSON `true` or `false` for `isRealtime`; omitting it means either value.
+Filter fields combine with AND. Values within a list are alternatives. Sensor names are compared ignoring case; other string lists use exact comparisons, including case. Lists must be nonempty if supplied; registration qualities are `Accurate` and `Sensor`. Resolution bounds use the same numeric scale as the stored Elasticsearch resolution and normalized `bestResolution`. They must be finite JSON numbers: minimum is zero or greater, maximum is strictly positive, and minimum must not exceed maximum when both are supplied. The adapter divides supplied resolution bounds by 100 before sending them to Elastic Provider, which multiplies them by 100 when querying Elasticsearch. Explicit minimum `0` is preserved as provider `gte: 0`; a blank/omitted bound is omitted. This applies to both overlay-filter and saved-rule query bounds; local matching uses the original bounds. Both numeric and time boundaries are inclusive, and either boundary may be omitted. API timestamps require ISO 8601 seconds with `Z` or an explicit offset; timezone-less request dates are rejected. Use JSON `true` or `false` for `isRealtime`; omitting it means either value.
 
 WKT must be a valid Polygon or MultiPolygon. The search selects intersecting overlays without clipping their footprints. The matched rule's geometry determines the ROI used for dispatch. Explicit filters are checked again against returned overlays locally; an overlay missing a value required by a filter does not match.
 
@@ -311,6 +316,31 @@ Each selected overlay produces one persistent, mandatory RabbitMQ message contai
 
 Every mode follows ordinary gateway identity: the same overlay, pipeline, rule, and run parameters reuse downstream dispatch IDs across auto-runs, so downstream deduplication may suppress repeat processing. Broker message IDs and correlation IDs remain scoped to each Auto Run. The gateway's existing whole-message retry can resend targets that already succeeded; see the [gateway documentation](../unified-gateway/README.md).
 
+### Sensor-name catalog
+
+Auto Run can resolve sensor-name capitalization using `GET /sensors/api/v1/sensors/list/sensor/` on a separate sensor API. The response is an array of objects, for example `[{"sensorName":"Ary"},{"sensorName":"Brt"}]`. No authentication is used. Configure the full HTTP(S) origin for the sensor service:
+
+```json
+{
+  "AutoRun": {
+    "SensorCatalog": {
+      "BaseUrl": "http://sensors.example",
+      "Path": "/sensors/api/v1/sensors/list/sensor/",
+      "RefreshIntervalMinutes": 1440,
+      "TimeoutSeconds": 30
+    }
+  }
+}
+```
+
+`BaseUrl` defaults to blank, which disables catalog lookup. `RefreshIntervalMinutes` defaults to **1440 (one day)** and is configurable; environment variables use names such as `AutoRun__SensorCatalog__BaseUrl` and `AutoRun__SensorCatalog__RefreshIntervalMinutes`. Restart Rules API after changing these settings. Requests have a configurable timeout, a 4 MiB response limit, and do not follow redirects.
+
+Each Rules API instance keeps its own in-memory cache, loads it when Auto Run is enabled, and refreshes it periodically even when no previews are running. Concurrent initial callers share one load. A successful refresh atomically replaces the catalog; a failed refresh retains the last successful snapshot and logs a warning. Before the first successful load, searches that need sensor-name resolution fail with a catalog error. Overlay-ID lookups and searches without sensor-name criteria do not depend on the catalog.
+
+Lookup ignores case but preserves the API's exact spelling in outgoing Elastic Provider queries. If the API lists `aRe`, rules containing `arE` and `Are` both query `aRe`; the saved rules and overlay payload names are preserved. Explicit `source.filters.sensorNames` values use the same translation, and local sensor-name filtering also ignores case. Other filter comparisons keep their existing behavior. One preparation uses one catalog snapshot for all its query branches, and an existing preview retains its frozen queries after a refresh.
+
+When the catalog is configured, a requested sensor name absent from it fails preparation explicitly. Malformed records or conflicting spellings of the same name, such as both `Ary` and `ARY`, reject the refresh instead of selecting an arbitrary spelling. Exact duplicate names are deduplicated.
+
 ### Elastic Provider configuration and contract
 
 The adapter uses:
@@ -356,7 +386,7 @@ Request construction follows the supplied working logical-operator example, not 
     "logical_operators": {
       "AND": [
         { "match": { "SENSOR": { "type": "IN", "values": ["ar"] } } },
-        { "range": { "RESOLUTION": { "type": "IN", "values": [{ "gte": 1, "lte": 20 }] } } },
+        { "range": { "RESOLUTION": { "type": "IN", "values": [{ "gte": 0.01, "lte": 0.2 }] } } },
         { "range": { "date": { "type": "IN", "values": [{ "gte": "2026-10-04T16:40:00.000Z", "lte": "2026-10-05T16:43:00.999Z" }] } } }
       ]
     }
@@ -365,7 +395,7 @@ Request construction follows the supplied working logical-operator example, not 
 }
 ```
 
-Different rule/sensor branches use separate AND queries, and each query's entire continuation chain finishes before the next query begins. The adapter does not invent an OR grammar or retry by dropping a rejected condition. Provider request aliases are configurable under `AutoRun:Provider:RequestFields`:
+The resolution bounds in this provider request correspond to Auto Run bounds of `1` and `20`. Different rule/sensor branches use separate AND queries, and each query's entire continuation chain finishes before the next query begins. The adapter does not invent an OR grammar or retry by dropping a rejected condition. Provider request aliases are configurable under `AutoRun:Provider:RequestFields`:
 
 | Option | Default request alias |
 | --- | --- |
@@ -434,7 +464,7 @@ The response contract is separate from request aliases. The ordinary GET and eac
 | `properties_list.ImageWidth`, `properties_list.ImageHeight` | `width`, `height` |
 | `geo.wkt` | Polygon/MultiPolygon GeoJSON `roiFootprint` |
 
-Elastic Provider returns `properties_list.Resolution` in meters per pixel (m/px): the resolution in centimeters per pixel divided by 100. The pipeline's `bestResolution` uses centimeters per pixel (cm/px), so Auto Run multiplies the provider value by 100 before local matching and publication. For example, `50 cm/px` is returned as `0.5 m/px` and normalized back to `bestResolution: 50`.
+Elastic Provider multiplies incoming resolution bounds by 100 before querying Elasticsearch and divides the stored resolution by 100 in its response. Auto Run compensates at both boundaries so filters, saved rules, local matching, and published `bestResolution` retain the stored Elasticsearch numeric value. For example, entering `80` sends `0.8` to the provider, which queries Elasticsearch for `80`; a stored value of `80` is returned by the provider as `0.8` and normalized back to `bestResolution: 80`. Request bounds are divided by 100 and response values multiplied by 100 without explicit rounding. This is compensation for the provider's scaling behavior; it does not change stored Elasticsearch values.
 
 Response aliases can be changed under `AutoRun:Provider:ResponseFields` using the option names in [ElasticProviderOptions.cs](AutoRuns/Provider/ElasticProviderOptions.cs). The GET result's mapped `GlobalId` must equal the requested ID. Response resolution must be a JSON number, and `IsRealTime`, when present, must be a JSON boolean.
 
