@@ -3,11 +3,11 @@ using RabbitMQ.Client;
 
 namespace ImagingPipeline.DlqRecovery.Tests;
 
-/// <summary>Requires RabbitMQ 3.12.11 on localhost:5672 and :5673 (admin/admin); never silently skipped.</summary>
+/// <summary>Requires RabbitMQ 3.12.11 on localhost:5672 and :5673 (admin/admin); reports skips when brokers are unavailable.</summary>
 [Trait("Category", "Broker")]
 public sealed class RecoveryBrokerTests
 {
-    [Fact]
+    [RecoveryBrokerFact]
     public async Task CrossBrokerReplayPreservesBodyAndTypedHeadersAndRemovesSourceAfterConfirmation()
     {
         await using var topology = await Topology.CreateAsync();
@@ -26,7 +26,7 @@ public sealed class RecoveryBrokerTests
         Assert.IsType<List<object>>(replayed.BasicProperties.Headers["x-updated-fields"]);
     }
 
-    [Fact]
+    [RecoveryBrokerFact]
     public async Task InvalidAndExhaustedOriginalsStayOnSourceBrokerInManualQueue()
     {
         await using var topology = await Topology.CreateAsync();
@@ -47,7 +47,7 @@ public sealed class RecoveryBrokerTests
         Assert.NotNull(two.BasicProperties.Headers!["failure-message"]);
     }
 
-    [Fact]
+    [RecoveryBrokerFact]
     public async Task UnroutableTargetPublicationLeavesOriginalInSourceDlq()
     {
         await using var topology = await Topology.CreateAsync();
@@ -63,7 +63,7 @@ public sealed class RecoveryBrokerTests
         Assert.Equal(1u, (await topology.SourceChannel.QueueDeclarePassiveAsync(topology.Mapping.SourceQueue)).MessageCount);
     }
 
-    [Fact]
+    [RecoveryBrokerFact]
     public async Task CrashAfterConfirmedPublishBeforeAckLeavesBothCopiesRecoverable()
     {
         await using var topology = await Topology.CreateAsync();
@@ -79,7 +79,7 @@ public sealed class RecoveryBrokerTests
         Assert.Equal(1u, (await topology.TargetChannel.QueueDeclarePassiveAsync(topology.Mapping.ReplayQueue)).MessageCount);
     }
 
-    [Fact]
+    [RecoveryBrokerFact]
     public async Task ConcurrentManagedRunCannotOwnSameDlq()
     {
         await using var topology = await Topology.CreateAsync();
@@ -90,7 +90,7 @@ public sealed class RecoveryBrokerTests
         Assert.Equal("original-id", original.Properties.MessageId);
     }
 
-    [Fact]
+    [RecoveryBrokerFact]
     public async Task UnknownLegacyHeadIsRetainedThenTransientMessageReplays()
     {
         await using var topology = await Topology.CreateAsync(sameBroker: true);
@@ -101,7 +101,7 @@ public sealed class RecoveryBrokerTests
         Assert.Equal(1u, (await topology.TargetChannel.QueueDeclarePassiveAsync(topology.Mapping.ReplayQueue)).MessageCount);
     }
 
-    [Fact]
+    [RecoveryBrokerFact]
     public async Task DestinationOutageDoesNotConsumeOrLoseSourceMessage()
     {
         await using var topology = await Topology.CreateAsync();
@@ -112,7 +112,7 @@ public sealed class RecoveryBrokerTests
         Assert.Equal(1u, (await topology.SourceChannel.QueueDeclarePassiveAsync(topology.Mapping.SourceQueue)).MessageCount);
     }
 
-    [Fact]
+    [RecoveryBrokerFact]
     public async Task FailedReplayReturnsWithPersistentBudgetAndEventuallyMovesToManual()
     {
         await using var topology = await Topology.CreateAsync();

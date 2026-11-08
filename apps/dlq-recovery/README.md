@@ -128,14 +128,19 @@ dotnet run --project apps/dlq-recovery -- --Recovery:Enabled=false
 dotnet test tests/dlq-recovery-tests --filter 'Category!=Broker'
 ```
 
-Broker tests **do not skip** when infrastructure is absent. Run two local
-RabbitMQ 3.12.11 brokers with test credentials `admin/admin` on AMQP ports 5672
-and 5673, then run:
+The eight broker tests report explicit **skips** when either local AMQP endpoint
+is unreachable. This allows closed-network CI without RabbitMQ services to run
+the remaining tests. To execute the broker tests, run two local RabbitMQ 3.12.11
+brokers with test credentials `admin/admin` on AMQP ports 5672 and 5673, then run:
 
 ```powershell
 dotnet test tests/dlq-recovery-tests
-npx nx affected -t build test --base=dev
+npx nx affected -t build test --base=dev --skip-nx-cache
 ```
+
+The availability check only probes TCP connectivity; authentication errors and
+test failures still fail the run when both endpoints are reachable. Skipped
+broker tests do not validate recovery behavior against a real broker.
 
 The tests create only uniquely named `karisuke.recovery.*` queues and remove
 those queues afterwards. They exercise cross-broker and same-broker replay,
