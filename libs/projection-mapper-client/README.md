@@ -22,7 +22,12 @@ messages; non-transient failures require review by default.
 Run `dotnet test tests/projection-mapper-client-tests/ImagingPipeline.ProjectionMapperClient.Tests.csproj`
 from the repository root.
 
-Test fixtures configure complete HTTP endpoint URLs, including the dynamically
-allocated mock-server port in integration tests. This keeps response and failure
-classification tests independent of platform-specific parsing of rooted paths.
-Runtime endpoint handling is unchanged.
+Endpoint values may be HTTP/HTTPS URLs or paths resolved against the configured
+host. A rooted path such as `/flare/g2i-by-id` starts at the host root; a relative
+path such as `flare/g2i-by-id` uses the base URL's path. Rooted paths remain HTTP
+paths on both Windows and Linux. Explicit non-HTTP schemes are rejected before
+sending a request.
+
+Endpoint tests exercise rooted, relative and absolute URLs for all three mapping
+operations and must pass on Linux as well as Windows. Other fixtures use complete
+URLs, including the dynamically allocated mock-server port in integration tests.
