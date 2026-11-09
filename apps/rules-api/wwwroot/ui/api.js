@@ -95,6 +95,7 @@ export const api = {
   items: (id, from, size, outcome) => request(`/auto-runs/${encodeURIComponent(id)}/items?from=${from}&size=${size}${outcome ? `&outcome=${encodeURIComponent(outcome)}` : ''}`),
   start: id => request(`/auto-runs/${encodeURIComponent(id)}/start`, { method: 'POST' }),
   rerun: id => request(`/auto-runs/${encodeURIComponent(id)}/rerun`, { method: 'POST' }),
+  republish: id => request(`/auto-runs/${encodeURIComponent(id)}/republish`, { method: 'POST' }),
   cancel: id => request(`/auto-runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
   publication: (id, body) => request(`/auto-runs/${encodeURIComponent(id)}/publication`, { method: 'PATCH', body })
 };

@@ -597,6 +597,65 @@ public sealed class AutoRunApiTests
     }
 
     [Fact]
+    public async Task RepublishCreatesReadyFrozenSelectionAndNewBrokerMessagesWithoutRepeatingSearch()
+    {
+        using var fixture = new Fixture();
+        fixture.Store.Add(RulesIndex, "shared-rule", Rule("Original selection rule", "original-tenant"));
+        using var accepted = await fixture.Client.PostAsJsonAsync("/auto-runs/preview", Request() with
+        {
+            Source = new() { Mode = AutoRunSourceMode.Rules }
+        }, AutoRunJson.Options);
+        await AssertStatus(accepted, HttpStatusCode.Accepted);
+        var ready = await WaitForState(fixture.Client, (await Read<AutoRunSummary>(accepted)).Id, AutoRunState.Ready);
+        using var premature = await fixture.Client.PostAsync($"/auto-runs/{ready.Id}/republish", null);
+        await AssertStatus(premature, HttpStatusCode.Conflict);
+        using var started = await fixture.Client.PostAsync($"/auto-runs/{ready.Id}/start", null);
+        await AssertStatus(started, HttpStatusCode.OK);
+        var completed = await WaitForState(fixture.Client, ready.Id, AutoRunState.Completed);
+        Assert.True(completed.CanRepublish);
+        var originalMessage = Assert.Single(fixture.Broker.Messages).Message;
+        await fixture.Store.DeleteAsync<PipelineRuleDocument>(RulesIndex, "shared-rule");
+        var ruleReads = fixture.Store.CallCount;
+        var providerReads = fixture.Provider.Calls.Count;
+        fixture.Provider.ImageUrl = "https://images.invalid/changed-after-selection";
+        fixture.Provider.BeforeResponse = _ => throw new InvalidOperationException("Republish must not call the provider.");
+
+        using var response = await fixture.Client.PostAsync($"/auto-runs/{ready.Id}/republish", null);
+
+        await AssertStatus(response, HttpStatusCode.Accepted);
+        var replay = await Read<AutoRunSummary>(response);
+        Assert.Equal(AutoRunState.Ready, replay.State);
+        Assert.Equal(ready.Id, replay.RepublishedFromRunId);
+        Assert.NotEqual(ready.Id, replay.Id);
+        Assert.EndsWith($"/auto-runs/{replay.Id}", response.Headers.Location!.ToString());
+        Assert.Null(replay.PreparationStartedAt);
+        Assert.Null(replay.StartRequestedAt);
+        Assert.Equal("Original selection rule", Assert.Single(replay.Targets).RuleName);
+        Assert.Equal(1, replay.Counters.Remaining);
+        Assert.Equal(0, replay.Counters.Confirmed);
+        Assert.Equal(ready.Queries.Select(query => query.GetRawText()), replay.Queries.Select(query => query.GetRawText()));
+        Assert.Equal(ruleReads, fixture.Store.CallCount);
+        Assert.Equal(providerReads, fixture.Provider.Calls.Count);
+        Assert.Single(fixture.Broker.Messages);
+
+        using var replayStarted = await fixture.Client.PostAsync($"/auto-runs/{replay.Id}/start", null);
+        await AssertStatus(replayStarted, HttpStatusCode.OK);
+        await WaitForState(fixture.Client, replay.Id, AutoRunState.Completed);
+        var messages = fixture.Broker.Messages.ToArray();
+        Assert.Equal(2, messages.Length);
+        var republished = messages[1].Message;
+        Assert.Equal(originalMessage.Body.ToArray(), republished.Body.ToArray());
+        Assert.NotEqual(originalMessage.MessageId, republished.MessageId);
+        AssertOrdinaryGatewayInput(republished, replay.Id);
+        Assert.Equal(ruleReads, fixture.Store.CallCount);
+        Assert.Equal(providerReads, fixture.Provider.Calls.Count);
+        using var originalResponse = await fixture.Client.GetAsync($"/auto-runs/{ready.Id}");
+        var original = await Read<AutoRunSummary>(originalResponse);
+        Assert.Equal(completed.Counters, original.Counters);
+        Assert.Equal(completed.FinishedAt, original.FinishedAt);
+    }
+
+    [Fact]
     public async Task RerunCreatesFreshPreviewFromOriginalCriteriaAndCurrentRulesWithoutStartingIt()
     {
         using var fixture = new Fixture();

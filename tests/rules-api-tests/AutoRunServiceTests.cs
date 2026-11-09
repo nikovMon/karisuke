@@ -16,7 +16,7 @@ using Microsoft.Extensions.Options;
 
 namespace ImagingPipeline.Rules.Api.Tests;
 
-public sealed class AutoRunServiceTests
+public sealed partial class AutoRunServiceTests
 {
     [Fact]
     public void SelectorSharesOverlaysAcrossQuotasButCountsThemOnceGlobally()
@@ -600,7 +600,8 @@ public sealed class AutoRunServiceTests
         fixture.Service.Start(ready.Id);
         var completed = await fixture.WaitAsync(ready.Id, AutoRunState.Completed);
         Assert.Equal(diagnostic, Assert.Single(completed.Diagnostics));
-        Assert.Equal(retained.Payload.Length, ready.RetainedBytes - completed.RetainedBytes);
+        Assert.Equal(ready.RetainedBytes, completed.RetainedBytes);
+        Assert.True(completed.CanRepublish);
         Assert.True(completed.RetainedBytes > 0);
         Assert.Single(fixture.Publisher.Calls);
         var deleted = fixture.Service.Delete(ready.Id);
@@ -1236,14 +1237,15 @@ public sealed class AutoRunServiceTests
     }
 
     [Fact]
-    public async Task TerminalWeightsReleasePayloadsAndBulkDeletionReleasesRemainingData()
+    public async Task CompletedRunsRetainPayloadsAndBulkDeletionReleasesAllData()
     {
         var overlay = Overlay("one");
         await using var fixture = await Fixture.StartAsync([overlay]);
         var ready = await fixture.ReadyAsync(Request(["one"], []));
         fixture.Service.Start(ready.Id);
         var completed = await fixture.WaitAsync(ready.Id, AutoRunState.Completed);
-        Assert.Equal(overlay.Payload.Length, ready.RetainedBytes - completed.RetainedBytes);
+        Assert.Equal(ready.RetainedBytes, completed.RetainedBytes);
+        Assert.True(completed.CanRepublish);
         Assert.True(completed.RetainedBytes > 0);
         var second = await fixture.ReadyAsync(Request(["one"], []));
 

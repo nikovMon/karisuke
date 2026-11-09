@@ -157,4 +157,7 @@ internal static partial class RulesApiLog
 
     [LoggerMessage(5061, LogLevel.Warning, "Auto-run sensor catalog refresh failed. Reason: {Reason}; HasCachedSnapshot: {HasCachedSnapshot}")]
     public static partial void SensorCatalogRefreshFailed(this ILogger logger, string reason, bool hasCachedSnapshot);
+
+    [LoggerMessage(5062, LogLevel.Information, "Auto-run {AutoRunId} publication preview copied from {SourceAutoRunId}: {SelectedCount} selected overlays.")]
+    public static partial void AutoRunPublicationCopied(this ILogger logger, string autoRunId, string sourceAutoRunId, int selectedCount);
 }

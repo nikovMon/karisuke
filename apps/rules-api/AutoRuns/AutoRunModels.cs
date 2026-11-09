@@ -93,6 +93,8 @@ public sealed record AutoRunSummary(
     public DateTimeOffset? StartRequestedAt { get; init; }
     public DateTimeOffset ServerTime { get; init; }
     public bool IsDirect { get; init; }
+    public bool CanRepublish { get; init; }
+    public string? RepublishedFromRunId { get; init; }
 }
 
 public sealed record AutoRunListEntry(

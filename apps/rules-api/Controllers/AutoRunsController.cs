@@ -129,6 +129,14 @@ public sealed class AutoRunsController(
         return AcceptedAtAction(nameof(Get), new { id = job.Id }, job);
     }
 
+    [HttpPost("{id}/republish")]
+    [ProducesResponseType(typeof(AutoRunSummary), StatusCodes.Status202Accepted)]
+    public IActionResult Republish(string id, CancellationToken cancellationToken)
+    {
+        var job = service.Republish(id, cancellationToken);
+        return AcceptedAtAction(nameof(Get), new { id = job.Id }, job);
+    }
+
     [HttpPatch("{id}/publication")]
     public AutoRunSummary Publication(string id, AutoRunPublication settings) => service.UpdatePublication(id, settings);
 
