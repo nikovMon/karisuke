@@ -264,15 +264,11 @@ public sealed class ProjectionMapperClient : IProjectionMapperClient
 
     private Uri? ResolveEndpoint(string endpoint)
     {
-        if (Uri.TryCreate(endpoint, UriKind.Absolute, out var absolute))
-        {
-            return absolute;
-        }
-
-        return _httpClient.BaseAddress is not null
-            && Uri.TryCreate(_httpClient.BaseAddress, endpoint, out var resolved)
-                ? resolved
-                : null;
+        // Resolve HTTP paths against the base before checking the scheme. On Linux,
+        // parsing "/path" as an absolute URI first treats it as a file URL.
+        return Uri.TryCreate(_httpClient.BaseAddress, endpoint, out var resolved)
+            ? resolved
+            : null;
     }
 
     private static void AddHttpRequestTags(Activity? activity, Uri? endpoint)
