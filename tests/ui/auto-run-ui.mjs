@@ -67,6 +67,8 @@ const runs = new Map();
 const previewRequests = new Map();
 let rerunFailure = false;
 let rerunGate = null;
+let republishFailure = false;
+let republishGate = null;
 let startFailure = false;
 let startGate = null;
 let previewFailure = null;
@@ -197,7 +199,7 @@ const server = http.createServer(async (req, res) => {
       });
       return json(summaries);
     }
-    const match = url.pathname.match(/^\/auto-runs\/([^/]+)(?:\/(items|start|cancel|publication|rerun))?$/);
+    const match = url.pathname.match(/^\/auto-runs\/([^/]+)(?:\/(items|start|cancel|publication|rerun|republish))?$/);
     if (match) {
       const run = runs.get(match[1]);
       if (!run) return json({ error: 'Run not found.' }, 404);
@@ -216,13 +218,26 @@ const server = http.createServer(async (req, res) => {
         if (rerunFailure) return json({ error: 'Another preparation is already active.' }, 409);
         return json(makeRun({ ...structuredClone(previewRequests.get(run.id)), publication: { ...run.publication } }), 202);
       }
+      if (match[2] === 'republish') {
+        await republishGate;
+        if (republishFailure) return json({ error: 'The retained payload budget is full.' }, 409);
+        if (!run.canRepublish || run.deletionRequested) return json({ error: 'This selection is unavailable for publication rerun.' }, 409);
+        const replay = { ...structuredClone(run), id: `run-${++runSequence}`, state: 'Ready',
+          readyAt: new Date().toISOString(), startedAt: null, finishedAt: null,
+          canRepublish: false, republishedFromRunId: run.id,
+          counters: { ...run.counters, confirmed: 0, failed: 0, uncertain: 0, inFlight: 0, remaining: run.counters.selected },
+          targets: run.targets.map(target => ({ ...structuredClone(target), confirmed: 0, failed: 0, uncertain: 0 })) };
+        runs.set(replay.id, replay);
+        previewRequests.set(replay.id, structuredClone(previewRequests.get(run.id)));
+        return json(replay, 202);
+      }
       if (match[2] === 'items') {
         let items = Array.from({ length: run.counters.selected }, (_, i) => ({
           overlayId: run.overlayIds?.[i] ?? `overlay-${String(i + 1).padStart(3, '0')}`, sensorName: 'SENSOR_A', sensorType: 'VIS',
           photoTime: '2026-10-19T10:00:00Z', targets: run.targets.map(t => ({ pipelineId: t.pipelineId, ruleId: t.ruleId })),
-          outcome: run.overlayIds ? (i < run.counters.confirmed ? 'Confirmed' : 'Pending')
+          outcome: run.republishedFromRunId && run.state === 'Ready' ? 'Pending' : run.overlayIds ? (i < run.counters.confirmed ? 'Confirmed' : 'Pending')
             : i === 1 ? 'Failed' : i === 2 ? 'Uncertain' : run.state === 'Publishing' ? 'Confirmed' : 'Pending',
-          error: run.overlayIds ? null : i === 1 ? '<img src=x onerror="window.injected=true"> mock broker error' : i === 2 ? 'Acknowledgment not received.' : null
+          error: run.overlayIds || run.republishedFromRunId && run.state === 'Ready' ? null : i === 1 ? '<img src=x onerror="window.injected=true"> mock broker error' : i === 2 ? 'Acknowledgment not received.' : null
         }));
         const outcome = url.searchParams.get('outcome');
         if (outcome) items = items.filter(i => i.outcome === outcome);
@@ -361,6 +376,9 @@ try {
   await page.locator('#prepare-button').click();
   await page.waitForURL('**/ui/auto-run/runs/run-1');
   await page.locator('#start-run:not([hidden])').waitFor();
+  assert.equal(await page.locator('#republish-run').count(), 1, 'run details expose a separate publication rerun action');
+  assert.ok(await page.locator('#republish-run').isHidden(), 'an unpublished preview has only its normal Start action');
+  assert.equal(await page.getByRole('button', { name: 'Rerun search', exact: true }).count(), 1);
   const preview = requests.find(r => r.path === '/auto-runs/preview').body;
   assert.equal(preview.source.mode, 'Rules');
   assert.equal(preview.source.filters.gridTypes, undefined);
@@ -1031,6 +1049,89 @@ try {
   }
   await rerunPage.close();
 
+  // Publication reruns retain the exact selection and require an explicit Start.
+  const replaySource = makeRun({ source: { mode: 'OverlayIds', overlayIds: ['frozen-one', 'frozen-two'] },
+    targets: [], minOverlays: 0, publication: { batchSize: 1, delayMs: 500 } });
+  replaySource.state = 'Completed'; replaySource.canRepublish = true;
+  replaySource.counters.confirmed = 2; replaySource.counters.remaining = 0;
+  const originalReplaySource = structuredClone(replaySource);
+  const replayPage = await context.newPage();
+  replayPage.on('pageerror', error => pageErrors.push(error.message));
+  await replayPage.goto(`${origin}/ui/auto-run/runs/${replaySource.id}`);
+  await replayPage.getByRole('button', { name: 'Rerun publication', exact: true }).waitFor();
+  assert.ok(await replayPage.getByRole('button', { name: 'Rerun search', exact: true }).isVisible());
+  assert.match(await replayPage.locator('#republish-run').getAttribute('title'), /selection.*Start/);
+  await replayPage.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await replayPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'both rerun actions fit mobile');
+  await replayPage.screenshot({ path: path.join(screenshots, 'publication-rerun-mobile.png'), fullPage: true });
+  republishFailure = true;
+  await replayPage.locator('#republish-run').click();
+  await replayPage.locator('#run-error').filter({ hasText: 'retained payload budget is full' }).waitFor();
+  assert.ok(await replayPage.locator('#republish-run').isEnabled());
+  assert.ok(await replayPage.locator('#rerun-run').isEnabled(), 'publication rerun failure restores both choices');
+  assert.ok(replayPage.url().endsWith(`/${replaySource.id}`));
+  republishFailure = false;
+  let releaseRepublish;
+  republishGate = new Promise(resolve => { releaseRepublish = resolve; });
+  pendingResponses.add(releaseRepublish);
+  const requestCount = requests.length;
+  await replayPage.locator('#republish-run').focus();
+  await replayPage.keyboard.press('Enter');
+  await replayPage.locator('#republish-run:disabled').waitFor();
+  assert.ok(await replayPage.locator('#rerun-run').isDisabled(), 'search rerun cannot overlap a publication rerun');
+  await replayPage.evaluate(() => {
+    for (const id of ['republish-run', 'rerun-run']) document.getElementById(id).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await replayPage.locator('.back-link').click();
+  releaseRepublish(); pendingResponses.delete(releaseRepublish); republishGate = null;
+  await replayPage.waitForTimeout(200);
+  assert.equal(new URL(replayPage.url()).pathname, '/ui/auto-run', 'a late publication rerun response cannot navigate away from another page');
+  assert.deepEqual(requests.slice(requestCount).filter(request => request.method === 'POST').map(request => request.path),
+    [`/auto-runs/${replaySource.id}/republish`], 'duplicate and competing clicks issue only one publication rerun');
+  await replayPage.goto(`${origin}/ui/auto-run/runs/${replaySource.id}`);
+  await replayPage.locator('#republish-run:not([hidden])').waitFor();
+  const beforePublicationRerun = requests.length;
+  await replayPage.locator('#republish-run').click();
+  await replayPage.waitForURL(url => !url.pathname.endsWith(`/${replaySource.id}`));
+  await replayPage.locator('#start-run:not([hidden])').waitFor();
+  assert.match(await replayPage.locator('#run-start-note').textContent(), /original selection.*No search.*Start/);
+  assert.equal(await replayPage.locator('#count-confirmed').textContent(), '0');
+  assert.equal(await replayPage.locator('#run-items').getByText('Pending', { exact: true }).count(), 2);
+  assert.match(await replayPage.locator('#run-items').textContent(), /frozen-one/);
+  assert.match(await replayPage.locator('#run-items').textContent(), /frozen-two/);
+  assert.equal(await replayPage.locator('#run-batch-size').inputValue(), '1');
+  assert.equal(await replayPage.locator('#run-delay-ms').inputValue(), '500');
+  assert.deepEqual(requests.slice(beforePublicationRerun).filter(request => request.method === 'POST').map(request => request.path),
+    [`/auto-runs/${replaySource.id}/republish`], 'publication rerun calls neither search nor Start');
+  assert.deepEqual(replaySource, originalReplaySource, 'publication rerun preserves the original history');
+  const replayId = new URL(replayPage.url()).pathname.split('/').pop();
+  await replayPage.locator('#start-run').click();
+  await replayPage.locator('#run-state').getByText('Publishing', { exact: true }).waitFor();
+  assert.equal(requests.filter(request => request.path === `/auto-runs/${replayId}/start`).length, 1);
+  assert.ok(await replayPage.locator('#republish-run').isHidden());
+  for (const [runState, eligible, deleting, selected] of [
+    ['CompletedWithErrors', true, false, 2], ['Completed', false, false, 2],
+    ['Completed', true, true, 2], ['Completed', true, false, 0], ['Publishing', true, false, 2]
+  ]) {
+    Object.assign(replaySource, { state: runState, canRepublish: eligible, deletionRequested: deleting });
+    replaySource.counters.selected = selected;
+    await replayPage.goto(`${origin}/ui/auto-run/runs/${replaySource.id}`);
+    await replayPage.locator('#run-content:not([hidden])').waitFor();
+    if (runState === 'CompletedWithErrors') {
+      assert.ok(await replayPage.locator('#republish-run').isEnabled(), 'completed runs with errors can resend their whole selection');
+    } else {
+      assert.ok(await replayPage.locator('#republish-run').isHidden() || await replayPage.locator('#republish-run').isDisabled());
+      const beforeBlockedReplay = requests.length;
+      await replayPage.evaluate(() => document.getElementById('republish-run').dispatchEvent(new MouseEvent('click', { bubbles: true })));
+      await replayPage.waitForTimeout(50);
+      assert.equal(requests.slice(beforeBlockedReplay).filter(request => request.path.endsWith('/republish')).length, 0);
+    }
+  }
+  await replayPage.goto(`${origin}/ui/auto-run/runs/missing-replay`);
+  await replayPage.locator('#run-error').filter({ hasText: 'no longer available' }).waitFor();
+  assert.ok(await replayPage.locator('#republish-run').isHidden());
+  await replayPage.close();
+
   pipelineFailure = true;
   const filterOutagePage = await context.newPage();
   filterOutagePage.on('pageerror', error => pageErrors.push(error.message));
@@ -1663,6 +1764,8 @@ try {
     'rerun restores original filters and latest publication settings without auto-publishing',
     'rerun duplicate-click protection, conflict recovery, keyboard and mobile layout',
     'rule and overlay-ID reruns work from retained deep links without configuration drafts',
+    'publication rerun reuses selected overlays and settings, preserves history, and requires explicit Start',
+    'publication and search rerun mutual locking, failure recovery, stale navigation, eligibility, keyboard and mobile layout',
     'grid-type and sortie filters absent from both search modes and submitted payloads',
     'configured map modal loads on demand, supports keyboard focus and Escape, and unloads on close',
     'map modal mobile layout and absent-configuration hint',

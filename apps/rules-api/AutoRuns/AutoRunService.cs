@@ -92,7 +92,7 @@ public sealed partial class AutoRunService(
         void EnsureMemoryAvailable(long additionalBytes = 0)
         {
             if (memory?.CanAllocate(additionalBytes) == false)
-                throw new AutoRunRequestException(409, "Memory is near the preparation limit. Start or cancel an existing preview, or wait for memory to be released.");
+                throw new AutoRunRequestException(409, "Memory is near the preparation limit. Cancel an unused preview, delete a completed run, or wait for memory to be released.");
         }
     }
 
@@ -717,9 +717,12 @@ public sealed partial class AutoRunService(
         job.ProviderProgress = null;
         job.WaitReason = null;
         job.FinishedAt = time.GetUtcNow();
-        foreach (var item in job.Items) item.Payload = null;
-        _retainedBytes -= job.PayloadBytes;
-        job.PayloadBytes = 0;
+        if (state is not (AutoRunState.Completed or AutoRunState.CompletedWithErrors))
+        {
+            foreach (var item in job.Items) item.Payload = null;
+            _retainedBytes -= job.PayloadBytes;
+            job.PayloadBytes = 0;
+        }
     }
 
     private Job Find(string id) => _jobs.GetValueOrDefault(id) ??
@@ -748,7 +751,9 @@ public sealed partial class AutoRunService(
         ProviderProgress = job.ProviderProgress,
         QueuePosition = QueuePosition(job), WaitReason = job.WaitReason,
         PreparationStartedAt = job.PreparationStartedAt, StartRequestedAt = job.StartRequestedAt,
-        ServerTime = time.GetUtcNow(), IsDirect = job.IsDirect
+        ServerTime = time.GetUtcNow(), IsDirect = job.IsDirect,
+        CanRepublish = CanRepublish(job),
+        RepublishedFromRunId = job.RepublishedFromRunId
     };
 
     private void Validate(AutoRunPreviewRequest request)
@@ -851,13 +856,17 @@ public sealed partial class AutoRunService(
         _retainedBytes += bytes;
     }
 
-    private sealed class Item(ProviderOverlay overlay, int[] assignments)
+    private sealed class Item(string id, string sensorName, string sensorType, DateTimeOffset photoTime,
+        byte[] payload, int[] assignments)
     {
-        public string Id { get; } = overlay.Input.ImageId;
-        public string SensorName { get; } = overlay.Input.SensorName;
-        public string SensorType { get; } = overlay.Input.SensorType;
-        public DateTimeOffset PhotoTime { get; } = overlay.Input.PhotoTime;
-        public byte[]? Payload { get; set; } = overlay.Payload;
+        public Item(ProviderOverlay overlay, int[] assignments) : this(overlay.Input.ImageId,
+            overlay.Input.SensorName, overlay.Input.SensorType, overlay.Input.PhotoTime, overlay.Payload, assignments) { }
+
+        public string Id { get; } = id;
+        public string SensorName { get; } = sensorName;
+        public string SensorType { get; } = sensorType;
+        public DateTimeOffset PhotoTime { get; } = photoTime;
+        public byte[]? Payload { get; set; } = payload;
         public int[] Assignments { get; } = assignments;
         public AutoRunItemOutcome Outcome { get; set; }
         public string? Error { get; set; }
@@ -901,5 +910,6 @@ public sealed partial class AutoRunService(
         public int[] UncertainByTarget { get; } = new int[targets.Count];
         public bool SourceExhausted { get; set; }
         public string? StoppedReason { get; set; }
+        public string? RepublishedFromRunId { get; init; }
     }
 }

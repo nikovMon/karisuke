@@ -11,6 +11,8 @@ const bytes = value => {
 };
 const splitValues = value => [...new Set(value.split(/[\n,]+/).map(v => v.trim()).filter(Boolean))];
 const terminal = state => ['Completed', 'CompletedWithErrors', 'Failed', 'Cancelled', 'Expired'].includes(state);
+const canRepublish = run => run?.canRepublish && ['Completed', 'CompletedWithErrors'].includes(run.state)
+  && run.counters.selected > 0 && !run.deletionRequested;
 const active = state => ['QueuedPreparation', 'Preparing', 'QueuedPublication', 'Publishing'].includes(state);
 const queued = state => ['QueuedPreparation', 'QueuedPublication'].includes(state);
 const stateLabel = value => ({ QueuedPreparation: 'Queued for preparation', QueuedPublication: 'Queued for publication' })[value] ?? value;
@@ -20,7 +22,7 @@ const state = {
   pipelines: [], runId: null, run: null, timer: null, itemsFrom: 0, itemsSize: 20,
   itemsOutcome: '', publicationDirty: false, refreshVersion: 0, rulesVersion: 0,
   rulesLoading: false, rulesPipeline: '', rulesSearch: '', rulesStatus: '', rulesTimer: null, rulesController: null, resumeRules: false,
-  selectionOperation: null, pendingRules: new Map(), setupReady: false, preparing: false, rerunPending: false,
+  selectionOperation: null, pendingRules: new Map(), setupReady: false, preparing: false,
   sensorNames: [], selectedSensorNames: new Set(), sensorNamesEnabled: false, sensorNamesLoaded: false,
   sensorNamesLoading: false, sensorNamesError: '', sensorNamesVersion: 0, sensorNamesSearch: '',
   history: [], historyVersion: 0, historyTimer: null, historyDeleting: false, historyPendingIds: new Set(),
@@ -891,7 +893,7 @@ async function deleteRuns(id = null) {
 
 function detailMarkup(id) {
   return `<a class="back-link" href="/ui/auto-run" data-route>← Back to configuration</a>
-  <div class="page-heading run-heading"><div><div class="eyebrow">RUN WORKSPACE</div><h1>Review. Launch. Follow through.</h1><div class="run-id mono">${escape(id)}</div></div><div class="run-heading-actions"><span id="run-state">${badge('Loading')}</span><button id="cancel-run" type="button" class="button danger" hidden>Cancel</button><button id="rerun-run" type="button" class="button" title="Prepare a fresh preview using the original configuration and saved publication settings. Rules are read again; publication requires Start." hidden>Rerun</button><button id="start-run" type="button" class="button primary" hidden>Start run ↗</button></div></div>
+  <div class="page-heading run-heading"><div><div class="eyebrow">RUN WORKSPACE</div><h1>Review. Launch. Follow through.</h1><div class="run-id mono">${escape(id)}</div></div><div class="run-heading-actions"><span id="run-state">${badge('Loading')}</span><button id="cancel-run" type="button" class="button danger" hidden>Cancel</button><button id="rerun-run" type="button" class="button" title="Prepare a fresh preview using the original configuration and saved publication settings. Rules are read again; publication requires Start." hidden>Rerun search</button><button id="republish-run" type="button" class="button" title="Reuse the original selection without another search. Review the new preview, then Start to send all selected overlays again." hidden>Rerun publication</button><button id="start-run" type="button" class="button primary" hidden>Start run ↗</button></div></div>
   <div id="run-error" class="notice error" role="alert" hidden></div>
   <div id="run-start-note" class="notice warning" role="status" hidden></div>
   <div id="run-queue-note" class="notice" role="status" hidden></div>
@@ -911,7 +913,8 @@ function detailMarkup(id) {
 function attachDetail() {
   $('start-run').addEventListener('click', () => runAction('start'));
   $('cancel-run').addEventListener('click', () => runAction('cancel'));
-  $('rerun-run').addEventListener('click', rerun);
+  $('rerun-run').addEventListener('click', () => rerun('rerun'));
+  $('republish-run').addEventListener('click', () => rerun('republish'));
   $('item-outcome').addEventListener('change', () => { state.itemsOutcome = $('item-outcome').value; state.itemsFrom = 0; loadItems(); });
   $('items-prev').addEventListener('click', () => { state.itemsFrom = Math.max(0, state.itemsFrom - state.itemsSize); loadItems(); });
   $('items-next').addEventListener('click', () => { state.itemsFrom += state.itemsSize; loadItems(); });
@@ -944,7 +947,7 @@ async function refreshRun(manual = false) {
       stopProviderCountdown();
       state.run = null;
       $('run-content').hidden = true;
-      for (const control of ['start-run', 'cancel-run', 'rerun-run', 'run-start-note', 'run-queue-note', 'run-outcome-note', 'run-notices']) $(control).hidden = true;
+      for (const control of ['start-run', 'cancel-run', 'rerun-run', 'republish-run', 'run-start-note', 'run-queue-note', 'run-outcome-note', 'run-notices']) $(control).hidden = true;
     }
     showError('run-error', error.status === 404 ? Object.assign(new Error(), error, { message: 'This run is no longer available. It may have been deleted, expired, or lost when the service restarted. Return to configuration to prepare a new preview.' }) : error, 'poll');
     if (error.status !== 404 && (!state.run || !terminal(state.run.state))) state.timer = setTimeout(() => refreshRun(), 5000);
@@ -958,12 +961,18 @@ function renderRunActions(run) {
   $('start-run').disabled = run.state !== 'Ready' || run.counters.selected === 0 || Boolean(pending) || run.deletionRequested;
   $('start-run').textContent = pending === 'start' ? 'Starting…' : 'Start run ↗';
   $('rerun-run').hidden = active(run.state);
-  $('rerun-run').disabled = state.rerunPending || Boolean(pending) || run.deletionRequested;
+  $('rerun-run').disabled = Boolean(pending) || run.deletionRequested;
+  $('rerun-run').textContent = pending === 'rerun' ? 'Preparing…' : 'Rerun search';
+  $('republish-run').hidden = !canRepublish(run);
+  $('republish-run').disabled = Boolean(pending) || run.deletionRequested;
+  $('republish-run').textContent = pending === 'republish' ? 'Preparing…' : 'Rerun publication';
   $('cancel-run').hidden = terminal(run.state);
   $('cancel-run').disabled = Boolean(pending) || run.deletionRequested;
   const reason = run.deletionRequested ? 'Deletion requested. Future work is cancelled; retained data will be released after in-flight work finishes.' : emptyReady
     ? 'Start is unavailable because this preview contains no selected overlays. Review the search notes and invalid-record counts, then adjust the criteria or provider settings and prepare a new preview.'
-    : pending === 'start' ? 'Starting the run. Waiting for Rules API to confirm the request.' : '';
+    : pending === 'start' ? 'Starting the run. Waiting for Rules API to confirm the request.'
+      : run.state === 'Ready' && run.republishedFromRunId
+        ? 'This preview reuses the original selection. No search or rule selection was repeated. Select Start to send all selected overlays again. Downstream deduplication may suppress repeated processing.' : '';
   $('run-start-note').textContent = reason;
   $('run-start-note').hidden = !reason;
   $('run-start-note').classList.toggle('warning', emptyReady);
@@ -1114,25 +1123,24 @@ async function runAction(action) {
   }
 }
 
-async function rerun() {
+async function rerun(action) {
   const id = state.runId;
-  if (!id || !state.run || state.run.deletionRequested || state.rerunPending || pendingRunActions.has(id) || active(state.run.state)) return;
-  state.rerunPending = true;
-  $('rerun-run').disabled = true;
-  $('rerun-run').textContent = 'Preparing…';
+  if (!id || !state.run || state.run.deletionRequested || pendingRunActions.has(id) || active(state.run.state)) return;
+  if (action === 'republish' && !canRepublish(state.run)) return;
+  pendingRunActions.set(id, action);
+  renderRunActions(state.run);
   hideError('run-error');
   try {
-    const run = await api.rerun(id);
+    const run = await api[action](id);
     if (id !== state.runId) return;
-    navigate(`/ui/auto-run/runs/${encodeURIComponent(run.id)}`);
-    toast('New preview created from the original configuration and saved publication settings. Review it before starting.');
+    navigate('/ui/auto-run/runs/' + encodeURIComponent(run.id));
+    toast(action === 'republish'
+      ? 'New preview reuses the original selection without searching. Review it, then Start to send all selected overlays again.'
+      : 'New preview created from the original configuration and saved publication settings. Review it before starting.');
   } catch (error) { if (id === state.runId) showError('run-error', error); }
   finally {
-    state.rerunPending = false;
-    if ($('rerun-run')) {
-      $('rerun-run').disabled = false;
-      $('rerun-run').textContent = 'Rerun';
-    }
+    pendingRunActions.delete(id);
+    if (id === state.runId && state.run) renderRunActions(state.run);
   }
 }
 
