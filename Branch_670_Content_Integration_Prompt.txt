@@ -1,0 +1,305 @@
+TASK: COMPREHENSIVE CONTENT REVIEW, EXTRACTION AND INTEGRATION — BRANCH
+670 PRESENTATION
+
+1.  OBJECTIVE
+
+I am providing: 1. A link to a folder containing numerous presentations
+related to the organization and its activities. 2. The original Branch
+670 presentation, which serves as the master presentation and the
+structural basis for the final deliverable.
+
+Your task is to review all relevant presentations in the folder,
+identify the most accurate, informative, relevant, and well-written
+content, and integrate it into the corresponding slides of the original
+Branch 670 presentation.
+
+The goal is to transform the original presentation into a complete,
+accurate, professional, and informative presentation that explains the
+organization’s mission, responsibilities, capabilities, value chain, and
+outputs.
+
+Do not simply copy text between presentations. Understand the
+information, assess its relevance, and integrate it intelligently.
+
+2.  ANALYZE THE ORIGINAL PRESENTATION SLIDE BY SLIDE
+
+Before reviewing the source presentations, read the entire original
+Branch 670 presentation.
+
+Examine every slide individually and identify: - The purpose of the
+slide. - The information it is intended to communicate. - What
+information is already present. - What information is missing or
+insufficiently explained. - What supporting information is needed to
+complete the slide. - The appropriate level of detail for the intended
+audience.
+
+Treat every slide as a specific content requirement. Do not rely only on
+slide titles. Analyze the actual content, headings, layout, and intended
+message.
+
+Create an internal content map connecting each original slide to the
+information that needs to be found in the source presentations.
+
+3.  REVIEW THE PRESENTATIONS IN THE PROVIDED FOLDER
+
+Thoroughly examine the presentations in the linked folder. Do not rely
+only on filenames, slide titles, or introductory slides.
+
+Read the actual slide content, including: - Headings and subheadings. -
+Text and descriptions. - Diagrams and organizational charts. - Processes
+and workflows. - Value-chain illustrations. - Responsibilities and areas
+of ownership. - Operational vectors. - Outputs and deliverables. -
+Tables, charts, and visual explanations.
+
+Use OCR or visual inspection when text is embedded in images or
+diagrams.
+
+Review all relevant presentations, not just the first few files. Work
+systematically through the folder and maintain a record of the
+information extracted from each source.
+
+4.  PRIORITY CONTENT TO EXTRACT
+
+A. ORGANIZATIONAL MISSION AND PURPOSE
+
+Find the clearest and most accurate descriptions of: - The
+organization’s overall mission. - Why the organization exists. - The
+need it addresses. - Its primary responsibilities. - Its contribution to
+the broader organizational mission.
+
+Identify concise, strong mission statements suitable for an executive
+presentation.
+
+B. MISSION AND PURPOSE OF EACH DEPARTMENT
+
+For every department, identify: - Its core mission and reason for
+existence. - Its primary responsibility. - Its professional domain. -
+Its unique contribution to Branch 670. - Its main areas of ownership.
+
+A purpose statement should explain why the department exists, not merely
+list its activities.
+
+C. OWNERSHIP OF THE VALUE CHAIN
+
+This is one of the highest-priority areas.
+
+Identify which parts of the value chain are owned or managed by each
+department. Look for: - Stages of the value chain. - Responsibilities at
+each stage. - Ownership of development processes. - Data and information
+flows, where explicitly documented. - Infrastructure and systems
+responsibilities. - Product ownership. - Processing and
+information-production capabilities. - The relationship between
+development activities and final outputs.
+
+Clearly distinguish between: - Full ownership. - Partial
+responsibility. - Supporting capabilities. - Shared responsibilities,
+where explicitly documented.
+
+Do not assume that a department owns an entire process simply because it
+participates in it.
+
+D. OPERATIONAL VECTORS
+
+Identify the organization’s main operational vectors and areas of
+activity: - What each department is responsible for. - What it develops
+and operates. - Which capabilities it provides. - Which professional and
+technological domains it covers. - How its responsibilities are defined.
+
+Organize these vectors clearly and consistently.
+
+E. OUTPUTS AND DELIVERABLES
+
+Identify the actual outputs produced by the organization and its
+departments. Look for: - Information products. - Technological
+capabilities. - Systems and platforms. - Algorithmic outputs. - Data and
+processing capabilities. - Product deliverables. - Other documented
+outputs.
+
+Explain what each department produces and what value those outputs
+provide.
+
+Do not confuse activities, capabilities, systems, and final outputs.
+Treat them as distinct categories.
+
+5.  ORGANIZATIONAL BASELINE — BRANCH 670
+
+Use the following information as the organizational baseline when
+analyzing the source material.
+
+Branch 670 operates in the field of visual intelligence.
+
+Its activities include two independent product domains:
+
+VIDEO / VISUAL DOMAIN - Software development for the video domain. -
+Data pipeline development. - End-user systems. - Dedicated product
+management. - Dedicated video algorithmics teams within the AI
+department.
+
+IMAGERY INTERPRETATION DOMAIN - Software development for imagery
+interpretation. - Processing pipeline development. - Storage
+capabilities. - End-user systems. - Dedicated product management. -
+Dedicated imagery interpretation algorithmics teams within the AI
+department.
+
+AI DEPARTMENT - Separate algorithmics teams for video and imagery
+interpretation. - A team responsible for algorithmic pipelines. - A
+Fullstack unit responsible for making algorithmic outputs accessible.
+
+Important organizational distinctions: - Video and imagery
+interpretation are separate product domains. - Their systems,
+development processes, and outputs are independent. - Their algorithmics
+teams are separate and professionally independent. - AI must not be
+described as creating a dependency or operational connection between the
+two domains.
+
+Use this information to understand the organization, but rely on the
+source presentations for additional details and specific descriptions.
+
+6.  CONTENT SELECTION AND INTEGRATION
+
+Do not copy every slide or every paragraph from the source
+presentations.
+
+Select information based on: 1. Relevance to the original slide’s
+purpose. 2. Accuracy and specificity. 3. Clarity and quality of writing.
+4. Professional value for an executive audience. 5. Contribution to
+understanding the organization.
+
+When multiple presentations describe the same subject: - Compare the
+descriptions. - Identify the most informative and well-articulated
+version. - Preserve important details that appear in only one source. -
+Avoid unnecessary repetition. - Do not silently combine conflicting
+descriptions.
+
+Prefer specific, meaningful descriptions over generic corporate
+language.
+
+Use the strongest source material as the basis for final wording, making
+only the edits necessary for clarity, consistency, and presentation
+quality.
+
+Do not invent information, responsibilities, outputs, processes, or
+organizational relationships.
+
+If information is missing, contradictory, or unclear, flag it for review
+rather than making assumptions.
+
+7.  MAP SOURCE CONTENT TO THE ORIGINAL SLIDES
+
+The original Branch 670 presentation remains the master presentation.
+
+For every slide: - Identify what information is required. - Locate
+relevant information in the source presentations. - Select the strongest
+supporting material. - Adapt the wording to fit the slide. - Complete
+missing information only where reliable source material exists. -
+Preserve the slide’s original purpose and message.
+
+If relevant information is found in a source presentation but does not
+fit any existing slide, identify it as a potential addition.
+
+Do not add slides automatically. Evaluate whether the information is
+genuinely necessary.
+
+The final presentation should tell one coherent story, rather than look
+like a collection of copied material.
+
+8.  WRITING AND PRESENTATION STANDARDS
+
+The audience consists of senior executives and business partners.
+
+The content must be: - Professional. - Precise. - Informative. -
+Strategic. - Clear to people who are not familiar with internal
+terminology.
+
+Use concise executive-level language without losing important
+professional detail.
+
+Avoid: - Long paragraphs. - Repetitive explanations. - Generic
+slogans. - Vague descriptions. - Unexplained internal terminology.
+
+Where appropriate, use: - Clear mission statements. - Responsibility
+descriptions. - Value-chain breakdowns. - Operational vectors. - Outputs
+and deliverables. - Process diagrams. - Structured comparisons.
+
+9.  PRESERVE THE ORIGINAL DESIGN
+
+The original Branch 670 presentation is the design and structural
+reference.
+
+Do not redesign the presentation as part of this task.
+
+Preserve: - Existing slide structure. - Established Apple-inspired
+visual language. - Bright background. - Subtle Glassmorphism style. -
+Sharp rectangular geometry. - Typography and color palette. - Overall
+visual identity.
+
+Adapt the amount of text to the existing layouts without compromising
+readability.
+
+If a slide requires more information than its current layout can
+accommodate, suggest a content or layout adjustment rather than
+shrinking the text excessively.
+
+10. SOURCE TRACEABILITY AND ACCURACY
+
+Maintain a reference for every significant piece of information added to
+the original presentation.
+
+Record: - Source presentation filename. - Source slide number. -
+Information extracted. - Destination slide in the original presentation.
+
+If two sources contradict each other, flag the discrepancy and identify
+both sources.
+
+Do not present inferred information as established fact.
+
+11. FINAL QUALITY CONTROL
+
+CONTENT - Every original slide has been reviewed. - Relevant source
+information has been incorporated. - Departmental missions are clearly
+explained. - Value-chain ownership is accurately described. -
+Operational vectors are presented. - Outputs and deliverables are
+clearly identified. - There is no unnecessary duplication. - All claims
+are supported by source material.
+
+CONSISTENCY - Terminology is consistent throughout. - Each department is
+described at an appropriate level of detail. - The presentation tells
+one coherent organizational story. - The information is understandable
+to external business partners.
+
+PRESENTATION - The original design language is preserved. - Slides
+remain readable. - No slide is overcrowded. - Diagrams and visual
+explanations accurately represent the source material.
+
+12. FINAL DELIVERABLES
+
+Provide:
+
+1.  THE COMPLETED BRANCH 670 PRESENTATION Integrate relevant information
+    from the source presentations into the original slides.
+
+2.  A SLIDE-BY-SLIDE CONTENT INTEGRATION SUMMARY Explain what was added
+    or improved on each slide and identify the source presentation and
+    slide number.
+
+3.  A LIST OF INFORMATION GAPS AND CONTRADICTIONS Identify subjects that
+    could not be completed because source material was insufficient,
+    unclear, or conflicting.
+
+FINAL INSTRUCTION
+
+Approach this task as an organizational analyst, an executive
+presentation writer, and a content editor.
+
+The objective is not to create more slides or add more text. It is to
+make every slide in the original presentation more informative,
+accurate, meaningful, and professionally articulated by extracting the
+best available content from the source presentations.
+
+Be thorough. Review the entire source folder, understand the material,
+and only then integrate the findings into the original Branch 670
+presentation.
+
+Do not guess or fill gaps with general knowledge. Base the integrated
+content on what the source presentations actually support, and
+explicitly flag anything that remains unknown or contradictory.
